@@ -2,10 +2,13 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -71,6 +74,9 @@ func resolveServiceImageBuild(ctx context.Context, client *Client, imageURI stri
 	build, err := DoRequestAndParse[serviceImageBuildResponse](ctx, client, "POST",
 		"/api/v2/builds/get_or_create_build_from_image_uri", body, http.StatusOK)
 	if err != nil {
+		if imageURIBlockedByArchivedEnvironment(imageURI, err) {
+			return "", &archivedImageURIError{imageURI: imageURI}
+		}
 		return "", fmt.Errorf("resolve image_uri %q to a build: %w", imageURI, err)
 	}
 	if build.Result.Status == "failed" {
@@ -107,6 +113,33 @@ func serviceBuildSatisfiesImage(ctx context.Context, client *Client, buildID, im
 		return true, true
 	}
 	return false, true
+}
+
+// imageURIBlockedByArchivedEnvironment reports get_or_create's 409 for a registry URI whose
+// anonymous cluster environment was archived. The lookup skips archived environments, and the
+// create then collides with the archived one's name (cluster_environments_resource.py:521-525),
+// so the URI can never be registered again in the organization. Observed on a real backend.
+func imageURIBlockedByArchivedEnvironment(imageURI string, err error) bool {
+	var statusErr *UnexpectedStatusError
+	return !strings.HasPrefix(imageURI, "anyscale/") && errors.As(err, &statusErr) &&
+		statusErr.StatusCode == http.StatusConflict && strings.Contains(statusErr.Body, "This name is already taken")
+}
+
+// imageURIEnvironmentName is the anonymous cluster environment name the backend derives from a
+// registry URI (builds_service.to_cluster_env_name).
+func imageURIEnvironmentName(imageURI string) string {
+	return regexp.MustCompile(`[^A-Za-z0-9_-]`).ReplaceAllString(imageURI, "-")
+}
+
+type archivedImageURIError struct{ imageURI string }
+
+func (e *archivedImageURIError) Error() string {
+	return fmt.Sprintf("Anyscale cannot register image_uri %q: it was registered before as the image (cluster "+
+		"environment) %q, which has since been archived, and an archived image keeps its name. Use build_id with "+
+		"an existing build, or an image_uri with a different tag. To restore the archived image instead, find its "+
+		"id with POST /api/v2/application_templates/search (include_archived and include_anonymous set) and call "+
+		"POST /api/v2/application_templates/{id}/unarchive; `anyscale image unarchive` does not find images "+
+		"registered from a URI.", e.imageURI, imageURIEnvironmentName(e.imageURI))
 }
 
 func stringPointerValue(s *string) string {

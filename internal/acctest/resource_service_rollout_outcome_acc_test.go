@@ -85,6 +85,9 @@ type outcomeMock struct {
 	// Builds known to GET /builds/{id} and get_or_create_build_from_image_uri, by ID.
 	builds         map[string]outcomeBuild
 	getOrCreateLog []map[string]any
+	// archivedURIs are registry URIs whose anonymous environment was archived: get_or_create
+	// answers them with the backend's 409.
+	archivedURIs map[string]bool
 }
 
 // outcomeBuild is one build as GET /builds/{id} reports it.
@@ -198,6 +201,12 @@ func (m *outcomeMock) serveGetOrCreateBuild(w http.ResponseWriter, r *http.Reque
 
 	m.mu.Lock()
 	m.getOrCreateLog = append(m.getOrCreateLog, body)
+	if m.archivedURIs[uri] {
+		m.mu.Unlock()
+		w.WriteHeader(http.StatusConflict)
+		_, _ = fmt.Fprint(w, `{"error": {"detail": "This name is already taken"}}`)
+		return
+	}
 	if m.builds == nil {
 		m.builds = map[string]outcomeBuild{}
 	}

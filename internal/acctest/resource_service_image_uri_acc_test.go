@@ -276,6 +276,31 @@ func TestAccServiceResource_InPlaceRejectsImageURIChange(t *testing.T) {
 	})
 }
 
+// TestAccServiceResource_ImageURIArchivedEnvironmentErrors_MockServer: a registry URI whose
+// anonymous environment was archived can never be registered again; the backend's bare 409 becomes
+// an error on image_uri that names the environment and the ways out.
+func TestAccServiceResource_ImageURIArchivedEnvironmentErrors_MockServer(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const name = "parity-image-archived"
+	m, server := newOutcomeMock(t, "svc_parity_image_archived", name, imageOnApply())
+	m.archivedURIs = map[string]bool{imageTestRegistryURI: true}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: imageConfig(server.URL, name, "main:app", fmt.Sprintf(`  image_uri = %q`, imageTestRegistryURI)),
+				ExpectError: regexp.MustCompile(`(?s)image_uri Blocked by an Archived Image.*` +
+					`registry-example-com-team-app-1.*build_id.*unarchive`),
+			},
+		},
+	})
+	if got := m.applyCount(); got != 0 {
+		t.Errorf("apply called %d times, want 0", got)
+	}
+}
+
 // TestAccServiceResource_ImageURIAndBuildIDConflict: exactly one of image_uri and build_id.
 func TestAccServiceResource_ImageURIAndBuildIDConflict(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)

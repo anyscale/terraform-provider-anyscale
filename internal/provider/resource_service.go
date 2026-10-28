@@ -653,7 +653,12 @@ func (r *ServiceResource) resolvePlannedServiceBuild(ctx context.Context, plan *
 	buildID, err := resolveServiceImageBuild(ctx, r.client, plan.ImageURI.ValueString(), plan.RegistryLoginSecret,
 		plan.ComputeConfigID.ValueString())
 	if err != nil {
-		diags.AddAttributeError(path.Root("image_uri"), "Failed to Resolve image_uri", err.Error())
+		summary := "Failed to Resolve image_uri"
+		var archived *archivedImageURIError
+		if errors.As(err, &archived) {
+			summary = "image_uri Blocked by an Archived Image"
+		}
+		diags.AddAttributeError(path.Root("image_uri"), summary, err.Error())
 		return false
 	}
 	plan.BuildID = types.StringValue(buildID)
