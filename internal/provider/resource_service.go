@@ -84,6 +84,7 @@ type ServiceResourceModel struct {
 	// Service config inputs, sent together as the apply body's `config` (serviceConfigFromModel).
 	QueryAuthTokenEnabled types.Bool `tfsdk:"query_auth_token_enabled"`
 	GRPCServiceNames      types.List `tfsdk:"grpc_service_names"`
+	EnvVars               types.Map  `tfsdk:"env_vars"`
 
 	// Computed outputs. The four nested-object fields are typed as types.Object rather than the
 	// concrete ServiceObservabilityURLsModel/ServiceVersionModel/ServiceStatusChecklistModel
@@ -156,9 +157,9 @@ func (r *ServiceResource) Schema(ctx context.Context, req resource.SchemaRequest
 		Version: 1,
 		MarkdownDescription: `Deploys an Anyscale Service and rolls out new versions on config change. Companion to the read-only ` + "`anyscale_service`" + `/` + "`anyscale_services`" + ` data sources, which share this resource's computed field shapes.
 
-A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_config_id`" + `, ` + "`connection_ids`" + `, ` + "`description`" + `, ` + "`query_auth_token_enabled`" + `, or ` + "`grpc_service_names`" + ` rolls out a new version automatically (declarative auto-rollout: the new version always rolls to 100%, so ` + "`terraform apply`" + ` converges to a steady RUNNING state rather than holding at a partial canary). ` + "`max_surge_percent`" + ` only paces that rollout; it does not hold it. If Anyscale rolls the new version back, the apply fails and the change stays in the plan until a rollout succeeds; a rollout that outlives the apply (timeout, interrupt) is settled on the next refresh the same way. Staged/manual canary (hold at a partial percent, explicit promote/rollback) is intentionally not supported by this resource in this version - it does not fit a converging declarative model and may arrive later as separate provider actions layered on top, not as a change to this resource's lifecycle.
+A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_config_id`" + `, ` + "`connection_ids`" + `, ` + "`description`" + `, ` + "`query_auth_token_enabled`" + `, ` + "`grpc_service_names`" + `, or ` + "`env_vars`" + ` rolls out a new version automatically (declarative auto-rollout: the new version always rolls to 100%, so ` + "`terraform apply`" + ` converges to a steady RUNNING state rather than holding at a partial canary). ` + "`max_surge_percent`" + ` only paces that rollout; it does not hold it. If Anyscale rolls the new version back, the apply fails and the change stays in the plan until a rollout succeeds; a rollout that outlives the apply (timeout, interrupt) is settled on the next refresh the same way. Staged/manual canary (hold at a partial percent, explicit promote/rollback) is intentionally not supported by this resource in this version - it does not fit a converging declarative model and may arrive later as separate provider actions layered on top, not as a change to this resource's lifecycle.
 
-~> **Note:** Every rollout sends the service's whole ` + "`config`" + ` object, and Anyscale resets any setting it omits. A service deployed with the Anyscale CLI and then imported loses the settings this resource does not manage (` + "`max_uptime_timeout_sec`" + `, cluster-level ` + "`env_vars`" + `) on its first rollout from Terraform, and loses gRPC routing unless ` + "`grpc_service_names`" + ` is set.
+~> **Note:** Every rollout sends the service's whole ` + "`config`" + ` object, and Anyscale resets any setting it omits. A service deployed with the Anyscale CLI and then imported loses any setting there that this resource does not set, such as ` + "`max_uptime_timeout_sec`" + `, gRPC routing without ` + "`grpc_service_names`" + `, or cluster-level environment variables without ` + "`env_vars`" + `, on its first rollout from Terraform.
 
 ~> **Note:** ` + "`terraform destroy`" + ` terminates the service and then deletes the record entirely (the backend requires a service to be terminated before it can be deleted, so destroy performs both steps and waits for termination in between). This is a gone-for-good delete, not an archive - there is no Terraform-managed way to recover a destroyed service's history afterward.`,
 
@@ -260,6 +261,12 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_co
 				Validators: []validator.List{
 					listvalidator.ValueStringsAre(stringvalidator.LengthAtLeast(1)),
 				},
+			},
+
+			"env_vars": schema.MapAttribute{
+				ElementType:         types.StringType,
+				Optional:            true,
+				MarkdownDescription: "Environment variables Anyscale sets for Ray on the service's cluster nodes. Unlike the Anyscale CLI, this does not also copy them into each application's `runtime_env`; set those in `ray_serve_config`. Not refreshed: the API does not return it. Changing it rolls out a new version; rejected at plan time under `IN_PLACE`.",
 			},
 
 			// ─── Computed outputs (reused from the anyscale_service data source's model - see
@@ -963,7 +970,8 @@ func serviceDeployFieldsChanged(plan, state *ServiceResourceModel) bool {
 		serviceConnectionIDsChanged(plan, state) ||
 		!plan.Description.Equal(state.Description) ||
 		serviceAuthChanged(plan, state) ||
-		serviceStringCollectionChanged(plan.GRPCServiceNames, state.GRPCServiceNames)
+		serviceStringCollectionChanged(plan.GRPCServiceNames, state.GRPCServiceNames) ||
+		serviceStringCollectionChanged(plan.EnvVars, state.EnvVars)
 }
 
 // serviceStringCollectionChanged compares a list or map input whose null and empty values send
@@ -1010,6 +1018,9 @@ func serviceInPlaceFrozenChanges(plan, state *ServiceResourceModel) []string {
 	}
 	if serviceStringCollectionChanged(plan.GRPCServiceNames, state.GRPCServiceNames) {
 		changed = append(changed, "grpc_service_names")
+	}
+	if serviceStringCollectionChanged(plan.EnvVars, state.EnvVars) {
+		changed = append(changed, "env_vars")
 	}
 	return changed
 }
@@ -1368,6 +1379,9 @@ type applyServiceRequest struct {
 type serviceConfigRequest struct {
 	Access    serviceAccessConfigRequest    `json:"access"`
 	Protocols serviceProtocolsConfigRequest `json:"protocols"`
+	// EnvVars is read by the cluster manager when it builds a node's Ray environment
+	// (cluster_manager_config_service._extract_env_vars_from_job_or_service_spec).
+	EnvVars map[string]string `json:"env_vars,omitempty"`
 }
 
 type serviceAccessConfigRequest struct {
@@ -1405,7 +1419,14 @@ func serviceConfigFromModel(ctx context.Context, plan *ServiceResourceModel) (*s
 			return nil, fmt.Errorf("invalid grpc_service_names: %v", diags)
 		}
 	}
+	var envVars map[string]string
+	if !plan.EnvVars.IsNull() && !plan.EnvVars.IsUnknown() {
+		if diags := plan.EnvVars.ElementsAs(ctx, &envVars, false); diags.HasError() {
+			return nil, fmt.Errorf("invalid env_vars: %v", diags)
+		}
+	}
 	return &serviceConfigRequest{
+		EnvVars: envVars,
 		Access: serviceAccessConfigRequest{
 			// Null only for a model that never went through the schema default.
 			UseBearerToken: plan.QueryAuthTokenEnabled.IsNull() || plan.QueryAuthTokenEnabled.ValueBool(),

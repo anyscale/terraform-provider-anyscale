@@ -339,6 +339,7 @@ func upgradeServiceResourceStateV0toV1(ctx context.Context, req resource.Upgrade
 		// Attributes added after v1 have no v0 source; the first refresh fills them.
 		QueryAuthTokenEnabled: types.BoolNull(),
 		GRPCServiceNames:      types.ListNull(types.StringType),
+		EnvVars:               types.MapNull(types.StringType),
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &newState)...)
