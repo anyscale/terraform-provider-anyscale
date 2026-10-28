@@ -1,0 +1,4 @@
+```
+release-note:new-resource
+resource/anyscale_runtime_env_package: Package a local directory, upload it to a cloud's storage under a content-addressed name, and output its `uri` for a service's `runtime_env.working_dir`, so a code change rolls out a new service version.
+```
