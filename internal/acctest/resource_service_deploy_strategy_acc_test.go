@@ -30,6 +30,11 @@ type deployStrategyMock struct {
 	mu          sync.Mutex
 	applyBodies [][]byte
 	terminated  int32
+	versions    int32 // versions created: every apply except an IN_PLACE upgrade, as the backend does
+}
+
+func (m *deployStrategyMock) versionID() string {
+	return fmt.Sprintf("svcver_findings_%d", atomic.LoadInt32(&m.versions))
 }
 
 func (m *deployStrategyMock) applyCount() int {
@@ -53,7 +58,7 @@ func (m *deployStrategyMock) applyBody(t *testing.T, i int) map[string]any {
 
 // deployStrategyServiceJSON is a RUNNING (or TERMINATED) service whose primary_version carries a
 // real ray_serve_config, so a cold import seeds a value matching deployStrategyConfig's.
-func deployStrategyServiceJSON(id, name, projectID, currentState string) string {
+func deployStrategyServiceJSON(id, name, projectID, currentState, versionID string) string {
 	return fmt.Sprintf(`{
 		"id": %[1]q, "name": %[2]q, "project_id": %[3]q, "cloud_id": "cld_findings",
 		"hostname": "findings.example.com", "base_url": "https://findings.example.com",
@@ -62,12 +67,12 @@ func deployStrategyServiceJSON(id, name, projectID, currentState string) string 
 		"is_multi_version": false, "auto_rollout_enabled": true,
 		"service_observability_urls": {},
 		"primary_version": {
-			"id": "svcver_findings", "created_at": "2026-01-01T00:00:00Z", "version": "v1",
+			"id": %[5]q, "created_at": "2026-01-01T00:00:00Z", "version": "v1",
 			"current_state": %[4]q, "weight": 100, "build_id": "bld_findings",
 			"compute_config_id": "cpt_findings", "production_job_ids": [], "connection_ids": [],
 			"ray_serve_config": {"applications": [{"import_path": "main:app"}]}
 		}
-	}`, id, name, projectID, currentState)
+	}`, id, name, projectID, currentState, versionID)
 }
 
 func newDeployStrategyServer(t *testing.T, serviceID, name, projectID string) (*deployStrategyMock, *httptest.Server) {
@@ -89,15 +94,22 @@ func newDeployStrategyServer(t *testing.T, serviceID, name, projectID string) (*
 		m.mu.Lock()
 		m.applyBodies = append(m.applyBodies, append([]byte(nil), raw...))
 		m.mu.Unlock()
+		var req struct {
+			Strategy string `json:"rollout_strategy"`
+		}
+		_ = json.Unmarshal(raw, &req)
+		if req.Strategy != "IN_PLACE" {
+			atomic.AddInt32(&m.versions, 1)
+		}
 		w.WriteHeader(http.StatusAccepted)
-		_, _ = fmt.Fprint(w, `{"result": `+deployStrategyServiceJSON(serviceID, name, projectID, "RUNNING")+`}`)
+		_, _ = fmt.Fprint(w, `{"result": `+deployStrategyServiceJSON(serviceID, name, projectID, "RUNNING", m.versionID())+`}`)
 	})
 	mux.HandleFunc("/api/v2/services-v2", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"total": 0, "next_paging_token": null}}`)
 	})
 	mux.HandleFunc("/api/v2/services-v2/"+serviceID, func(w http.ResponseWriter, r *http.Request) {
-		serveServiceGetOrDelete(t, w, r, deployStrategyServiceJSON(serviceID, name, projectID, state()))
+		serveServiceGetOrDelete(t, w, r, deployStrategyServiceJSON(serviceID, name, projectID, state(), m.versionID()))
 	})
 	mux.HandleFunc("/api/v2/services-v2/"+serviceID+"/terminate", func(w http.ResponseWriter, r *http.Request) {
 		atomic.StoreInt32(&m.terminated, 1)

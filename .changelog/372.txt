@@ -1,0 +1,19 @@
+```
+release-note:fixed
+resource/anyscale_service: A rollout that Anyscale rolls back now fails `terraform apply` with an error naming the failed and restored versions, and the change stays in the plan so re-applying retries it.
+```
+
+```
+release-note:fixed
+resource/anyscale_service: An out-of-band deploy or rollback, or a rollout that was rolled back after an interrupted apply, now shows as a `ray_serve_config` diff on the next plan.
+```
+
+```
+release-note:fixed
+resource/anyscale_service: A terminated service still in configuration now plans an in-place update, and `terraform apply` restarts it with the same id and hostname, keeping its connections.
+```
+
+```
+release-note:fixed
+resource/anyscale_service: Restarting a service no longer fails on the transient `UNHEALTHY` state Anyscale reports while it comes back; a service-level error state now ends the wait only when a version or status checklist item confirms it.
+```

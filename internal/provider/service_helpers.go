@@ -58,11 +58,25 @@ const defaultServiceRolloutPollInterval = 10 * time.Second
 // backend adding a new benign transitional state does not break every apply against an otherwise-healthy service; the
 // caller's timeout still backstops a genuinely stuck or new-terminal state, and logs a warning
 // so the gap stays visible - see waitForServiceStateWithTiming).
+//
+// Waiting for RUNNING additionally requires no canary: a rollout is settled only once its canary
+// has been promoted or rolled back (see serviceRolloutRolledBack). A goal_state of TERMINATED
+// while waiting for RUNNING is terminal: the service was terminated (by a user, or by the backend
+// after its primary cluster died) and will not reach RUNNING on its own.
+//
+// A service-level error bucket is terminal only when a component confirms it (see
+// serviceErrorConfirmed). Observed on a real backend: a restarted service reports UNHEALTHY within
+// seconds of PUT /apply and stays UNHEALTHY after its version and every checklist item are
+// RUNNING, because the service health probe holds RUNNING back until it has seen it several times
+// in a row after any error (HEALTH_PROBE_JAIL_THRESHOLD, services/actors/health_probe.py).
 func evaluateServiceState(service *ServiceResult, target string) (done bool, err error) {
 	switch {
-	case service.CurrentState == target:
+	case service.CurrentState == target && (target != serviceStateRunning || service.CanaryVersion == nil):
 		return true, nil
-	case target != serviceStateTerminated && serviceErrorStates[service.CurrentState]:
+	case target == serviceStateRunning && service.GoalState == serviceStateTerminated:
+		return true, fmt.Errorf("service was terminated (current_state %s) while waiting for it to reach %s",
+			service.CurrentState, target)
+	case target != serviceStateTerminated && serviceErrorStates[service.CurrentState] && serviceErrorConfirmed(service):
 		if service.ErrorMessage != nil && *service.ErrorMessage != "" {
 			return true, fmt.Errorf("service entered %s state: %s", service.CurrentState, *service.ErrorMessage)
 		}
@@ -73,6 +87,34 @@ func evaluateServiceState(service *ServiceResult, target string) (done bool, err
 	default:
 		return false, nil
 	}
+}
+
+// serviceErrorConfirmed reports whether a service-level error state is backed by a component: a
+// version or status checklist item in an error state, or no component reported at all (nothing
+// to contradict it). A service whose reported components are all healthy or still starting is
+// treated as converging, and the wait's timeout backstops one that never recovers.
+func serviceErrorConfirmed(service *ServiceResult) bool {
+	reported, failed := false, false
+	note := func(state string) {
+		reported = true
+		failed = failed || serviceErrorStates[state]
+	}
+	for _, v := range []*ServiceVersionResult{service.PrimaryVersion, service.CanaryVersion} {
+		if v != nil {
+			note(v.CurrentState)
+		}
+	}
+	if c := service.ServiceStatusChecklist; c != nil {
+		for _, item := range c.Shared {
+			note(item.State)
+		}
+		for _, group := range c.PerVersion {
+			for _, item := range group.Items {
+				note(item.State)
+			}
+		}
+	}
+	return failed || !reported
 }
 
 // serviceChecklistFailureDetail scans a service's status checklist for per-component failure
@@ -129,6 +171,20 @@ func waitForServiceState(ctx context.Context, client *Client, serviceID, target 
 // exit path's shape (a GET error is uniformly nil-service, rather than papered over with a
 // last-observed fallback).
 func waitForServiceStateWithTiming(ctx context.Context, client *Client, serviceID, target string, timeout, interval time.Duration) (*ServiceResult, error) {
+	return pollServiceState(ctx, client, serviceID, target, timeout, interval, nil)
+}
+
+// waitForServiceRollout waits for a deploy to settle at RUNNING, passing every polled service to
+// observe (when non-nil) so the caller can record version names and failure reasons the settled
+// service no longer reports. observe returning true ends the wait successfully with that
+// service: the caller has seen enough to decide the outcome (a rolled-back rollout leaves the old
+// version primary while the service can still pass through UNHEALTHY, which would otherwise end
+// the wait with a generic error).
+func waitForServiceRollout(ctx context.Context, client *Client, serviceID string, timeout time.Duration, observe func(*ServiceResult) bool) (*ServiceResult, error) {
+	return pollServiceState(ctx, client, serviceID, serviceStateRunning, timeout, defaultServiceRolloutPollInterval, observe)
+}
+
+func pollServiceState(ctx context.Context, client *Client, serviceID, target string, timeout, interval time.Duration, observe func(*ServiceResult) bool) (*ServiceResult, error) {
 	deadline := time.Now().Add(timeout)
 
 	for {
@@ -141,17 +197,24 @@ func waitForServiceStateWithTiming(ctx context.Context, client *Client, serviceI
 			"service_id":    serviceID,
 			"current_state": service.CurrentState,
 			"target":        target,
+			"has_canary":    service.CanaryVersion != nil,
 		})
+
+		if observe != nil && observe(service) {
+			return service, nil
+		}
 
 		if done, evalErr := evaluateServiceState(service, target); done {
 			return service, evalErr
-		} else if !serviceContinueStates[service.CurrentState] && (target != serviceStateTerminated || !serviceErrorStates[service.CurrentState]) {
+		} else if !serviceContinueStates[service.CurrentState] && service.CurrentState != target &&
+			!serviceErrorStates[service.CurrentState] {
 			// An unrecognized current_state continues polling rather
 			// than hard-erroring - a backend adding a new benign transitional state must not
 			// break every apply against a healthy, still-converging service. The timeout below
 			// backstops a genuinely stuck/new-terminal state; this only keeps it visible. An
-			// is_error bucket while waiting for TERMINATED is excluded from this warning too -
-			// it is a known, expected bucket here (evaluateServiceState), not an unrecognized one.
+			// is_error bucket that did not end the wait (waiting for TERMINATED, or not confirmed
+			// by any component) is excluded from this warning too - it is a known, expected
+			// bucket here (evaluateServiceState), not an unrecognized one.
 			tflog.Warn(ctx, "Unrecognized service current_state, continuing to poll", map[string]any{
 				"service_id":    serviceID,
 				"current_state": service.CurrentState,

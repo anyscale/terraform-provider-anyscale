@@ -40,6 +40,8 @@ func TestAccServiceResource_DescriptionOnlyChangeRedeploys(t *testing.T) {
 		if err := json.Unmarshal([]byte(serviceFindingsJSON(serviceID, name, projectID, serviceFindingsCurrentState(&terminated))), &body); err != nil {
 			t.Fatalf("mock service body: %v", err)
 		}
+		// Every apply creates a new service version, as the backend does.
+		body["primary_version"].(map[string]any)["id"] = fmt.Sprintf("svcver_description_%d", atomic.LoadInt32(&applyCallCount))
 		mu.Lock()
 		if storedDescription != nil {
 			body["description"] = *storedDescription

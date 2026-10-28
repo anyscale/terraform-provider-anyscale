@@ -150,7 +150,7 @@ func (r *ServiceResource) Schema(ctx context.Context, req resource.SchemaRequest
 		Version: 1,
 		MarkdownDescription: `Deploys an Anyscale Service and rolls out new versions on config change. Companion to the read-only ` + "`anyscale_service`" + `/` + "`anyscale_services`" + ` data sources, which share this resource's computed field shapes.
 
-A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_config_id`" + `, ` + "`connection_ids`" + `, or ` + "`description`" + ` rolls out a new version automatically (declarative auto-rollout: the new version always rolls to 100%, so ` + "`terraform apply`" + ` converges to a steady RUNNING state rather than holding at a partial canary). ` + "`max_surge_percent`" + ` only paces that rollout; it does not hold it. Staged/manual canary (hold at a partial percent, explicit promote/rollback) is intentionally not supported by this resource in this version - it does not fit a converging declarative model and may arrive later as separate provider actions layered on top, not as a change to this resource's lifecycle.
+A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_config_id`" + `, ` + "`connection_ids`" + `, or ` + "`description`" + ` rolls out a new version automatically (declarative auto-rollout: the new version always rolls to 100%, so ` + "`terraform apply`" + ` converges to a steady RUNNING state rather than holding at a partial canary). ` + "`max_surge_percent`" + ` only paces that rollout; it does not hold it. If Anyscale rolls the new version back, the apply fails and the change stays in the plan until a rollout succeeds; a rollout that outlives the apply (timeout, interrupt) is settled on the next refresh the same way. Staged/manual canary (hold at a partial percent, explicit promote/rollback) is intentionally not supported by this resource in this version - it does not fit a converging declarative model and may arrive later as separate provider actions layered on top, not as a change to this resource's lifecycle.
 
 ~> **Note:** ` + "`terraform destroy`" + ` terminates the service and then deletes the record entirely (the backend requires a service to be terminated before it can be deleted, so destroy performs both steps and waits for termination in between). This is a gone-for-good delete, not an archive - there is no Terraform-managed way to recover a destroyed service's history afterward.`,
 
@@ -173,9 +173,9 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_co
 			},
 			"ray_serve_config": schema.DynamicAttribute{
 				Required: true,
-				MarkdownDescription: "The Ray Serve application config, as a native HCL object (supports nested objects and mixed types) - the same `types.Dynamic` convention `anyscale_compute_config`'s `advanced_instance_config`/`flags` use for similarly open-ended, schemaless config. " +
-					"This value is never refreshed from the server on a normal read: the backend may enrich or reorder the stored copy, and echoing that back would produce a spurious diff against your own config on every plan even with no real change. What you last applied is what stays authoritative in state; the live server-side copy (potentially normalized) is visible read-only via `primary_version.ray_serve_config`, so you can compare if you suspect drift. " +
-					"After `terraform import`, this field is seeded once from the server's stored version - the first `terraform plan` afterward may show a normalization diff that you resolve by reconciling your HCL with the imported value (a known limitation of importing any open/schemaless config).",
+				MarkdownDescription: "The Ray Serve application config, as a native HCL object (nested objects and mixed types allowed). " +
+					"Not refreshed while the service runs the version this resource deployed, because the server may normalize its stored copy (readable as `primary_version.ray_serve_config`). " +
+					"When the primary version is one Terraform did not deploy (an out-of-band deploy or rollback, or a rolled-back rollout), and after `terraform import`, it is set from that version's config, so the next plan shows the difference, possibly including normalization.",
 				PlanModifiers: []planmodifier.Dynamic{
 					dynamicplanmodifier.UseStateForUnknown(),
 				},
@@ -255,7 +255,7 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_co
 			},
 			"goal_state": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The goal state of this service (`RUNNING` or `TERMINATED`).",
+				MarkdownDescription: "The goal state of this service (`RUNNING` or `TERMINATED`). A service found `TERMINATED` (terminated outside Terraform, or by Anyscale after its cluster failed) plans an in-place update, and apply restarts it with the same id and hostname.",
 			},
 			"creator_id": schema.StringAttribute{
 				Computed:            true,
@@ -353,7 +353,7 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_co
 				Update:            true,
 				Delete:            true,
 				CreateDescription: "Maximum time to wait for a create rollout to reach `RUNNING` (e.g. `20m`, `1h`). Defaults to `30m` - a standard `ROLLOUT` genuinely takes real time on real infra (a full second cluster spins up before the gradual canary traffic-shift even starts), but observed real rollouts run closer to ~20m, so this default carries real margin without being needlessly long. Purely local to this provider - never sent to or read from the Anyscale API.",
-				UpdateDescription: "Maximum time to wait for an update rollout to reach `RUNNING`. Same default and rationale as `create`. Only consulted when the update actually triggers a new rollout (see `ray_serve_config`/`build_id`/`compute_config_id`/`connection_ids`/`description`) - an update that changes only `tags`, `rollout_strategy`, `max_surge_percent`, or this `timeouts` block does not wait.",
+				UpdateDescription: "Maximum time to wait for an update rollout, or the restart of a terminated service, to reach `RUNNING`. Same default as `create`. An update that changes only `tags`, `rollout_strategy`, `max_surge_percent`, or this block does not wait. A rollout still running at the timeout continues server-side and is settled on the next refresh.",
 				DeleteDescription: "Maximum time to wait for destroy to wait for termination to reach `TERMINATED` before deleting. Same default and rationale as `create`.",
 			}),
 		},
@@ -506,6 +506,13 @@ func (r *ServiceResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 		r.validateProjectComputeConfigCloudMatch(ctx, &plan, &resp.Diagnostics)
 	}
 
+	if serviceRestartRequired(&plan, &state) {
+		// The restart is always a standard deploy (see Update), so the IN_PLACE invariant below
+		// does not apply to it.
+		planServiceRestart(ctx, &state, resp)
+		return
+	}
+
 	if plan.RolloutStrategy.ValueString() != serviceRolloutStrategyInPlace {
 		return
 	}
@@ -537,6 +544,31 @@ func (r *ServiceResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 				strings.Join(changed, ", "),
 			))
 	}
+}
+
+// planServiceRestart turns a terminated service that config still wants running into a planned
+// in-place update. With no config change the plan would otherwise equal state and Update would
+// never run, so the service-state attributes the restart changes are marked unknown (they are
+// Computed, so the provider may plan any value for them).
+func planServiceRestart(ctx context.Context, state *ServiceResourceModel, resp *resource.ModifyPlanResponse) {
+	unknowns := map[string]attr.Value{
+		"current_state":            types.StringUnknown(),
+		"goal_state":               types.StringUnknown(),
+		"ended_at":                 types.StringUnknown(),
+		"error_message":            types.StringUnknown(),
+		"primary_version":          types.ObjectUnknown(serviceVersionAttrTypes),
+		"canary_version":           types.ObjectUnknown(serviceVersionAttrTypes),
+		"service_status_checklist": types.ObjectUnknown(serviceStatusChecklistAttrTypes),
+	}
+	for name, v := range unknowns {
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root(name), v)...)
+	}
+
+	resp.Diagnostics.AddWarning("Terminated Service Will Be Restarted",
+		fmt.Sprintf("Service %s is terminated (current_state %s). Applying restarts it under the same id and hostname "+
+			"with a new version of the configured settings, and waits for RUNNING. To stop managing it without "+
+			"restarting it, use terraform state rm.",
+			state.ID.ValueString(), state.CurrentState.ValueString()))
 }
 
 // validateProjectComputeConfigCloudMatch guards a real, confirmed footgun: the backend's
@@ -722,8 +754,13 @@ func (r *ServiceResource) Create(ctx context.Context, req resource.CreateRequest
 	// fail (tags sync below, then the potentially long-running rollout wait) - without this, a
 	// later failure would leave the service orphaned in the backend with no Terraform record to
 	// destroy it. Mirrors resource_container_image_build.go's Create.
+	tflog.Debug(ctx, "Service apply response versions", serviceApplyVersionFields(&service, "", ""))
 	diags = populateServiceResourceModelComputed(ctx, &plan, &service)
 	resp.Diagnostics.Append(diags...)
+	if service.PrimaryVersion != nil {
+		resp.Diagnostics.Append(setServiceVersionTracking(ctx, resp.Private,
+			&serviceVersionTracking{VersionID: service.PrimaryVersion.ID})...)
+	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -745,7 +782,7 @@ func (r *ServiceResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	finalService, err := waitForServiceState(ctx, r.client, service.ID, serviceStateRunning, timeout)
+	finalService, err := waitForServiceRollout(ctx, r.client, service.ID, timeout, nil)
 	if finalService != nil {
 		diags := populateServiceResourceModelComputed(ctx, &plan, finalService)
 		resp.Diagnostics.Append(diags...)
@@ -755,6 +792,10 @@ func (r *ServiceResource) Create(ctx context.Context, req resource.CreateRequest
 	if err != nil {
 		AddAPIError(&resp.Diagnostics, "wait for service rollout", err)
 		return
+	}
+	if finalService != nil && finalService.PrimaryVersion != nil {
+		resp.Diagnostics.Append(setServiceVersionTracking(ctx, resp.Private,
+			&serviceVersionTracking{VersionID: finalService.PrimaryVersion.ID})...)
 	}
 }
 
@@ -785,12 +826,34 @@ func (r *ServiceResource) Read(ctx context.Context, req resource.ReadRequest, re
 		return
 	}
 
+	// Version tracking (service_rollout_outcome.go): ray_serve_config is refreshed from the live
+	// primary only when the primary is a version Terraform did not deploy (out-of-band deploy or
+	// rollback, or a rolled-back rollout an interrupted apply left behind).
+	tracking, trackDiags := getServiceVersionTracking(ctx, req.Private)
+	resp.Diagnostics.Append(trackDiags...)
+	nextTracking, drift := reconcileServiceVersionTracking(tracking, service)
+	if drift {
+		live, err := serviceRayServeConfigFromVersion(ctx, service.PrimaryVersion)
+		if err != nil {
+			AddConfigError(&resp.Diagnostics, "Failed to Convert Live ray_serve_config", err.Error())
+			return
+		}
+		tflog.Warn(ctx, "Service primary version is not the one Terraform deployed; refreshing ray_serve_config from it", map[string]any{
+			"service_id": serviceID, "primary_version_id": service.PrimaryVersion.ID,
+		})
+		state.RayServeConfig = live
+	}
+	if nextTracking != nil {
+		resp.Diagnostics.Append(setServiceVersionTracking(ctx, resp.Private, nextTracking)...)
+	}
+
 	// Refresh the plain, un-normalized inputs the API can meaningfully report drift for.
 	// Deliberately NOT refreshed here (state keeps whatever was last applied/imported):
-	//   - ray_serve_config, connection_ids: see their schema MarkdownDescriptions - the server's
-	//     live copies are visible via primary_version instead, refreshing the authoring copies
-	//     would either fight config with a spurious diff (ray_serve_config) or silently flip a
-	//     null "preserve" directive into an active "remove everything" one (connection_ids).
+	//   - ray_serve_config (except on version drift above), connection_ids: see their schema
+	//     MarkdownDescriptions - the server's live copies are visible via primary_version
+	//     instead, refreshing the authoring copies would either fight config with a spurious
+	//     diff (ray_serve_config) or silently flip a null "preserve" directive into an active
+	//     "remove everything" one (connection_ids).
 	//   - rollout_strategy, max_surge_percent: not returned by this endpoint (or any endpoint) at
 	//     all, nothing to refresh from - see their schema MarkdownDescriptions.
 	//   - timeouts: purely local to this provider, never sent to or read from the API.
@@ -800,8 +863,9 @@ func (r *ServiceResource) Read(ctx context.Context, req resource.ReadRequest, re
 	// has ever gone healthy - see populateServiceResourceModelComputed). build_id/compute_config_id
 	// are Required, so there is no null to fall back to here - leave the prior state value alone
 	// rather than overwrite it with a wrong placeholder; the next Read once primary_version is
-	// populated will refresh it for real.
-	if service.PrimaryVersion != nil {
+	// populated will refresh it for real. While a canary is rolling out the primary is still the
+	// old version, so refreshing from it would report the in-flight change as drift.
+	if service.PrimaryVersion != nil && service.CanaryVersion == nil {
 		state.BuildID = types.StringValue(service.PrimaryVersion.BuildID)
 		state.ComputeConfigID = types.StringValue(service.PrimaryVersion.ComputeConfigID)
 	}
@@ -889,7 +953,8 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	if !serviceDeployFieldsChanged(&plan, &state) {
+	restart := serviceRestartRequired(&plan, &state)
+	if !restart && !serviceDeployFieldsChanged(&plan, &state) {
 		// Nothing that requires a new version changed - e.g. only
 		// timeouts, only tags (already synced above), or only rollout_strategy/max_surge_percent
 		// (persisted from plan below, sent with the next real deploy) - so skip the PUT /apply +
@@ -926,7 +991,24 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	applyBody, err := buildApplyServiceRequest(ctx, &plan)
+	// A failed PUT /apply must leave state describing what is still deployed, so the next plan
+	// shows the change again. State is set explicitly rather than relying on the framework
+	// pre-populating the response with prior state. Tags were already synced above.
+	unchanged := state
+	unchanged.Tags = plan.Tags
+	resp.Diagnostics.Append(resp.State.Set(ctx, &unchanged)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	requestPlan := plan
+	if restart {
+		if !r.prepareServiceRestart(ctx, &state, &requestPlan, timeout, &resp.Diagnostics) {
+			return
+		}
+	}
+
+	applyBody, err := buildApplyServiceRequest(ctx, &requestPlan)
 	if err != nil {
 		AddConfigError(&resp.Diagnostics, "Invalid Service Configuration", err.Error())
 		return
@@ -941,6 +1023,7 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 	tflog.Info(ctx, "Applying service update", map[string]any{
 		"service_id": serviceID,
 		"name":       plan.Name.ValueString(),
+		"restart":    restart,
 	})
 
 	applyResp, err := DoRequestAndParse[ServiceResponse](
@@ -955,6 +1038,20 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 	plan.ID = types.StringValue(service.ID)
 	plan.ProjectID = types.StringValue(service.ProjectID)
 
+	// Identify the version this apply created, then record it as pending before the wait, so an
+	// interrupted wait (timeout, ctrl-C) leaves the next Read able to tell whether it won.
+	preApplyPrimaryID := serviceVersionIDFromObject(state.PrimaryVersion)
+	inPlace := !restart && requestPlan.RolloutStrategy.ValueString() == serviceRolloutStrategyInPlace
+	newVersionID := serviceAppliedVersionID(&service, preApplyPrimaryID, inPlace)
+	tflog.Debug(ctx, "Service apply response versions", serviceApplyVersionFields(&service, preApplyPrimaryID, newVersionID))
+	priorTracking, trackDiags := getServiceVersionTracking(ctx, req.Private)
+	resp.Diagnostics.Append(trackDiags...)
+	pending := &serviceVersionTracking{VersionID: preApplyPrimaryID, Pending: true, PendingVersionID: newVersionID}
+	if priorTracking != nil && priorTracking.VersionID != "" {
+		pending.VersionID = priorTracking.VersionID
+	}
+	resp.Diagnostics.Append(setServiceVersionTracking(ctx, resp.Private, pending)...)
+
 	// Persist immediately for the same orphan-avoidance reason as Create.
 	diags = populateServiceResourceModelComputed(ctx, &plan, &service)
 	resp.Diagnostics.Append(diags...)
@@ -963,7 +1060,9 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	finalService, err := waitForServiceState(ctx, r.client, service.ID, serviceStateRunning, timeout)
+	observer := newServiceRolloutObserver(newVersionID)
+	observer.observe(&service)
+	finalService, err := waitForServiceRollout(ctx, r.client, service.ID, timeout, observer.observeUntilRolledBack)
 	if finalService != nil {
 		diags := populateServiceResourceModelComputed(ctx, &plan, finalService)
 		resp.Diagnostics.Append(diags...)
@@ -971,9 +1070,45 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	}
 	if err != nil {
+		// The rollout continues server-side; the pending tracking lets Read settle it later.
 		AddAPIError(&resp.Diagnostics, "wait for service rollout", err)
 		return
 	}
+
+	if finalService.PrimaryVersion == nil {
+		return // nothing to compare; the next Read seeds tracking once a primary is reported
+	}
+	settled := &serviceVersionTracking{VersionID: finalService.PrimaryVersion.ID}
+	resp.Diagnostics.Append(setServiceVersionTracking(ctx, resp.Private, settled)...)
+
+	if serviceRolloutRolledBack(finalService, newVersionID, preApplyPrimaryID) {
+		rolledBack := withPriorServiceDeployFields(plan, state)
+		resp.Diagnostics.Append(resp.State.Set(ctx, &rolledBack)...)
+		resp.Diagnostics.AddError("Service Rollout Rolled Back", serviceRolledBackDetail(serviceID, observer, finalService))
+	}
+}
+
+// prepareServiceRestart readies a PUT /apply that restarts a terminated service. The backend
+// restarts only a fully TERMINATED service (409 while still terminating), accepts only a standard
+// deploy for it, and does not carry the previous version's connections forward on that path, so
+// a null connection_ids ("leave connections alone") sends the last version's set explicitly.
+// requestPlan is the apply body source only; state keeps the configured values.
+func (r *ServiceResource) prepareServiceRestart(ctx context.Context, state, requestPlan *ServiceResourceModel, timeout time.Duration, diags *diag.Diagnostics) bool {
+	if state.CurrentState.ValueString() != serviceStateTerminated {
+		if _, err := waitForServiceState(ctx, r.client, state.ID.ValueString(), serviceStateTerminated, timeout); err != nil {
+			AddAPIError(diags, "wait for service termination before restart", err)
+			return false
+		}
+	}
+
+	requestPlan.RolloutStrategy = types.StringValue(serviceRolloutStrategyRollout)
+
+	if requestPlan.ConnectionIDs.IsNull() && !state.PrimaryVersion.IsNull() && !state.PrimaryVersion.IsUnknown() {
+		if live, ok := state.PrimaryVersion.Attributes()["connection_ids"].(types.List); ok && !live.IsNull() && !live.IsUnknown() {
+			requestPlan.ConnectionIDs = live
+		}
+	}
+	return true
 }
 
 // Delete terminates the service, waits for termination to land, then deletes the record.
@@ -1075,19 +1210,17 @@ func (r *ServiceResource) ImportState(ctx context.Context, req resource.ImportSt
 		return
 	}
 
-	var rsConfigMap map[string]interface{}
-	if err := json.Unmarshal(service.PrimaryVersion.RayServeConfig, &rsConfigMap); err != nil {
-		AddJSONError(&resp.Diagnostics, "unmarshal", "imported ray_serve_config", err)
-		return
-	}
-
-	rsConfigDynamic, err := InterfaceToDynamic(ctx, rsConfigMap)
+	rsConfigDynamic, err := serviceRayServeConfigFromVersion(ctx, service.PrimaryVersion)
 	if err != nil {
 		AddConfigError(&resp.Diagnostics, "Failed to Convert Imported ray_serve_config", err.Error())
 		return
 	}
 
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("ray_serve_config"), rsConfigDynamic)...)
+
+	// ray_serve_config was just seeded from the primary, so that primary is the tracked version.
+	resp.Diagnostics.Append(setServiceVersionTracking(ctx, resp.Private,
+		&serviceVersionTracking{VersionID: service.PrimaryVersion.ID})...)
 }
 
 // Helper functions
