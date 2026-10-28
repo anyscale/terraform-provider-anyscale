@@ -1,0 +1,4 @@
+```
+release-note:added
+resource/anyscale_service: Add `image_uri` and `registry_login_secret` as an alternative to `build_id`; the image is resolved to a build at apply time, and a plan detects when the service no longer runs that image.
+```

@@ -57,5 +57,6 @@ resource "anyscale_service" "minimal" {
 }
 
 output "service_base_url" {
-  value = anyscale_service.example.base_url
+  value       = anyscale_service.example.base_url
+  description = "The base URL clients use to reach the service"
 }
