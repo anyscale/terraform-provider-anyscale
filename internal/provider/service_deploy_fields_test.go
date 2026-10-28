@@ -103,3 +103,16 @@ func TestServiceDeployFieldsAreFrozenUnderInPlace(t *testing.T) {
 		}
 	}
 }
+
+// TestServiceAuthChangedIgnoresUnrefreshedState: state written before query_auth_token_enabled
+// existed holds null until the first refresh; planning against it (terraform plan
+// -refresh=false) must not roll out a new version.
+func TestServiceAuthChangedIgnoresUnrefreshedState(t *testing.T) {
+	plan := ServiceResourceModel{QueryAuthTokenEnabled: types.BoolValue(true)}
+	if serviceAuthChanged(&plan, &ServiceResourceModel{QueryAuthTokenEnabled: types.BoolNull()}) {
+		t.Error("null prior query_auth_token_enabled counted as a change")
+	}
+	if !serviceAuthChanged(&plan, &ServiceResourceModel{QueryAuthTokenEnabled: types.BoolValue(false)}) {
+		t.Error("false -> true not counted as a change")
+	}
+}
