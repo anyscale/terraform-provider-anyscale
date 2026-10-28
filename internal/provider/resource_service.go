@@ -202,7 +202,7 @@ A change to an input that defines the deployed version (` + "`ray_serve_config`"
 			},
 			"image_uri": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "Container image to run: `anyscale/ray:<tag>`, `anyscale/image/<name>:<revision>`, or a registry URI. Set this or `build_id`. Resolved to a build at apply time and recorded in `build_id`; each plan checks that the build still matches. Needs permission to create images, even for Anyscale's base images. For an image managed by `anyscale_container_image_registry`, pass its `build_id` instead: a registry URI here registers a separate copy.",
+				MarkdownDescription: "Container image to run: `anyscale/ray:<tag>`, `anyscale/image/<name>:<revision>`, or a registry URI; set this or `build_id`. Resolved to a build at apply time and recorded in `build_id`; each plan checks the build still matches. Needs permission to create images, even for base images. For an image `anyscale_container_image_registry` manages, use its `build_id`: a registry URI here registers a separate copy.",
 			},
 			"registry_login_secret": schema.StringAttribute{
 				Optional:            true,
@@ -278,13 +278,13 @@ A change to an input that defines the deployed version (` + "`ray_serve_config`"
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(true),
-				MarkdownDescription: "Whether requests to the service must carry a bearer token. Defaults to `true`. Changing it rolls out a new version that issues a new token or clears it; read the token with the `anyscale_service_credentials` ephemeral resource. Rejected at plan time under `IN_PLACE`.",
+				MarkdownDescription: "Whether requests to the service must carry a bearer token. Defaults to `true`. Changing it rolls out a new version that issues a new token or clears it; read the token with the `anyscale_service_credentials` ephemeral resource.",
 			},
 
 			"grpc_service_names": schema.ListAttribute{
 				ElementType:         types.StringType,
 				Optional:            true,
-				MarkdownDescription: "gRPC service names the load balancer routes to the service: a gRPC request whose path starts with `/<name>` reaches it. Null or empty disables gRPC routing. At most one name while `query_auth_token_enabled` is `true`, two otherwise. Configure Ray Serve's side with `grpc_options` in `ray_serve_config`. Not refreshed: the API does not return it. Changing it rolls out a new version; rejected at plan time under `IN_PLACE`.",
+				MarkdownDescription: "gRPC service names the load balancer routes to the service, by path prefix `/<name>`. Null or empty disables gRPC routing. At most one name while `query_auth_token_enabled` is `true`, two otherwise. Set Ray Serve's side in `ray_serve_config`'s `grpc_options`. Not refreshed: the API does not return it. Changing it rolls out a new version.",
 				Validators: []validator.List{
 					listvalidator.ValueStringsAre(stringvalidator.LengthAtLeast(1)),
 				},
@@ -293,7 +293,7 @@ A change to an input that defines the deployed version (` + "`ray_serve_config`"
 			"env_vars": schema.MapAttribute{
 				ElementType:         types.StringType,
 				Optional:            true,
-				MarkdownDescription: "Environment variables Anyscale sets for Ray on the service's cluster nodes. Unlike the Anyscale CLI, this does not also copy them into each application's `runtime_env`; set those in `ray_serve_config`. Not refreshed: the API does not return it. Changing it rolls out a new version; rejected at plan time under `IN_PLACE`.",
+				MarkdownDescription: "Environment variables Anyscale sets for Ray on the service's cluster nodes. Unlike the Anyscale CLI, this does not also copy them into each application's `runtime_env`; set those in `ray_serve_config`. Not refreshed: the API does not return it. Changing it rolls out a new version.",
 			},
 
 			// ─── Computed outputs (reused from the anyscale_service data source's model - see
