@@ -31,6 +31,10 @@ resource "anyscale_service" "example" {
   # ray_serve_config.
   rollout_strategy = "ROLLOUT"
 
+  # true turns the service off but keeps its id and hostname; false
+  # (the default) restarts it.
+  stopped = false
+
   tags = {
     team = "ml-platform"
   }
