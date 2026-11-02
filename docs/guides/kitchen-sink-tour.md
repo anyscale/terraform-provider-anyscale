@@ -9,7 +9,8 @@ description: |-
 
 [`examples/kitchen-sink`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/kitchen-sink)
 wires a representative subset of this provider's resources and data sources into one configuration.
-It does not cover `anyscale_service`, `anyscale_scheduler_config`, `anyscale_system_cluster`,
+It does not cover the `anyscale_service` resource (see [Services](./services.md)),
+`anyscale_scheduler_config`, `anyscale_system_cluster`,
 `anyscale_cloud_access`, `anyscale_cloud_iam_mapping`, `anyscale_organization_user_role`, or
 `anyscale_organization_default_cloud`, and `anyscale_organization_user` appears only commented out (see below).
 It's not a getting-started example - if you haven't yet, read [Create a VM

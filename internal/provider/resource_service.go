@@ -164,13 +164,11 @@ func (r *ServiceResource) Metadata(ctx context.Context, req resource.MetadataReq
 func (r *ServiceResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Version: 1,
-		MarkdownDescription: `Deploys an Anyscale Service and rolls out new versions on config change. Companion to the read-only ` + "`anyscale_service`" + `/` + "`anyscale_services`" + ` data sources, which share this resource's computed field shapes.
+		MarkdownDescription: `Deploys an Anyscale Service. With the default ` + "`ROLLOUT`" + ` strategy, changing an input that defines the deployed version rolls out a new version, and ` + "`terraform apply`" + ` waits until it serves all traffic. If Anyscale rolls the new version back, the apply fails and the change stays in the plan. See the [services guide](../guides/services.md) for rollouts, rolling back, stopping, query auth, and import.
 
-A change to an input that defines the deployed version (` + "`ray_serve_config`" + `, ` + "`build_id`" + ` or ` + "`image_uri`" + `, ` + "`compute_config_id`" + `, ` + "`connection_ids`" + `, ` + "`description`" + `, ` + "`version_name`" + `, ` + "`query_auth_token_enabled`" + `, ` + "`grpc_service_names`" + `, ` + "`env_vars`" + `) rolls out a new version automatically (declarative auto-rollout: the new version always rolls to 100%, so ` + "`terraform apply`" + ` converges to a steady RUNNING state rather than holding at a partial canary). ` + "`max_surge_percent`" + ` only paces that rollout; it does not hold it. If Anyscale rolls the new version back, the apply fails and the change stays in the plan until a rollout succeeds; a rollout that outlives the apply (timeout, interrupt) is settled on the next refresh the same way. Staged/manual canary (hold at a partial percent, explicit promote/rollback) is intentionally not supported by this resource in this version - it does not fit a converging declarative model and may arrive later as separate provider actions layered on top, not as a change to this resource's lifecycle.
+~> **Note:** Every rollout sends the service's whole config, and Anyscale resets any setting it omits. Before managing a service deployed with the Anyscale CLI, read [Owning config for imported services](../guides/services.md#owning-config-for-imported-services).
 
-~> **Note:** Every rollout sends the service's whole ` + "`config`" + ` object, and Anyscale resets any setting it omits. A service deployed with the Anyscale CLI and then imported loses any setting there that this resource does not set, such as ` + "`max_uptime_timeout_sec`" + `, gRPC routing without ` + "`grpc_service_names`" + `, or cluster-level environment variables without ` + "`env_vars`" + `, on its first rollout from Terraform.
-
-~> **Note:** ` + "`terraform destroy`" + ` terminates the service, waits for termination, and deletes the record for good. To turn a service off but keep its id, hostname and record, set ` + "`stopped = true`" + ` instead.`,
+~> **Note:** ` + "`terraform destroy`" + ` deletes the service permanently. To turn it off but keep its id and hostname, set ` + "`stopped = true`" + ` instead.`,
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -184,16 +182,14 @@ A change to an input that defines the deployed version (` + "`ray_serve_config`"
 			// ─── Required inputs ───
 			"name": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The name of the service. Unique only within `project_id`, not organization-wide. Immutable: the backend has no rename endpoint, so changing this replaces the resource.",
+				MarkdownDescription: "The name of the service. Unique only within `project_id`, not organization-wide. Changing it replaces the service.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"ray_serve_config": schema.DynamicAttribute{
-				Required: true,
-				MarkdownDescription: "The Ray Serve application config, as a native HCL object (nested objects and mixed types allowed). " +
-					"Not refreshed while the service runs the version this resource deployed, because the server may normalize its stored copy (readable as `primary_version.ray_serve_config`). " +
-					"When the primary version is one Terraform did not deploy (an out-of-band deploy or rollback, or a rolled-back rollout), and after `terraform import`, it is set from that version's config, so the next plan shows the difference, possibly including normalization.",
+				Required:            true,
+				MarkdownDescription: "The Ray Serve application config, as a native HCL object. Changing it rolls out a new version. The live copy is `primary_version.ray_serve_config`; this attribute is overwritten from it only when the running version is not the one Terraform last deployed, or after import, so the next plan shows the difference. See [Out-of-band changes](../guides/services.md#out-of-band-changes).",
 				PlanModifiers: []planmodifier.Dynamic{
 					dynamicplanmodifier.UseStateForUnknown(),
 				},
@@ -230,10 +226,9 @@ A change to an input that defines the deployed version (` + "`ray_serve_config`"
 				MarkdownDescription: "Description of the service. Null if not set. Changing it rolls out a new version under `ROLLOUT` and is rejected at plan time under `IN_PLACE`.",
 			},
 			"project_id": schema.StringAttribute{
-				Optional: true,
-				Computed: true,
-				MarkdownDescription: "The ID of the project this service starts clusters in. If omitted, the backend resolves your organization's default project for the compute config's cloud - that resolved value is written back here, so leaving this unset does not produce a diff on later plans. " +
-					"Immutable: changing it replaces the resource. Its cloud must match `compute_config_id`'s cloud, and a plan-time check rejects a mismatch (naming both cloud IDs; skipped when either ID is unknown or a lookup fails). To move to a compute config on a different cloud, change `project_id` in the same apply; leaving it unset keeps the project in state, so the check fails.",
+				Optional:            true,
+				Computed:            true,
+				MarkdownDescription: "The ID of the project this service starts clusters in. If unset, your organization's default project for the compute config's cloud is used and recorded here. Changing it replaces the service. Its cloud must match `compute_config_id`'s, which plan checks; to move to a compute config on another cloud, change `project_id` in the same apply.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplace(),
@@ -242,7 +237,7 @@ A change to an input that defines the deployed version (` + "`ray_serve_config`"
 			"tags": schema.MapAttribute{
 				ElementType:         types.StringType,
 				Optional:            true,
-				MarkdownDescription: "Tags to associate with the service. The backend stores tags through a separate system from the service record itself (`/api/v2/tags/resource`, not the service GET/apply endpoints), so this resource makes its own extra calls to keep it a true round trip: read back on refresh, and - since that system's write endpoint only upserts (adds/updates) rather than replaces - any key removed from this map is explicitly deleted so it does not linger on the backend forever.",
+				MarkdownDescription: "Tags to associate with the service. Refreshed from Anyscale; a key removed from this map is deleted from the service.",
 			},
 
 			// ─── Optional rollout inputs ───
@@ -250,29 +245,28 @@ A change to an input that defines the deployed version (` + "`ray_serve_config`"
 				Optional:            true,
 				Computed:            true,
 				Default:             stringdefault.StaticString(serviceRolloutStrategyRollout),
-				MarkdownDescription: "How a deploy rolls in a new version: `ROLLOUT` (default) starts a new cluster and shifts traffic to it; `IN_PLACE` upgrades the existing cluster, which is faster but permits changing only `ray_serve_config`: any other change that would roll out a new version is rejected at plan time. The create deploy ignores it and is always standard, so `IN_PLACE` is safe to set from the start. Not readable from the API, so drift is never detected. Changing only this attribute does not redeploy the service; the new value takes effect on the next deploy.",
+				MarkdownDescription: "`ROLLOUT` (default) starts a new cluster and shifts traffic to it. `IN_PLACE` upgrades the existing cluster, which is faster but allows changing only `ray_serve_config`; plan rejects any other change that rolls out. A change takes effect on the next rollout, and the first deploy always uses `ROLLOUT`. Drift is not detected. See [Rollout strategy](../guides/services.md#rollout-strategy).",
 				Validators: []validator.String{
 					stringvalidator.OneOf(serviceRolloutStrategyRollout, serviceRolloutStrategyInPlace),
 				},
 			},
 			"max_surge_percent": schema.Int64Attribute{
 				Optional:            true,
-				MarkdownDescription: "Rollout pacing (0-100): how much excess capacity to allocate during a deploy; the rollout still converges to 100%. Off by default: unless Anyscale support has enabled resource-constrained upgrades for your cloud, create succeeds but every later deploy fails with a 400. Null lets the backend choose. Not readable from the API; a change to it alone takes effect on the next deploy.",
+				MarkdownDescription: "Extra capacity, 0-100 percent, to allocate during a rollout. It paces the rollout but does not hold it. Requires resource-constrained upgrades, which Anyscale support enables per cloud; without them, every rollout after create fails with a 400. Drift is not detected; a change takes effect on the next rollout.",
 				Validators: []validator.Int64{
 					int64validator.Between(0, 100),
 				},
 			},
 			"connection_ids": schema.ListAttribute{
-				ElementType: types.StringType,
-				Optional:    true,
-				MarkdownDescription: "Connection IDs to associate with the new service version. Null (the default) preserves the connections already attached; `[]` removes all of them. " +
-					"Never refreshed from the server, because copying the live set in would turn a later \"leave connections alone\" apply into \"remove every connection\"; read the live set from `primary_version.connection_ids`. After `terraform import`, a configured list equal to the live set is not treated as a change. Changing it rolls out a new version under `ROLLOUT` and is rejected at plan time under `IN_PLACE`.",
+				ElementType:         types.StringType,
+				Optional:            true,
+				MarkdownDescription: "Connection IDs for the new service version. Null (the default) keeps the attached connections; `[]` removes them all. Not refreshed, so that null keeps meaning \"leave them alone\"; read the live set from `primary_version.connection_ids`. Changing it rolls out a new version, which `IN_PLACE` rejects.",
 			},
 
 			"version_name": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
-				MarkdownDescription: "Name of the version a rollout creates. If unset, Anyscale generates one and it is recorded here. Changing it rolls out a new version. A name can be used once per service, including by failed or rolled-back versions, so a value set here must change with every rollout.",
+				MarkdownDescription: "Name of the version a rollout creates. If unset, Anyscale generates one and it is recorded here. Changing it rolls out a new version. A name can be used once per service, including by failed or rolled-back versions, so a value set here must change with every rollout. See [Version names](../guides/services.md#version-names).",
 				Validators: []validator.String{
 					stringvalidator.LengthAtLeast(1),
 				},
@@ -281,7 +275,7 @@ A change to an input that defines the deployed version (` + "`ray_serve_config`"
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
-				MarkdownDescription: "Set `true` to terminate the service but keep its id and hostname; `false` (the default) restarts it under the same id as a new version. Refreshed from `goal_state`, so a service terminated outside Terraform, or by Anyscale after its cluster failed, plans a restart. Cannot be `true` on create. While `true`, inputs that define the deployed version cannot change.",
+				MarkdownDescription: "Set `true` to terminate the service but keep its id and hostname; `false` (the default) restarts it under the same id as a new version. Refreshed from `goal_state`, so a service terminated outside Terraform, or by Anyscale after its cluster failed, plans a restart. Cannot be `true` on create. While `true`, inputs that define the deployed version cannot change. See [Stopping and restarting](../guides/services.md#stopping-and-restarting).",
 			},
 			"query_auth_token_enabled": schema.BoolAttribute{
 				Optional:            true,
@@ -309,7 +303,7 @@ A change to an input that defines the deployed version (` + "`ray_serve_config`"
 			// service_conversion.go and populateServiceResourceModelComputed below) ───
 			"cloud_id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The ID of the cloud this service runs in, derived from `compute_config_id`. Exposed for parity with the `anyscale_service`/`anyscale_services` data sources.",
+				MarkdownDescription: "The ID of the cloud this service runs in, derived from `compute_config_id`.",
 			},
 			"hostname": schema.StringAttribute{
 				Computed:            true,
@@ -321,7 +315,7 @@ A change to an input that defines the deployed version (` + "`ray_serve_config`"
 			},
 			"current_state": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The current state of this service (e.g. `RUNNING`, `UNHEALTHY`, `TERMINATED`). Ships as a plain string with no client-side enum validation, matching this provider's convention of not hand-maintaining a copy of the backend's enum list.",
+				MarkdownDescription: "The current state of this service (e.g. `RUNNING`, `UNHEALTHY`, `TERMINATED`).",
 			},
 			"goal_state": schema.StringAttribute{
 				Computed:            true,
@@ -341,7 +335,7 @@ A change to an input that defines the deployed version (` + "`ray_serve_config`"
 			},
 			"is_multi_version": schema.BoolAttribute{
 				Computed:            true,
-				MarkdownDescription: "Whether this service is a multi-version service (multiple active versions with no single canary). Always false for services managed by this resource in this version - multi-version is out of scope (see this resource's top-level description).",
+				MarkdownDescription: "Whether this service has several active versions with no single canary. Always `false` for a service this resource manages.",
 			},
 			"auto_rollout_enabled": schema.BoolAttribute{
 				Computed:            true,
@@ -352,9 +346,8 @@ A change to an input that defines the deployed version (` + "`ray_serve_config`"
 				MarkdownDescription: "Error message from processing the most recent API request against this service, if any. Null otherwise.",
 			},
 			"service_observability_urls": schema.SingleNestedAttribute{
-				Computed: true,
-				MarkdownDescription: "Dashboard URLs for this service. The whole block is null while a service is still being processed (a confirmed real transitional state, e.g. a not-yet-healthy service that has not finished its first reconcile). " +
-					"Once present, each individual URL is separately null if the backend has none to report for it (e.g. before the service's first successful deploy).",
+				Computed:            true,
+				MarkdownDescription: "Dashboard URLs for this service. Null until the service finishes its first reconcile; once present, each URL is null if Anyscale has none to report yet.",
 				Attributes: map[string]schema.Attribute{
 					"service_dashboard_url": schema.StringAttribute{
 						Computed:            true,
@@ -376,17 +369,17 @@ A change to an input that defines the deployed version (` + "`ray_serve_config`"
 			},
 			"primary_version": schema.SingleNestedAttribute{
 				Computed:            true,
-				MarkdownDescription: "The primary (currently active) version of this service, as last observed from the server - including its own `ray_serve_config`/`connection_ids`, which reflect the live server-side state rather than this resource's authored `ray_serve_config`/`connection_ids` inputs above. Compare the two if you suspect drift. Can be null if the backend has not returned it yet.",
+				MarkdownDescription: "The version serving traffic, as last read from Anyscale. Its `ray_serve_config` and `connection_ids` are the live values; compare them with this resource's inputs to spot drift. Null until Anyscale reports it.",
 				Attributes:          serviceVersionResourceAttributes(),
 			},
 			"canary_version": schema.SingleNestedAttribute{
 				Computed:            true,
-				MarkdownDescription: "The canary version of this service - a point-in-time snapshot of an in-progress rollout, present only while one is active and null once the service settles. Because it disappears predictably as soon as the rollout completes, treat it as observational (e.g. for dashboards or monitoring) rather than wiring it as a stable input elsewhere - anything that depends on it will see it go null on its own, with no configuration change on your end.",
+				MarkdownDescription: "The version an in-progress rollout is moving traffic to. Null once the rollout finishes, so use it for monitoring, not as an input to other resources.",
 				Attributes:          serviceVersionResourceAttributes(),
 			},
 			"service_status_checklist": schema.SingleNestedAttribute{
 				Computed:            true,
-				MarkdownDescription: "Per-component status breakdown derived from the most recent reconciler snapshot. Null for terminated services and during the brief window before the reconciler's first tick on a brand-new service.",
+				MarkdownDescription: "Per-component status from Anyscale's most recent check. Null for a terminated service and briefly after a new one is created.",
 				Attributes: map[string]schema.Attribute{
 					"shared": schema.ListNestedAttribute{
 						Computed:            true,
@@ -422,8 +415,8 @@ A change to an input that defines the deployed version (` + "`ray_serve_config`"
 				Create:            true,
 				Update:            true,
 				Delete:            true,
-				CreateDescription: "Maximum time to wait for the create rollout to reach `RUNNING` (e.g. `45m`, `2h`). Defaults to `60m`. Anyscale sets no deadline on a rollout, so this is the only limit. Local to this provider; never sent to the API.",
-				UpdateDescription: "Same as `create`, for an update that rolls out a new version, restarts the service, or stops it (waiting for `TERMINATED`). Any other update does not wait. A rollout still running at the timeout continues and is settled on the next refresh.",
+				CreateDescription: "How long to wait for the first deploy to reach `RUNNING`, e.g. `45m` or `2h`. Defaults to `60m`. See [Timeouts](../guides/services.md#timeouts).",
+				UpdateDescription: "How long to wait for a rollout, restart, or stop. Defaults to `60m`. A rollout still running at the timeout continues, and the next refresh records its result.",
 				DeleteDescription: "Maximum time to wait for termination before deleting. Defaults to `60m`.",
 			}),
 		},
@@ -488,7 +481,7 @@ func serviceVersionResourceAttributes() map[string]schema.Attribute {
 		},
 		"ray_serve_config": schema.StringAttribute{
 			Computed:            true,
-			MarkdownDescription: "The Ray Serve config for this version, as a JSON string. This is a dynamic, open-ended structure upstream with no fixed schema in this provider - use `jsondecode()` in HCL to access individual fields. Always present (required upstream), even when its contents are trivial.",
+			MarkdownDescription: "The Ray Serve config for this version, as a JSON string. Use `jsondecode()` to read its fields.",
 		},
 	}
 }
@@ -500,7 +493,7 @@ func serviceStatusChecklistItemResourceAttributes() map[string]schema.Attribute 
 	return map[string]schema.Attribute{
 		"kind": schema.StringAttribute{
 			Computed:            true,
-			MarkdownDescription: "The kind of resource this checklist row represents (e.g. `SERVICE`, `SERVICE_VERSION`, `LOAD_BALANCER`). Ships as a plain string with no client-side enum validation, matching this provider's convention of not hand-maintaining a copy of the backend's enum list.",
+			MarkdownDescription: "The kind of resource this checklist row represents (e.g. `SERVICE`, `SERVICE_VERSION`, `LOAD_BALANCER`).",
 		},
 		"label": schema.StringAttribute{
 			Computed:            true,

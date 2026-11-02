@@ -226,7 +226,7 @@ func serviceStatusChecklistItemAttributes() map[string]schema.Attribute {
 	return map[string]schema.Attribute{
 		"kind": schema.StringAttribute{
 			Computed:            true,
-			MarkdownDescription: "The kind of resource this checklist row represents (e.g. `SERVICE`, `SERVICE_VERSION`, `LOAD_BALANCER`). Ships as a plain string with no client-side enum validation, matching this provider's convention of not hand-maintaining a copy of the backend's enum list.",
+			MarkdownDescription: "The kind of resource this checklist row represents (e.g. `SERVICE`, `SERVICE_VERSION`, `LOAD_BALANCER`).",
 		},
 		"label": schema.StringAttribute{
 			Computed:            true,
@@ -308,7 +308,7 @@ func serviceVersionAttributes() map[string]schema.Attribute {
 		},
 		"ray_serve_config": schema.StringAttribute{
 			Computed:            true,
-			MarkdownDescription: "The Ray Serve config for this version, as a JSON string. This is a dynamic, open-ended structure upstream with no fixed schema in this provider - use `jsondecode()` in HCL to access individual fields, the same convention `anyscale_compute_config`'s `advanced_instance_config`/`flags` use for similarly open-ended config. Always present (required upstream), even when its contents are trivial.",
+			MarkdownDescription: "The Ray Serve config for this version, as a JSON string. Use `jsondecode()` to read its fields.",
 		},
 	}
 }
@@ -363,7 +363,7 @@ func serviceSharedAttributes() map[string]schema.Attribute {
 		},
 		"current_state": schema.StringAttribute{
 			Computed:            true,
-			MarkdownDescription: "The current state of this service (e.g. `RUNNING`, `UNHEALTHY`, `TERMINATED`). Ships as a plain string with no client-side enum validation, matching this provider's convention of not hand-maintaining a copy of the backend's enum list.",
+			MarkdownDescription: "The current state of this service (e.g. `RUNNING`, `UNHEALTHY`, `TERMINATED`).",
 		},
 		"goal_state": schema.StringAttribute{
 			Computed:            true,
