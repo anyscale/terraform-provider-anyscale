@@ -26,7 +26,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - resource/anyscale_service: Documentation for `max_surge_percent` now explains that it is off by default: unless Anyscale has enabled resource-constrained upgrades for your cloud, the service is created but every later deploy fails with a 400. The registry example no longer sets it.
 - resource/anyscale_service: Each rollout now sends the service's whole `config` object, so a service deployed with the Anyscale CLI loses `max_uptime_timeout_sec`, and any gRPC routing or cluster-level environment variables not set here, on its first rollout from Terraform.
 - resource/anyscale_service: The default `create`, `update`, and `delete` timeout is now `60m` (was `30m`), because Anyscale sets no deadline on a rollout.
-- resource/anyscale_service: A service terminated outside Terraform, or by Anyscale after its cluster failed, now shows in the plan as `stopped` changing from `true` to `false`, instead of an update with a warning; applying still restarts it.
 - resource/anyscale_service: Documentation for `anyscale_service` now describes current behavior, with a new services guide covering rollouts, rollback, `stopped`, timeouts and import, and an example that deploys code through `anyscale_runtime_env_package`.
 - data-source/anyscale_service: Descriptions of `current_state`, the version `ray_serve_config` and the checklist `kind` are shorter and no longer describe provider internals.
 - data-source/anyscale_services: Descriptions of `current_state`, the version `ray_serve_config` and the checklist `kind` are shorter and no longer describe provider internals.
@@ -35,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - resource/anyscale_service: A rollout that Anyscale rolls back now fails `terraform apply` with an error naming the failed and restored versions, and the change stays in the plan so re-applying retries it.
 - resource/anyscale_service: An out-of-band deploy or rollback, or a rollout that was rolled back after an interrupted apply, now shows as a `ray_serve_config` diff on the next plan.
-- resource/anyscale_service: A terminated service still in configuration now plans an in-place update, and `terraform apply` restarts it with the same id and hostname, keeping its connections.
+- resource/anyscale_service: A terminated service still in configuration, whether stopped outside Terraform or by Anyscale after its cluster failed, now plans `stopped` changing from `true` to `false`, and `terraform apply` restarts it with the same id and hostname, keeping its connections.
 - resource/anyscale_service: Restarting a service no longer fails on the transient `UNHEALTHY` state Anyscale reports while it comes back; a service-level error state now ends the wait only when a version or status checklist item confirms it.
 - resource/anyscale_service: A rollout no longer silently re-enables bearer authentication on a service that had it disabled.
 
