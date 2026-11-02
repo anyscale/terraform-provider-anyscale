@@ -40,6 +40,8 @@ type outcomeVersion struct {
 	// RoutePrefix, when set, is added to the stored application the way the backend may enrich
 	// a stored ray_serve_config, so the live copy no longer equals the authored one.
 	RoutePrefix string
+	// TargetWeight and CurrentWeight, when set, are rendered as a canary's traffic shares.
+	TargetWeight, CurrentWeight *int
 }
 
 // outcomeSnapshot is what GET /services-v2/{id} returns at one point in time.
@@ -49,6 +51,8 @@ type outcomeSnapshot struct {
 	PrimaryState string // the primary version's current_state; "" means CurrentState
 	Primary      outcomeVersion
 	Canary       *outcomeVersion
+	// Manual reports a canary held at a manual share (auto_rollout_enabled false).
+	Manual bool
 }
 
 // outcomeApplyResult is the mock's reaction to one PUT /apply call: either an error status, or a
@@ -360,12 +364,18 @@ func outcomeVersionJSON(v outcomeVersion, state string) string {
 	if v.RoutePrefix != "" {
 		routePrefix = fmt.Sprintf(`, "route_prefix": %q`, v.RoutePrefix)
 	}
+	weightJSON := func(w *int) string {
+		if w == nil {
+			return "null"
+		}
+		return fmt.Sprint(*w)
+	}
 	return fmt.Sprintf(`{
 		"id": %q, "created_at": "2026-01-01T00:00:00Z", "version": %q,
-		"current_state": %q, "weight": 100, "build_id": %q,
+		"current_state": %q, "weight": 100, "target_weight": %s, "current_weight": %s, "build_id": %q,
 		"compute_config_id": "cpt_outcome", "production_job_ids": [], "connection_ids": %s,
 		"ray_serve_config": {"applications": [{"import_path": %q%s}]}
-	}`, v.ID, v.Name, state, buildID, conns, v.ImportPath, routePrefix)
+	}`, v.ID, v.Name, state, weightJSON(v.TargetWeight), weightJSON(v.CurrentWeight), buildID, conns, v.ImportPath, routePrefix)
 }
 
 func (m *outcomeMock) render(s outcomeSnapshot) string {
@@ -397,10 +407,10 @@ func (m *outcomeMock) render(s outcomeSnapshot) string {
 		"auth_token": %s, "secondary_auth_token": null,
 		"current_state": %q, "goal_state": %q, "ended_at": %s,
 		"creator_id": "usr_outcome", "created_at": "2026-01-01T00:00:00Z",
-		"is_multi_version": false, "auto_rollout_enabled": true,
+		"is_multi_version": false, "auto_rollout_enabled": %t,
 		"service_observability_urls": {},
 		"primary_version": %s, "canary_version": %s, "service_status_checklist": null
-	}`, m.serviceID, m.name, m.projectID, token, s.CurrentState, goal, endedAt,
+	}`, m.serviceID, m.name, m.projectID, token, s.CurrentState, goal, endedAt, !s.Manual,
 		outcomeVersionJSON(s.Primary, primaryState), canary)
 }
 

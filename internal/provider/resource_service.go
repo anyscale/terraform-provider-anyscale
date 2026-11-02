@@ -83,6 +83,7 @@ type ServiceResourceModel struct {
 	// Optional rollout inputs
 	RolloutStrategy types.String   `tfsdk:"rollout_strategy"`
 	MaxSurgePercent types.Int64    `tfsdk:"max_surge_percent"`
+	CanaryPercent   types.Int64    `tfsdk:"canary_percent"`
 	ConnectionIDs   types.List     `tfsdk:"connection_ids"`
 	VersionName     types.String   `tfsdk:"version_name"`
 	Timeouts        timeouts.Value `tfsdk:"timeouts"`
@@ -253,6 +254,13 @@ func (r *ServiceResource) Schema(ctx context.Context, req resource.SchemaRequest
 			"max_surge_percent": schema.Int64Attribute{
 				Optional:            true,
 				MarkdownDescription: "Extra capacity, 0-100 percent, to allocate during a rollout. It paces the rollout but does not hold it. Requires resource-constrained upgrades, which Anyscale support enables per cloud; without them, every rollout after create fails with a 400. Drift is not detected; a change takes effect on the next rollout.",
+				Validators: []validator.Int64{
+					int64validator.Between(0, 100),
+				},
+			},
+			"canary_percent": schema.Int64Attribute{
+				Optional:            true,
+				MarkdownDescription: "Traffic share, 0-100 percent, for a new version while it rolls out. When set, a deploy holds the new version at this share, and changing it shifts traffic. Remove it to finish the rollout; `100` also finishes it where Anyscale completes manual rollouts. No effect on create or restart. See [Canary rollouts](../guides/services.md#canary-rollouts).",
 				Validators: []validator.Int64{
 					int64validator.Between(0, 100),
 				},
@@ -545,6 +553,8 @@ func (r *ServiceResource) ConfigValidators(context.Context) []resource.ConfigVal
 // ValidateConfig rejects more gRPC service names than the backend accepts for the configured
 // bearer-auth setting, which it would otherwise reject only at apply.
 func (r *ServiceResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	validateServiceCanaryPercentStrategy(ctx, req.Config, &resp.Diagnostics)
+
 	var names types.List
 	var auth types.Bool
 	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("grpc_service_names"), &names)...)
@@ -559,6 +569,21 @@ func (r *ServiceResource) ValidateConfig(ctx context.Context, req resource.Valid
 				"Each name is a path condition on the service's load balancer rule, which has a fixed condition limit.",
 				limit, bearer, len(names.Elements())))
 	}
+}
+
+// validateServiceCanaryPercentStrategy rejects canary_percent with rollout_strategy IN_PLACE: an
+// in-place upgrade has no second version to split traffic with, and Anyscale rejects the pair.
+func validateServiceCanaryPercentStrategy(ctx context.Context, config tfsdk.Config, diags *diag.Diagnostics) {
+	var canary types.Int64
+	var strategy types.String
+	diags.Append(config.GetAttribute(ctx, path.Root("canary_percent"), &canary)...)
+	diags.Append(config.GetAttribute(ctx, path.Root("rollout_strategy"), &strategy)...)
+	if diags.HasError() || canary.IsNull() || canary.IsUnknown() || strategy.ValueString() != serviceRolloutStrategyInPlace {
+		return
+	}
+	diags.AddAttributeError(path.Root("canary_percent"), "canary_percent Requires ROLLOUT",
+		"canary_percent holds a new version beside the current one, which rollout_strategy = \"IN_PLACE\" never creates. "+
+			"Remove canary_percent, or use rollout_strategy = \"ROLLOUT\" (the default).")
 }
 
 // ModifyPlan enforces the backend's IN_PLACE invariant at plan time rather than letting a
@@ -611,6 +636,7 @@ func (r *ServiceResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 
 	restart := serviceRestartRequired(&plan, &state)
 	planServiceVersionName(ctx, req.Config, &plan, &state, restart, resp)
+	rejectServiceVersionNameWhileHeld(&plan, &state, restart, &resp.Diagnostics)
 
 	if restart {
 		// The restart is always a standard deploy (see Update), so the IN_PLACE invariant below
@@ -641,6 +667,30 @@ func (r *ServiceResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 				strings.Join(changed, ", "),
 			))
 	}
+}
+
+// serviceCanaryHeld reports whether the service in state has a canary held at a manual traffic
+// share: a canary version is present and Anyscale is not rolling it out automatically.
+func serviceCanaryHeld(state *ServiceResourceModel) bool {
+	return !state.CanaryVersion.IsNull() && !state.CanaryVersion.IsUnknown() &&
+		!state.AutoRolloutEnabled.IsNull() && !state.AutoRolloutEnabled.ValueBool()
+}
+
+// rejectServiceVersionNameWhileHeld rejects renaming the held canary. With the deploy fields
+// unchanged the next apply only re-sends the held version, and Anyscale keeps that version's name
+// whatever is sent, so the new name would be recorded without ever being applied.
+func rejectServiceVersionNameWhileHeld(plan, state *ServiceResourceModel, restart bool, diags *diag.Diagnostics) {
+	if restart || !serviceCanaryHeld(state) || plan.VersionName.IsUnknown() || plan.VersionName.Equal(state.VersionName) {
+		return
+	}
+	nameOnly := *plan
+	nameOnly.VersionName = state.VersionName
+	if serviceDeployFieldsChanged(&nameOnly, state) {
+		return // a new deploy replaces the held canary, so its name is applied
+	}
+	diags.AddAttributeError(path.Root("version_name"), "Cannot Rename a Held Canary",
+		fmt.Sprintf("version_name cannot change while a canary is held (current name %q): Anyscale keeps the held version's name. "+
+			"Finish the rollout first, or change it together with a deploy field such as ray_serve_config.", state.VersionName.ValueString()))
 }
 
 // planServiceBuildID plans build_id when image_uri sources it, and reports whether it set
@@ -1061,6 +1111,20 @@ func (r *ServiceResource) Read(ctx context.Context, req resource.ReadRequest, re
 		state.BuildID = types.StringValue(service.PrimaryVersion.BuildID)
 		state.ComputeConfigID = types.StringValue(service.PrimaryVersion.ComputeConfigID)
 		state.VersionName = types.StringValue(service.PrimaryVersion.Version)
+	} else if c := service.CanaryVersion; c != nil && tracking != nil && tracking.HeldVersionID == c.ID && state.BuildID.IsNull() {
+		// A held canary adopted at import: state's deploy fields describe the held version
+		// (ImportState seeded ray_serve_config from it), so seed the rest from it once.
+		state.BuildID = types.StringValue(c.BuildID)
+		state.ComputeConfigID = types.StringValue(c.ComputeConfigID)
+		state.VersionName = types.StringValue(c.Version)
+	}
+	// canary_percent is the held canary's target share, refreshed only for a canary this resource
+	// holds (ImportState adopts a held canary as this resource's). A canary held from outside
+	// Terraform is not this resource's rollout, so the prior value is kept. State without tracking
+	// predates it and cannot be told apart, so it refreshes too.
+	if c := service.CanaryVersion; c != nil && !service.AutoRolloutEnabled && c.TargetWeight != nil &&
+		(tracking == nil || tracking.HeldVersionID == c.ID) {
+		state.CanaryPercent = types.Int64Value(*c.TargetWeight)
 	}
 	// project_id must be refreshed here even though it is
 	// RequiresReplace and Create/Update already set it - ImportState seeds only id and
@@ -1547,7 +1611,14 @@ func (r *ServiceResource) ImportState(ctx context.Context, req resource.ImportSt
 		return
 	}
 
-	rsConfigDynamic, err := serviceRayServeConfigFromVersion(ctx, service.PrimaryVersion)
+	// A manually held canary is adopted as this resource's hold: state's deploy fields then
+	// describe the held version, as they do after an apply that holds one.
+	seed := service.PrimaryVersion
+	held := service.CanaryVersion != nil && !service.AutoRolloutEnabled
+	if held {
+		seed = service.CanaryVersion
+	}
+	rsConfigDynamic, err := serviceRayServeConfigFromVersion(ctx, seed)
 	if err != nil {
 		AddConfigError(&resp.Diagnostics, "Failed to Convert Imported ray_serve_config", err.Error())
 		return
@@ -1556,8 +1627,16 @@ func (r *ServiceResource) ImportState(ctx context.Context, req resource.ImportSt
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("ray_serve_config"), rsConfigDynamic)...)
 
 	// ray_serve_config was just seeded from the primary, so that primary is the tracked version.
-	resp.Diagnostics.Append(setServiceVersionTracking(ctx, resp.Private,
-		&serviceVersionTracking{VersionID: service.PrimaryVersion.ID})...)
+	// For a held canary it was seeded from the canary, which is tracked as pending exactly as an
+	// apply that holds one records it: Read settles it once the rollout finishes or is rolled back,
+	// and refreshes canary_percent from it meanwhile.
+	tracking := &serviceVersionTracking{VersionID: service.PrimaryVersion.ID}
+	if held {
+		tracking.Pending = true
+		tracking.PendingVersionID = service.CanaryVersion.ID
+		tracking.HeldVersionID = service.CanaryVersion.ID
+	}
+	resp.Diagnostics.Append(setServiceVersionTracking(ctx, resp.Private, tracking)...)
 }
 
 // Helper functions

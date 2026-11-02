@@ -32,6 +32,9 @@ type serviceVersionTracking struct {
 	Pending bool `json:"pending,omitempty"`
 	// PendingVersionID is the version that apply created, when the apply response identified it.
 	PendingVersionID string `json:"pending_version_id,omitempty"`
+	// HeldVersionID is the canary this resource holds at canary_percent. Read refreshes
+	// canary_percent only from this canary.
+	HeldVersionID string `json:"held_version_id,omitempty"`
 }
 
 // getServiceVersionTracking returns nil when no tracking is stored: state from `terraform

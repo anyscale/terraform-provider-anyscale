@@ -343,6 +343,7 @@ func upgradeServiceResourceStateV0toV1(ctx context.Context, req resource.Upgrade
 		ImageURI:              types.StringNull(),
 		RegistryLoginSecret:   types.StringNull(),
 		VersionName:           types.StringNull(),
+		CanaryPercent:         types.Int64Null(),
 		Stopped:               types.BoolNull(),
 	}
 
