@@ -537,3 +537,76 @@ func TestProjectResourceDelete_403Retry(t *testing.T) {
 		}
 	})
 }
+
+// TestProjectResourceDelete_ClassifiesByStatusCode proves Delete classifies a failure by the
+// response's status code, not by "status NNN" appearing in the error text. That text includes the
+// response body, so a body quoting another status would otherwise be retried as the 403 race or
+// reported as the 409 active-resources conflict.
+func TestProjectResourceDelete_ClassifiesByStatusCode(t *testing.T) {
+	withFastRetryTiming(t)
+
+	t.Run("a 400 whose body quotes a 403 is not retried", func(t *testing.T) {
+		var requestCount int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"detail":"upstream returned status 403"}}`))
+		}))
+		defer server.Close()
+
+		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+		diags := runProjectResourceDelete(t, r, ProjectResourceModel{
+			ID:        types.StringValue("prj_400_quotes_403"),
+			CreatedAt: types.StringValue(time.Now().Format(time.RFC3339)),
+		})
+
+		if !diags.HasError() {
+			t.Fatal("expected a diagnostic error for a 400, got none")
+		}
+		if requestCount != 1 {
+			t.Fatalf("a 400 must not be retried as the 403 race - expected exactly 1 request, got %d", requestCount)
+		}
+	})
+
+	t.Run("a 400 whose body quotes a 409 is not reported as active resources", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"detail":"upstream returned status 409"}}`))
+		}))
+		defer server.Close()
+
+		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+		diags := runProjectResourceDelete(t, r, ProjectResourceModel{
+			ID:        types.StringValue("prj_400_quotes_409"),
+			CreatedAt: types.StringValue(time.Now().Add(-1 * time.Hour).Format(time.RFC3339)),
+		})
+
+		if !diags.HasError() {
+			t.Fatal("expected a diagnostic error for a 400, got none")
+		}
+		if diagsContainSummary(diags, "Project Has Active Resources") {
+			t.Errorf("a 400 must not be reported as the 409 active-resources conflict, got: %v", diags)
+		}
+	})
+
+	t.Run("a real 409 is reported as active resources", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"error":{"detail":"Project has active clusters"}}`))
+		}))
+		defer server.Close()
+
+		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+		diags := runProjectResourceDelete(t, r, ProjectResourceModel{
+			ID:        types.StringValue("prj_real_409"),
+			CreatedAt: types.StringValue(time.Now().Add(-1 * time.Hour).Format(time.RFC3339)),
+		})
+
+		if !diagsContainSummary(diags, "Project Has Active Resources") {
+			t.Errorf("expected 'Project Has Active Resources' for a 409, got: %v", diags)
+		}
+	})
+}

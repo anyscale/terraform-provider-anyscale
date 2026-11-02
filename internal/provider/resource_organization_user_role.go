@@ -153,8 +153,7 @@ func setOrganizationPermissionLevel(ctx context.Context, client *Client, identit
 // Matched on UnexpectedStatusError's status code, never on text: a 403 whose body
 // happens to mention a 501 is not the feature gate.
 func orgRolesFeatureDisabled(err error) bool {
-	var statusErr *UnexpectedStatusError
-	return errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusNotImplemented
+	return isHTTPStatus(err, http.StatusNotImplemented)
 }
 
 // orgSelfModification reports whether an error is the backend refusing to let a

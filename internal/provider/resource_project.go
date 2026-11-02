@@ -326,7 +326,7 @@ func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 	err := r.deleteProjectWithRetry(ctx, projectID, state.CreatedAt.ValueString())
 	if err != nil {
-		if strings.Contains(err.Error(), "status 409") {
+		if isHTTPStatus(err, http.StatusConflict) {
 			resp.Diagnostics.AddError(
 				"Project Has Active Resources",
 				fmt.Sprintf("Cannot delete project %s: it still has running clusters or workspaces. Terminate all clusters and workspaces in this project, then retry. (%s)", projectID, err.Error()),
@@ -490,7 +490,7 @@ func retryOn403(
 		}
 		lastErr = err
 
-		if !eligible || !strings.Contains(err.Error(), "status 403") || (isNonTransient != nil && isNonTransient(err)) || elapsed >= deleteProjectRetryMaxWait {
+		if !eligible || !isHTTPStatus(err, http.StatusForbidden) || (isNonTransient != nil && isNonTransient(err)) || elapsed >= deleteProjectRetryMaxWait {
 			return nil, lastErr
 		}
 

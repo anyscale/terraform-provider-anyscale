@@ -15,7 +15,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"k8s.io/apimachinery/pkg/labels"
 )
 
@@ -104,7 +103,7 @@ func putCloudDeploymentConfig(ctx context.Context, client *Client, cloudID, clou
 }
 
 // cloudIAMMappingRetryInitialBackoff/MaxBackoff/MaxAttempts/BackoffFactor
-// mirror resource_cloud_access.go's cloudAccessRetryX constants in shape,
+// mirror cloud_access_reconcile.go's cloudAccessRetryX constants in shape,
 // but the classifier below is deliberately wider - it also retries a bare
 // 500, because this endpoint's PUT is a full, idempotent replace of exactly
 // one field (see docs/decisions/cloud-iam-mapping/README.md's partial-failure
@@ -138,44 +137,20 @@ func cloudIAMMappingRetryableError(err error) bool {
 	return strings.Contains(err.Error(), "API request failed")
 }
 
-// doCloudIAMMappingConfigRequestRetry wraps the PUT with a bounded retry,
-// following cloudAccessDoWriteRetry's shape exactly - body is rewound via
-// io.Seeker before each retry after the first (MarshalRequestBody's
-// underlying *bytes.Reader satisfies it).
+// doCloudIAMMappingConfigRequestRetry wraps the PUT with a bounded retry
+// (doWriteWithRetry) and parses the response.
 func doCloudIAMMappingConfigRequestRetry(ctx context.Context, client *Client, method, cloudID, cloudResourceID string, body io.Reader) (*CloudDeploymentConfigResponse, error) {
 	path := fmt.Sprintf(cloudIAMMappingConfigPathFormat, cloudID, cloudResourceID)
-	backoff := cloudIAMMappingRetryInitialBackoff
-	seeker, _ := body.(io.Seeker)
-
-	var lastBody []byte
-	var lastErr error
-	for attempt := 1; attempt <= cloudIAMMappingRetryMaxAttempts; attempt++ {
-		if attempt > 1 && seeker != nil {
-			if _, seekErr := seeker.Seek(0, io.SeekStart); seekErr != nil {
-				return nil, fmt.Errorf("could not rewind request body for retry attempt %d: %w", attempt, seekErr)
-			}
-		}
-
-		lastBody, lastErr = DoRequestRaw(ctx, client, method, path, body, http.StatusOK)
-		if lastErr == nil || !cloudIAMMappingRetryableError(lastErr) || attempt == cloudIAMMappingRetryMaxAttempts {
-			break
-		}
-
-		tflog.Warn(ctx, "Transient failure writing cloud IAM mapping config, retrying", map[string]any{
-			"method": method, "path": path, "attempt": attempt, "backoff": backoff.String(),
-		})
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("%w (after %d attempt(s), most recent failure: %s)", ctx.Err(), attempt, lastErr)
-		case <-time.After(backoff):
-		}
-		backoff = time.Duration(float64(backoff) * cloudIAMMappingRetryBackoffFactor)
-		if backoff > cloudIAMMappingRetryMaxBackoff {
-			backoff = cloudIAMMappingRetryMaxBackoff
-		}
-	}
-	if lastErr != nil {
-		return nil, lastErr
+	lastBody, err := doWriteWithRetry(ctx, client, writeRetryPolicy{
+		initialBackoff: cloudIAMMappingRetryInitialBackoff,
+		maxBackoff:     cloudIAMMappingRetryMaxBackoff,
+		maxAttempts:    cloudIAMMappingRetryMaxAttempts,
+		backoffFactor:  cloudIAMMappingRetryBackoffFactor,
+		retryable:      cloudIAMMappingRetryableError,
+		warnMessage:    "Transient failure writing cloud IAM mapping config, retrying",
+	}, method, path, body, http.StatusOK)
+	if err != nil {
+		return nil, err
 	}
 
 	var result CloudDeploymentConfigResponse

@@ -102,48 +102,17 @@ func cloudAccessRetryableError(err error) bool {
 // policy. A budget exhausted mid-reconcile converges and records (Ungranted
 // or Unmanaged, plus a warning) rather than erroring - the
 // never-error-after-a-successful-write rule admits no exemption here.
-//
-// body is rewound via io.Seeker before each retry after the first, since the
-// first attempt's read already consumed it; a nil body (every DELETE here)
-// is unaffected.
 func cloudAccessDoWriteRetry(
 	ctx context.Context, client *Client, method, path string, body io.Reader, expectedStatuses ...int,
 ) ([]byte, error) {
-	seeker, _ := body.(io.Seeker)
-	backoff := cloudAccessRetryInitialBackoff
-
-	var lastResp []byte
-	var lastErr error
-	for attempt := 1; attempt <= cloudAccessRetryMaxAttempts; attempt++ {
-		if attempt > 1 && seeker != nil {
-			if _, seekErr := seeker.Seek(0, io.SeekStart); seekErr != nil {
-				return nil, fmt.Errorf("could not rewind request body for retry attempt %d: %w", attempt, seekErr)
-			}
-		}
-
-		lastResp, lastErr = DoRequestRaw(ctx, client, method, path, body, expectedStatuses...)
-		if lastErr == nil || !cloudAccessRetryableError(lastErr) || attempt == cloudAccessRetryMaxAttempts {
-			return lastResp, lastErr
-		}
-
-		tflog.Warn(ctx, "Transient failure on cloud_access write, retrying", map[string]any{
-			"method": method, "path": path, "attempt": attempt, "backoff": backoff.String(),
-		})
-		select {
-		case <-ctx.Done():
-			// Named explicitly rather than returning lastErr bare: this is the
-			// reconcile's own timeout (J.13) or a canceled apply, not the transient
-			// condition that triggered the retry, and a caller recording this into
-			// Ungranted/unmanaged_grants should be able to say why in the warning.
-			return lastResp, fmt.Errorf("%w (after %d attempt(s), most recent failure: %s)", ctx.Err(), attempt, lastErr)
-		case <-time.After(backoff):
-		}
-		backoff = time.Duration(float64(backoff) * cloudAccessRetryBackoffFactor)
-		if backoff > cloudAccessRetryMaxBackoff {
-			backoff = cloudAccessRetryMaxBackoff
-		}
-	}
-	return lastResp, lastErr
+	return doWriteWithRetry(ctx, client, writeRetryPolicy{
+		initialBackoff: cloudAccessRetryInitialBackoff,
+		maxBackoff:     cloudAccessRetryMaxBackoff,
+		maxAttempts:    cloudAccessRetryMaxAttempts,
+		backoffFactor:  cloudAccessRetryBackoffFactor,
+		retryable:      cloudAccessRetryableError,
+		warnMessage:    "Transient failure on cloud_access write, retrying",
+	}, method, path, body, expectedStatuses...)
 }
 
 // cloudAccessBridgePermissionLevel is the legacy permission_level used to

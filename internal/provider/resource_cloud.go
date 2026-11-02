@@ -1036,9 +1036,31 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 	tflog.Info(ctx, "Cloud created successfully", map[string]any{"id": cloudID, "name": name})
 
+	// auto_add_user is applied before anything else, on empty clouds too: the backend accepts it
+	// on a cloud that is still being created (confirmed against the real API), and a converted
+	// organization's refusal then costs no resource add or readiness wait before the cloud is
+	// undone. See docs/decisions/cloud-create-settings-atomicity.
+	if plan.AutoAddUser.ValueBool() {
+		if err := r.updateCloudBoolField(ctx, cloudID, "auto_add_user", true); err != nil {
+			if isOrgConvertedConflict(err) {
+				r.undoCreateRefusedAutoAddUser(ctx, cloudID, err, resp)
+				return
+			}
+			resp.Diagnostics.AddError("Failed to Apply Cloud Settings", fmt.Sprintf("Cloud %s was created, but applying its configured settings failed: update auto_add_user: %s", cloudID, err.Error()))
+			return
+		}
+	}
+
 	if isEmptyCloud {
 		// Skip add_resource call - resources will be added via anyscale_cloud_resource
 		tflog.Info(ctx, "Created empty cloud - resources should be added via anyscale_cloud_resource", map[string]any{"id": cloudID})
+
+		// The remaining toggles too, with step 4's semantics: without this, a configured true
+		// reads back false and the apply fails as an inconsistent result.
+		if err := r.updateMutableFields(ctx, cloudID, plan, createdCloudSettings(plan)); err != nil {
+			resp.Diagnostics.AddError("Failed to Apply Cloud Settings", fmt.Sprintf("Cloud %s was created, but applying its configured settings failed: %s", cloudID, err.Error()))
+			return
+		}
 
 		// Read back to get final state
 		if err := r.readCloudState(ctx, cloudID, &plan, nil); err != nil {
@@ -1070,7 +1092,8 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 	tflog.Info(ctx, "Cloud is ready", map[string]any{"id": cloudID})
 
-	// Step 4: apply the cloud-level boolean toggles the user configured.
+	// Step 4: apply the remaining cloud-level boolean toggles the user configured. auto_add_user
+	// was applied right after the POST above, so its baseline here is the planned value.
 	// These are NOT part of CreateCloudRequest/add_resource - the backend only
 	// exposes them via their own single-field PUT routes (same ones Update
 	// calls) - so without this step, setting any of them in the very first
@@ -1083,18 +1106,7 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	// zero-value baseline (rather than a real prior state, which doesn't
 	// exist yet) reuses the exact same diff-and-call logic Update() already
 	// uses and has already been proven against.
-	zeroValueState := CloudResourceModel{
-		AutoAddUser:            types.BoolValue(false),
-		LineageTrackingEnabled: types.BoolValue(false),
-		AggregatedLogsEnabled:  types.BoolValue(false),
-	}
-	if err := r.updateMutableFields(ctx, cloudID, plan, zeroValueState); err != nil {
-		if isOrgConvertedConflict(err) {
-			addOrgConvertedError(&resp.Diagnostics, err, fmt.Sprintf("Cloud %s was created, but Anyscale refused to set auto_add_user, "+
-				"so Terraform has marked the cloud tainted. Before the next apply, run 'terraform untaint' on this resource's address "+
-				"AND set auto_add_user = false or remove it from the configuration. Otherwise the next apply destroys and recreates the cloud.", cloudID))
-			return
-		}
+	if err := r.updateMutableFields(ctx, cloudID, plan, createdCloudSettings(plan)); err != nil {
 		resp.Diagnostics.AddError("Failed to Apply Cloud Settings", fmt.Sprintf("Cloud %s was created, but applying its configured settings failed: %s", cloudID, err.Error()))
 		return
 	}
@@ -1106,6 +1118,39 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// createdCloudSettings is the baseline updateMutableFields diffs a new cloud's plan against: a
+// freshly created cloud starts with every toggle false, except auto_add_user, which Create has
+// already applied by the time the others are.
+func createdCloudSettings(plan CloudResourceModel) CloudResourceModel {
+	return CloudResourceModel{
+		AutoAddUser:            plan.AutoAddUser,
+		LineageTrackingEnabled: types.BoolValue(false),
+		AggregatedLogsEnabled:  types.BoolValue(false),
+	}
+}
+
+// undoCreateRefusedAutoAddUser handles an organization converted to role bindings refusing
+// auto_add_user on a cloud Create just made. The refusal is deterministic, so leaving the cloud
+// in state would taint it and the next apply would replace it. Instead the cloud is deleted and
+// removed from state, and the next apply after the config fix is an ordinary create. If the
+// delete fails, the cloud stays in state (tainted, as Create errors) with the manual recovery.
+func (r *CloudResource) undoCreateRefusedAutoAddUser(ctx context.Context, cloudID string, refusal error, resp *resource.CreateResponse) {
+	_, delErr := DoRequestRaw(ctx, r.client, "DELETE", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil,
+		http.StatusOK, http.StatusNoContent, http.StatusNotFound)
+	if delErr == nil {
+		tflog.Info(ctx, "Deleted the cloud created in this apply after auto_add_user was refused", map[string]any{"id": cloudID})
+		resp.State.RemoveResource(ctx)
+		addOrgConvertedError(&resp.Diagnostics, refusal, "The cloud was not created: Terraform deleted the cloud it had just "+
+			"created because Anyscale refused auto_add_user. Set auto_add_user = false or remove it from the configuration, then apply again.")
+		return
+	}
+	tflog.Error(ctx, "Failed to delete the cloud after auto_add_user was refused", map[string]any{"id": cloudID, "error": delErr.Error()})
+	addOrgConvertedError(&resp.Diagnostics, refusal, fmt.Sprintf("Cloud %s was created, but Anyscale refused to set auto_add_user, "+
+		"and deleting the cloud also failed (%s), so Terraform has marked the cloud tainted. Before the next apply, run "+
+		"'terraform untaint' on this resource's address AND set auto_add_user = false or remove it from the configuration. "+
+		"Otherwise the next apply destroys and recreates the cloud.", cloudID, extractAPIErrorDetail(delErr)))
 }
 
 // Read refreshes the Terraform state with the latest data.
@@ -1353,11 +1398,11 @@ func (r *CloudResource) updateCloudBoolField(ctx context.Context, cloudID, field
 // including a differently-worded 409, must propagate immediately rather
 // than be retried.
 func isTransientAutoAddUserConflict(err error) bool {
-	msg := err.Error()
-	if !strings.Contains(msg, "status 409") {
+	var statusErr *UnexpectedStatusError
+	if !errors.As(err, &statusErr) || statusErr.StatusCode != http.StatusConflict {
 		return false
 	}
-	return strings.Contains(msg, "still being applied") || strings.Contains(msg, "try again")
+	return strings.Contains(statusErr.Body, "still being applied") || strings.Contains(statusErr.Body, "try again")
 }
 
 // updateCloudAggregatedLogsConfig calls the aggregated-logs PUT route. Its

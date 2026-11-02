@@ -1034,8 +1034,16 @@ func (r *CloudResourceResource) Delete(ctx context.Context, req resource.DeleteR
 	deleteURL := fmt.Sprintf("/api/v2/clouds/%s/remove_resource?cloud_resource_name=%s",
 		cloudID, url.QueryEscape(resourceName))
 
-	if _, err := DoRequestRaw(ctx, r.client, "DELETE", deleteURL, nil,
-		http.StatusOK, http.StatusNoContent, http.StatusNotFound); err != nil {
+	_, err = DoRequestRaw(ctx, r.client, "DELETE", deleteURL, nil, http.StatusOK, http.StatusNoContent)
+	if errors.Is(err, ErrNotFound) {
+		// A 404 does not by itself mean the resource is gone: the endpoint also
+		// 404s for a cloud with no primary resource, after it has found the named
+		// one. Confirm with the lookup Read uses rather than matching the detail,
+		// which would break silently if the backend rewords it.
+		r.confirmCloudResourceGoneAfter404(ctx, cloudID, resourceName, err, &resp.Diagnostics)
+		return
+	}
+	if err != nil {
 		// The backend refuses to remove the primary resource with a 400. That
 		// resource's lifecycle belongs to the cloud, so this is the same no-op
 		// as the IsDefault branch above - reached when is_default in state is
@@ -1053,6 +1061,38 @@ func (r *CloudResourceResource) Delete(ctx context.Context, req resource.DeleteR
 	}
 
 	tflog.Info(ctx, "Cloud resource deleted successfully", map[string]any{"cloud_id": cloudID, "name": resourceName})
+}
+
+// confirmCloudResourceGoneAfter404 decides a Delete that got a 404. The delete
+// succeeded if the cloud is gone or no longer lists the resource. If the
+// resource is still listed, or the lookup fails, the destroy fails: treating
+// it as gone would drop a live resource from state with nothing left to
+// manage or report it.
+func (r *CloudResourceResource) confirmCloudResourceGoneAfter404(ctx context.Context, cloudID, resourceName string, deleteErr error, diags *diag.Diagnostics) {
+	results, err := listCloudResources(ctx, r.client, cloudID)
+	if errors.Is(err, ErrNotFound) {
+		tflog.Info(ctx, "Cloud no longer exists; treating cloud resource as deleted", map[string]any{"cloud_id": cloudID, "name": resourceName})
+		return
+	}
+	if err != nil {
+		diags.AddError(
+			"Could Not Confirm Cloud Resource Deletion",
+			fmt.Sprintf("Removing cloud resource %q from cloud %s returned 404 (%s), and listing the cloud's resources to confirm it is gone failed: %s. Retry the destroy.",
+				resourceName, cloudID, extractAPIErrorDetail(deleteErr), extractAPIErrorDetail(err)),
+		)
+		return
+	}
+	for _, res := range results {
+		if res.Name == resourceName {
+			diags.AddError(
+				"Cloud Resource Was Not Deleted",
+				fmt.Sprintf("Removing cloud resource %q from cloud %s returned 404 (%s), but the cloud still lists the resource, so it still exists. Contact Anyscale support with this message; to stop managing the resource without deleting it, run terraform state rm.",
+					resourceName, cloudID, extractAPIErrorDetail(deleteErr)),
+			)
+			return
+		}
+	}
+	tflog.Info(ctx, "Cloud resource already deleted", map[string]any{"cloud_id": cloudID, "name": resourceName})
 }
 
 // ImportState imports an existing resource into Terraform state.

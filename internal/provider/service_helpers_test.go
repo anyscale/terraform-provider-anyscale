@@ -313,6 +313,66 @@ func TestWaitForServiceStateWithTiming_TimesOutOnErrorStateWhileTerminating(t *t
 	}
 }
 
+// TestWaitForServiceStateWithTiming_TimeoutCarriesFailureDetail proves a wait that times out
+// while the service sits in an error state names why, not only the state. Waiting for
+// TERMINATED never ends on an error state, so before this a stuck Delete cost the full timeout
+// and reported less than an immediate failure would have.
+func TestWaitForServiceStateWithTiming_TimeoutCarriesFailureDetail(t *testing.T) {
+	const lbMessage = "AccessDenied: not authorized to perform sts:AssumeRole"
+	tests := []struct {
+		name         string
+		errorMessage *string
+		checklist    *ServiceStatusChecklistResult
+		want         string
+	}{
+		{
+			name:         "error_message",
+			errorMessage: func() *string { s := "listener rule deletion failed"; return &s }(),
+			want:         "(currently USER_ERROR_FAILURE: listener rule deletion failed)",
+		},
+		{
+			// error_message is null on GET (docs/decisions/service-rollout-outcome), so the
+			// checklist is the realistic source of the reason.
+			name: "checklist only",
+			checklist: &ServiceStatusChecklistResult{
+				Shared: []StatusChecklistItemResult{
+					{Kind: "LB_RESOURCES", Label: "Load Balancer resources", State: "USER_ERROR_FAILURE", Message: lbMessage},
+					{Kind: "DNS", Label: "DNS record", State: "RUNNING", Message: "DNS is ready"},
+				},
+			},
+			want: "(currently USER_ERROR_FAILURE: LB_RESOURCES: " + lbMessage + ")",
+		},
+		{
+			name: "no detail",
+			want: "(currently USER_ERROR_FAILURE)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				result := ServiceResult{
+					ID:                     "svc_stuck",
+					CurrentState:           "USER_ERROR_FAILURE",
+					ErrorMessage:           tt.errorMessage,
+					ServiceStatusChecklist: tt.checklist,
+				}
+				_ = json.NewEncoder(w).Encode(ServiceResponse{Result: result})
+			}))
+			t.Cleanup(server.Close)
+			client := NewClientWithToken(server.URL, "test-token")
+
+			_, err := waitForServiceStateWithTiming(context.Background(), client, "svc_stuck", serviceStateTerminated, 17*time.Millisecond, 5*time.Millisecond)
+
+			if err == nil {
+				t.Fatal("err = nil, want a timeout error")
+			}
+			if !strings.Contains(err.Error(), "timed out") || !strings.HasSuffix(err.Error(), tt.want) {
+				t.Errorf("err = %q, want a timeout error ending in %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
 // TestWaitForServiceStateWithTiming_SurfacesSystemFailure is the headline error-path
 // proof: a rollout that fails must surface as a returned error carrying error_message, not a
 // silent success or a hang - proven through the real polling loop (STARTING first), not just

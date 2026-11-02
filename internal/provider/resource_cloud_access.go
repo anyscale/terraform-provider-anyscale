@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"sort"
 	"strings"
@@ -82,11 +83,11 @@ const (
 // example comment, and the generated docs page: four surfaces, three people,
 // one afternoon.
 //
-// Matched on the status text DoRequestRaw produces, since that helper does not
-// return the status code itself. Same approach as the organization-scope
-// equivalent.
+// Matched on the typed status code, never the error text: the text includes
+// the response body, which can mention any status. Same approach as the
+// organization-scope equivalent.
 func cloudRolesFeatureDisabled(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "unexpected status 501")
+	return isHTTPStatus(err, http.StatusNotImplemented)
 }
 
 // cloudRolesDisabledSummary and cloudRolesDisabledDetail are the diagnostic

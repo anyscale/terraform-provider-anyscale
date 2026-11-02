@@ -658,8 +658,7 @@ func TestCloudAccessMembersToState_RefreshesProjectRolesInScope(t *testing.T) {
 }
 
 // TestCloudRolesFeatureDisabled pins the 501 detector, and the reason it needs a
-// test is the negative cases: it is a substring match on the status text, and a
-// match that is too loose relabels an unrelated failure as a feature gate, which
+// test is the negative cases: a match that is too loose relabels an unrelated failure as a feature gate, which
 // sends a practitioner to Anyscale support for a problem support cannot see.
 func TestCloudRolesFeatureDisabled(t *testing.T) {
 	for _, tc := range []struct {
@@ -670,7 +669,7 @@ func TestCloudRolesFeatureDisabled(t *testing.T) {
 		{name: "nil is not a feature gate", err: nil, want: false},
 		{
 			name: "a 501 is the feature gate",
-			err:  fmt.Errorf("unexpected status 501: not implemented"),
+			err:  &UnexpectedStatusError{StatusCode: 501, Body: "not implemented"},
 			want: true,
 		},
 		{
@@ -678,20 +677,32 @@ func TestCloudRolesFeatureDisabled(t *testing.T) {
 			// problem; labelling either as "ask support to enable a feature" is worse
 			// than a raw error.
 			name: "a 500 is a real failure",
-			err:  fmt.Errorf("unexpected status 500: boom"),
+			err:  &UnexpectedStatusError{StatusCode: 500, Body: "boom"},
 			want: false,
 		},
 		{
 			name: "a 401 is not a feature gate",
-			err:  fmt.Errorf("unexpected status 401: unauthorized"),
+			err:  &UnexpectedStatusError{StatusCode: 401, Body: "unauthorized"},
 			want: false,
 		},
 		{
 			// A body that merely mentions 501 must not trip it - the match is on the
-			// status phrase, not on the digits appearing anywhere.
+			// response's status code, not on text appearing anywhere in the error.
 			name: "the digits appearing in a body do not count",
-			err:  fmt.Errorf("unexpected status 400: value 501 is out of range"),
+			err:  &UnexpectedStatusError{StatusCode: 400, Body: "value 501 is out of range"},
 			want: false,
+		},
+		{
+			// The error text includes the body, so a text match on the status
+			// phrase would relabel this 403 as the feature gate.
+			name: "a body quoting the status phrase does not count",
+			err:  &UnexpectedStatusError{StatusCode: 403, Body: "upstream returned unexpected status 501"},
+			want: false,
+		},
+		{
+			name: "a wrapped 501 is the feature gate",
+			err:  fmt.Errorf("listing cloud roles: %w", &UnexpectedStatusError{StatusCode: 501, Body: "not implemented"}),
+			want: true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

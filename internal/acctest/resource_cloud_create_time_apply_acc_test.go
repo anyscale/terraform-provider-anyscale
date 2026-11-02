@@ -27,8 +27,11 @@ type mockCloudCreateTimeServer struct {
 	mu                      sync.Mutex
 	cloudID                 string
 	isAggregatedLogsEnabled bool
-	logIngestionPutCalled   bool
-	logIngestionPutValue    bool
+	// isAutoAddUser is what GET reports for auto_add_user. This server does not
+	// own that PUT; a fronting server that does sets it (setAutoAddUser).
+	isAutoAddUser         bool
+	logIngestionPutCalled bool
+	logIngestionPutValue  bool
 }
 
 func newMockCloudCreateTimeServer(t *testing.T) (*httptest.Server, *mockCloudCreateTimeServer) {
@@ -127,9 +130,15 @@ func (s *mockCloudCreateTimeServer) cloudJSONLocked() string {
 	return fmt.Sprintf(`{
 		"id": %[1]q, "name": "createtime-mock", "provider": "AWS", "region": "us-east-2",
 		"status": "ready", "state": "ACTIVE", "compute_stack": "VM",
-		"auto_add_user": false, "lineage_tracking_enabled": false,
+		"auto_add_user": %[3]t, "lineage_tracking_enabled": false,
 		"is_aggregated_logs_enabled": %[2]t
-	}`, s.cloudID, s.isAggregatedLogsEnabled)
+	}`, s.cloudID, s.isAggregatedLogsEnabled, s.isAutoAddUser)
+}
+
+func (s *mockCloudCreateTimeServer) setAutoAddUser(v bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.isAutoAddUser = v
 }
 
 func (s *mockCloudCreateTimeServer) snapshot() (putCalled, putValue bool) {
@@ -209,5 +218,33 @@ resource "anyscale_cloud" "test" {
 	}
 	if !putValue {
 		t.Errorf("update_customer_aggregated_logs_config was called with is_enabled=false, want true to match the configured value")
+	}
+}
+
+// An empty cloud (no embedded resource config) returns from Create before the
+// resource add and the readiness wait. aggregated_logs_enabled = true must still
+// be applied there; before it was, the readback reported false and the apply
+// failed as an inconsistent result.
+func TestAccCloudResource_EmptyCloudAppliesAggregatedLogsEnabled(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	server, mock := newMockCloudCreateTimeServer(t)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProviderBlock(server.URL) + `
+resource "anyscale_cloud" "test" {
+  name                    = "createtime-mock"
+  cloud_provider          = "AWS"
+  region                  = "us-east-2"
+  aggregated_logs_enabled = true
+}
+`,
+				Check: resource.TestCheckResourceAttr("anyscale_cloud.test", "aggregated_logs_enabled", "true"),
+			},
+		},
+	})
+	if putCalled, putValue := mock.snapshot(); !putCalled || !putValue {
+		t.Errorf("aggregated logs PUT called=%t value=%t, want one call with true", putCalled, putValue)
 	}
 }

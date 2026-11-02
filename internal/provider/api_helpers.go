@@ -60,6 +60,15 @@ func (e *UnexpectedStatusError) Error() string {
 	return fmt.Sprintf("unexpected status %d: %s", e.StatusCode, e.Body)
 }
 
+// isHTTPStatus reports whether err is, or wraps, an API response with this
+// status code. Classify by this rather than by matching "status NNN" in
+// err.Error(): that text also contains the response body, so a body that
+// happens to mention another status would match.
+func isHTTPStatus(err error, statusCode int) bool {
+	var statusErr *UnexpectedStatusError
+	return errors.As(err, &statusErr) && statusErr.StatusCode == statusCode
+}
+
 // DoRequestAndParse performs an HTTP request, reads and closes the response body,
 // checks the status code, and unmarshals the JSON response into the provided type.
 // This combines the most common request pattern used throughout the provider.
