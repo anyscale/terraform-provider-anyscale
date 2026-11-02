@@ -83,7 +83,7 @@ Read-Only:
 - `cloud_id` (String) The cloud ID this service belongs to.
 - `created_at` (String) Timestamp when the service was created.
 - `creator_id` (String) The ID of the user who created the service.
-- `current_state` (String) The current state of this service (e.g. `RUNNING`, `UNHEALTHY`, `TERMINATED`). Ships as a plain string with no client-side enum validation, matching this provider's convention of not hand-maintaining a copy of the backend's enum list.
+- `current_state` (String) The current state of this service (e.g. `RUNNING`, `UNHEALTHY`, `TERMINATED`).
 - `description` (String) Description of the service. Null if not set.
 - `ended_at` (String) Timestamp when the service was terminated. Null while the service is active.
 - `error_message` (String) Error message from processing the most recent API request against this service, if any. Null otherwise.
@@ -110,7 +110,7 @@ Read-Only:
 - `current_weight` (Number) The current percentage of live traffic observed for this version, 0-100. Null if not currently observed.
 - `id` (String) The unique identifier of this service version.
 - `production_job_ids` (List of String) The production job IDs associated with this service version. Empty (not null) if none.
-- `ray_serve_config` (String) The Ray Serve config for this version, as a JSON string. This is a dynamic, open-ended structure upstream with no fixed schema in this provider - use `jsondecode()` in HCL to access individual fields, the same convention `anyscale_compute_config`'s `advanced_instance_config`/`flags` use for similarly open-ended config. Always present (required upstream), even when its contents are trivial.
+- `ray_serve_config` (String) The Ray Serve config for this version, as a JSON string. Use `jsondecode()` to read its fields.
 - `target_weight` (Number) The intended final traffic weight for this version, 0-100, when known. Null otherwise.
 - `version` (String) The version string identifier for this version.
 - `weight` (Number) The configured traffic weight currently stored for this version, 0-100. During rollouts this may be an intermediate desired load-balancer weight rather than the live figure - see `current_weight`.
@@ -129,7 +129,7 @@ Read-Only:
 - `current_weight` (Number) The current percentage of live traffic observed for this version, 0-100. Null if not currently observed.
 - `id` (String) The unique identifier of this service version.
 - `production_job_ids` (List of String) The production job IDs associated with this service version. Empty (not null) if none.
-- `ray_serve_config` (String) The Ray Serve config for this version, as a JSON string. This is a dynamic, open-ended structure upstream with no fixed schema in this provider - use `jsondecode()` in HCL to access individual fields, the same convention `anyscale_compute_config`'s `advanced_instance_config`/`flags` use for similarly open-ended config. Always present (required upstream), even when its contents are trivial.
+- `ray_serve_config` (String) The Ray Serve config for this version, as a JSON string. Use `jsondecode()` to read its fields.
 - `target_weight` (Number) The intended final traffic weight for this version, 0-100, when known. Null otherwise.
 - `version` (String) The version string identifier for this version.
 - `weight` (Number) The configured traffic weight currently stored for this version, 0-100. During rollouts this may be an intermediate desired load-balancer weight rather than the live figure - see `current_weight`.
@@ -167,7 +167,7 @@ Read-Only:
 
 Read-Only:
 
-- `kind` (String) The kind of resource this checklist row represents (e.g. `SERVICE`, `SERVICE_VERSION`, `LOAD_BALANCER`). Ships as a plain string with no client-side enum validation, matching this provider's convention of not hand-maintaining a copy of the backend's enum list.
+- `kind` (String) The kind of resource this checklist row represents (e.g. `SERVICE`, `SERVICE_VERSION`, `LOAD_BALANCER`).
 - `label` (String) User-facing label for this resource (e.g. `Cluster`, `Load Balancer`).
 - `message` (String) Reconciler-provided message describing the current state. Empty string, not null, when the backend has no message to report.
 - `observed_at` (String) When this row's state was last observed by the cluster manager. Null when the snapshot is missing a timestamp (older event).
@@ -181,7 +181,7 @@ Read-Only:
 
 Read-Only:
 
-- `kind` (String) The kind of resource this checklist row represents (e.g. `SERVICE`, `SERVICE_VERSION`, `LOAD_BALANCER`). Ships as a plain string with no client-side enum validation, matching this provider's convention of not hand-maintaining a copy of the backend's enum list.
+- `kind` (String) The kind of resource this checklist row represents (e.g. `SERVICE`, `SERVICE_VERSION`, `LOAD_BALANCER`).
 - `label` (String) User-facing label for this resource (e.g. `Cluster`, `Load Balancer`).
 - `message` (String) Reconciler-provided message describing the current state. Empty string, not null, when the backend has no message to report.
 - `observed_at` (String) When this row's state was last observed by the cluster manager. Null when the snapshot is missing a timestamp (older event).
