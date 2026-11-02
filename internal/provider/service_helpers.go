@@ -77,10 +77,7 @@ func evaluateServiceState(service *ServiceResult, target string) (done bool, err
 		return true, fmt.Errorf("service was terminated (current_state %s) while waiting for it to reach %s",
 			service.CurrentState, target)
 	case target != serviceStateTerminated && serviceErrorStates[service.CurrentState] && serviceErrorConfirmed(service):
-		if service.ErrorMessage != nil && *service.ErrorMessage != "" {
-			return true, fmt.Errorf("service entered %s state: %s", service.CurrentState, *service.ErrorMessage)
-		}
-		if detail := serviceChecklistFailureDetail(service.ServiceStatusChecklist); detail != "" {
+		if detail := serviceFailureDetail(service); detail != "" {
 			return true, fmt.Errorf("service entered %s state: %s", service.CurrentState, detail)
 		}
 		return true, fmt.Errorf("service entered %s state", service.CurrentState)
@@ -115,6 +112,15 @@ func serviceErrorConfirmed(service *ServiceResult) bool {
 		}
 	}
 	return failed || !reported
+}
+
+// serviceFailureDetail returns the most specific failure reason a polled service reports:
+// error_message when set, otherwise the failing status checklist items, otherwise "".
+func serviceFailureDetail(service *ServiceResult) string {
+	if service.ErrorMessage != nil && *service.ErrorMessage != "" {
+		return *service.ErrorMessage
+	}
+	return serviceChecklistFailureDetail(service.ServiceStatusChecklist)
 }
 
 // serviceChecklistFailureDetail scans a service's status checklist for per-component failure
@@ -223,6 +229,15 @@ func pollServiceState(ctx context.Context, client *Client, serviceID, target str
 		}
 
 		if time.Now().After(deadline) {
+			// Carry the last-reported failure reason: a wait that ends here because an error
+			// state was not terminal (Delete, or an error no component confirmed) would
+			// otherwise report only the state name.
+			if detail := serviceFailureDetail(service); detail != "" {
+				return service, fmt.Errorf(
+					"timed out after %s waiting for service %s to reach state %s (currently %s: %s)",
+					timeout, serviceID, target, service.CurrentState, detail,
+				)
+			}
 			return service, fmt.Errorf(
 				"timed out after %s waiting for service %s to reach state %s (currently %s)",
 				timeout, serviceID, target, service.CurrentState,
