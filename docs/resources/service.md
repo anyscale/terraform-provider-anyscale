@@ -3,28 +3,33 @@
 page_title: "anyscale_service Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Deploys an Anyscale Service and rolls out new versions on config change. Companion to the read-only anyscale_service/anyscale_services data sources, which share this resource's computed field shapes.
-  A change to an input that defines the deployed version (ray_serve_config, build_id or image_uri, compute_config_id, connection_ids, description, version_name, query_auth_token_enabled, grpc_service_names, env_vars) rolls out a new version automatically (declarative auto-rollout: the new version always rolls to 100%, so terraform apply converges to a steady RUNNING state rather than holding at a partial canary). max_surge_percent only paces that rollout; it does not hold it. If Anyscale rolls the new version back, the apply fails and the change stays in the plan until a rollout succeeds; a rollout that outlives the apply (timeout, interrupt) is settled on the next refresh the same way. Staged/manual canary (hold at a partial percent, explicit promote/rollback) is intentionally not supported by this resource in this version - it does not fit a converging declarative model and may arrive later as separate provider actions layered on top, not as a change to this resource's lifecycle.
-  ~> Note: Every rollout sends the service's whole config object, and Anyscale resets any setting it omits. A service deployed with the Anyscale CLI and then imported loses any setting there that this resource does not set, such as max_uptime_timeout_sec, gRPC routing without grpc_service_names, or cluster-level environment variables without env_vars, on its first rollout from Terraform.
-  ~> Note: terraform destroy terminates the service, waits for termination, and deletes the record for good. To turn a service off but keep its id, hostname and record, set stopped = true instead.
+  Deploys an Anyscale Service. With the default ROLLOUT strategy, changing an input that defines the deployed version rolls out a new version, and terraform apply waits until it serves all traffic. If Anyscale rolls the new version back, the apply fails and the change stays in the plan. See the services guide ../guides/services.md for rollouts, rolling back, stopping, query auth, and import.
+  ~> Note: Every rollout sends the service's whole config, and Anyscale resets any setting it omits. Before managing a service deployed with the Anyscale CLI, read Owning config for imported services ../guides/services.md#owning-config-for-imported-services.
+  ~> Note: terraform destroy deletes the service permanently. To turn it off but keep its id and hostname, set stopped = true instead.
 ---
 
 # anyscale_service (Resource)
 
-Deploys an Anyscale Service and rolls out new versions on config change. Companion to the read-only `anyscale_service`/`anyscale_services` data sources, which share this resource's computed field shapes.
+Deploys an Anyscale Service. With the default `ROLLOUT` strategy, changing an input that defines the deployed version rolls out a new version, and `terraform apply` waits until it serves all traffic. If Anyscale rolls the new version back, the apply fails and the change stays in the plan. See the [services guide](../guides/services.md) for rollouts, rolling back, stopping, query auth, and import.
 
-A change to an input that defines the deployed version (`ray_serve_config`, `build_id` or `image_uri`, `compute_config_id`, `connection_ids`, `description`, `version_name`, `query_auth_token_enabled`, `grpc_service_names`, `env_vars`) rolls out a new version automatically (declarative auto-rollout: the new version always rolls to 100%, so `terraform apply` converges to a steady RUNNING state rather than holding at a partial canary). `max_surge_percent` only paces that rollout; it does not hold it. If Anyscale rolls the new version back, the apply fails and the change stays in the plan until a rollout succeeds; a rollout that outlives the apply (timeout, interrupt) is settled on the next refresh the same way. Staged/manual canary (hold at a partial percent, explicit promote/rollback) is intentionally not supported by this resource in this version - it does not fit a converging declarative model and may arrive later as separate provider actions layered on top, not as a change to this resource's lifecycle.
+~> **Note:** Every rollout sends the service's whole config, and Anyscale resets any setting it omits. Before managing a service deployed with the Anyscale CLI, read [Owning config for imported services](../guides/services.md#owning-config-for-imported-services).
 
-~> **Note:** Every rollout sends the service's whole `config` object, and Anyscale resets any setting it omits. A service deployed with the Anyscale CLI and then imported loses any setting there that this resource does not set, such as `max_uptime_timeout_sec`, gRPC routing without `grpc_service_names`, or cluster-level environment variables without `env_vars`, on its first rollout from Terraform.
-
-~> **Note:** `terraform destroy` terminates the service, waits for termination, and deletes the record for good. To turn a service off but keep its id, hostname and record, set `stopped = true` instead.
+~> **Note:** `terraform destroy` deletes the service permanently. To turn it off but keep its id and hostname, set `stopped = true` instead.
 
 ## Example Usage
 
 ```terraform
-# Deploy a Ray Serve application as an Anyscale Service. A change to a
-# deploy input (ray_serve_config, the image, compute_config_id, ...)
-# rolls out a new version, and terraform apply waits for it.
+# Package ./app and deploy it as the service's working_dir. Editing a
+# file under ./app uploads a new package and rolls out the service.
+resource "anyscale_runtime_env_package" "app" {
+  source_dir = "${path.module}/app"
+  # The cloud of the service's compute config.
+  cloud_id = "cld_abc123"
+}
+
+# A change to a deploy input (ray_serve_config, the image,
+# compute_config_id, ...) rolls out a new version, and terraform apply
+# waits for it.
 resource "anyscale_service" "example" {
   name        = "my-service"
   description = "Serves the fraud-detection model"
@@ -45,7 +50,7 @@ resource "anyscale_service" "example" {
         route_prefix = "/"
         import_path  = "fraud_detection.main:app"
         runtime_env = {
-          working_dir = "https://github.com/my-org/my-repo/archive/main.zip"
+          working_dir = anyscale_runtime_env_package.app.uri
         }
       }
     ]
@@ -64,22 +69,6 @@ resource "anyscale_service" "example" {
   }
 }
 
-# Minimal service running a build from anyscale_container_image_build
-# or anyscale_container_image_registry.
-resource "anyscale_service" "minimal" {
-  name              = "minimal-service"
-  build_id          = "cenv_def456"
-  compute_config_id = "cpt_def456"
-
-  ray_serve_config = {
-    applications = [
-      {
-        import_path = "main:app"
-      }
-    ]
-  }
-}
-
 output "service_base_url" {
   value       = anyscale_service.example.base_url
   description = "The base URL clients use to reach the service"
@@ -92,54 +81,54 @@ output "service_base_url" {
 ### Required
 
 - `compute_config_id` (String) The ID of the compute config this service uses: `anyscale_compute_config`'s `config_id` output, not its `id` (the name). A value without the `cpt_` prefix is rejected before the service deploys. Determines the cloud, so there is no `cloud_id` argument. Changing it rolls out a new service version, not a replace. See `project_id` for the cloud-mismatch check.
-- `name` (String) The name of the service. Unique only within `project_id`, not organization-wide. Immutable: the backend has no rename endpoint, so changing this replaces the resource.
-- `ray_serve_config` (Dynamic) The Ray Serve application config, as a native HCL object (nested objects and mixed types allowed). Not refreshed while the service runs the version this resource deployed, because the server may normalize its stored copy (readable as `primary_version.ray_serve_config`). When the primary version is one Terraform did not deploy (an out-of-band deploy or rollback, or a rolled-back rollout), and after `terraform import`, it is set from that version's config, so the next plan shows the difference, possibly including normalization.
+- `name` (String) The name of the service. Unique only within `project_id`, not organization-wide. Changing it replaces the service.
+- `ray_serve_config` (Dynamic) The Ray Serve application config, as a native HCL object. Changing it rolls out a new version. The live copy is `primary_version.ray_serve_config`; this attribute is overwritten from it only when the running version is not the one Terraform last deployed, or after import, so the next plan shows the difference. See [Out-of-band changes](../guides/services.md#out-of-band-changes).
 
 ### Optional
 
 - `build_id` (String) The ID of the container image build this service runs, e.g. from `anyscale_container_image_build` or `anyscale_container_image_registry`. Set this or `image_uri`; with `image_uri`, it is the build that URI resolved to. Changing it rolls out a new version; it is not a replace.
-- `connection_ids` (List of String) Connection IDs to associate with the new service version. Null (the default) preserves the connections already attached; `[]` removes all of them. Never refreshed from the server, because copying the live set in would turn a later "leave connections alone" apply into "remove every connection"; read the live set from `primary_version.connection_ids`. After `terraform import`, a configured list equal to the live set is not treated as a change. Changing it rolls out a new version under `ROLLOUT` and is rejected at plan time under `IN_PLACE`.
+- `connection_ids` (List of String) Connection IDs for the new service version. Null (the default) keeps the attached connections; `[]` removes them all. Not refreshed, so that null keeps meaning "leave them alone"; read the live set from `primary_version.connection_ids`. Changing it rolls out a new version, which `IN_PLACE` rejects.
 - `description` (String) Description of the service. Null if not set. Changing it rolls out a new version under `ROLLOUT` and is rejected at plan time under `IN_PLACE`.
 - `env_vars` (Map of String) Environment variables Anyscale sets for Ray on the service's cluster nodes. Unlike the Anyscale CLI, this does not also copy them into each application's `runtime_env`; set those in `ray_serve_config`. Not refreshed: the API does not return it. Changing it rolls out a new version.
 - `grpc_service_names` (List of String) gRPC service names the load balancer routes to the service, by path prefix `/<name>`. Null or empty disables gRPC routing. At most one name while `query_auth_token_enabled` is `true`, two otherwise. Set Ray Serve's side in `ray_serve_config`'s `grpc_options`. Not refreshed: the API does not return it. Changing it rolls out a new version.
 - `image_uri` (String) Container image to run: `anyscale/ray:<tag>`, `anyscale/image/<name>:<revision>`, or a registry URI; set this or `build_id`. Resolved to a build at apply time and recorded in `build_id`; each plan checks the build still matches. Needs permission to create images, even for base images. For an image `anyscale_container_image_registry` manages, use its `build_id`: a registry URI here registers a separate copy.
-- `max_surge_percent` (Number) Rollout pacing (0-100): how much excess capacity to allocate during a deploy; the rollout still converges to 100%. Off by default: unless Anyscale support has enabled resource-constrained upgrades for your cloud, create succeeds but every later deploy fails with a 400. Null lets the backend choose. Not readable from the API; a change to it alone takes effect on the next deploy.
-- `project_id` (String) The ID of the project this service starts clusters in. If omitted, the backend resolves your organization's default project for the compute config's cloud - that resolved value is written back here, so leaving this unset does not produce a diff on later plans. Immutable: changing it replaces the resource. Its cloud must match `compute_config_id`'s cloud, and a plan-time check rejects a mismatch (naming both cloud IDs; skipped when either ID is unknown or a lookup fails). To move to a compute config on a different cloud, change `project_id` in the same apply; leaving it unset keeps the project in state, so the check fails.
+- `max_surge_percent` (Number) Extra capacity, 0-100 percent, to allocate during a rollout. It paces the rollout but does not hold it. Requires resource-constrained upgrades, which Anyscale support enables per cloud; without them, every rollout after create fails with a 400. Drift is not detected; a change takes effect on the next rollout.
+- `project_id` (String) The ID of the project this service starts clusters in. If unset, your organization's default project for the compute config's cloud is used and recorded here. Changing it replaces the service. Its cloud must match `compute_config_id`'s, which plan checks; to move to a compute config on another cloud, change `project_id` in the same apply.
 - `query_auth_token_enabled` (Boolean) Whether requests to the service must carry a bearer token. Defaults to `true`. Changing it rolls out a new version that issues a new token or clears it; read the token with the `anyscale_service_credentials` ephemeral resource.
 - `registry_login_secret` (String, Sensitive) Name of the secret holding credentials for the private registry in `image_uri`. Requires `image_uri`.
-- `rollout_strategy` (String) How a deploy rolls in a new version: `ROLLOUT` (default) starts a new cluster and shifts traffic to it; `IN_PLACE` upgrades the existing cluster, which is faster but permits changing only `ray_serve_config`: any other change that would roll out a new version is rejected at plan time. The create deploy ignores it and is always standard, so `IN_PLACE` is safe to set from the start. Not readable from the API, so drift is never detected. Changing only this attribute does not redeploy the service; the new value takes effect on the next deploy.
-- `stopped` (Boolean) Set `true` to terminate the service but keep its id and hostname; `false` (the default) restarts it under the same id as a new version. Refreshed from `goal_state`, so a service terminated outside Terraform, or by Anyscale after its cluster failed, plans a restart. Cannot be `true` on create. While `true`, inputs that define the deployed version cannot change.
-- `tags` (Map of String) Tags to associate with the service. The backend stores tags through a separate system from the service record itself (`/api/v2/tags/resource`, not the service GET/apply endpoints), so this resource makes its own extra calls to keep it a true round trip: read back on refresh, and - since that system's write endpoint only upserts (adds/updates) rather than replaces - any key removed from this map is explicitly deleted so it does not linger on the backend forever.
+- `rollout_strategy` (String) `ROLLOUT` (default) starts a new cluster and shifts traffic to it. `IN_PLACE` upgrades the existing cluster, which is faster but allows changing only `ray_serve_config`; plan rejects any other change that rolls out. A change takes effect on the next rollout, and the first deploy always uses `ROLLOUT`. Drift is not detected. See [Rollout strategy](../guides/services.md#rollout-strategy).
+- `stopped` (Boolean) Set `true` to terminate the service but keep its id and hostname; `false` (the default) restarts it under the same id as a new version. Refreshed from `goal_state`, so a service terminated outside Terraform, or by Anyscale after its cluster failed, plans a restart. Cannot be `true` on create. While `true`, inputs that define the deployed version cannot change. See [Stopping and restarting](../guides/services.md#stopping-and-restarting).
+- `tags` (Map of String) Tags to associate with the service. Refreshed from Anyscale; a key removed from this map is deleted from the service.
 - `timeouts` (Block, Optional) (see [below for nested schema](#nestedblock--timeouts))
-- `version_name` (String) Name of the version a rollout creates. If unset, Anyscale generates one and it is recorded here. Changing it rolls out a new version. A name can be used once per service, including by failed or rolled-back versions, so a value set here must change with every rollout.
+- `version_name` (String) Name of the version a rollout creates. If unset, Anyscale generates one and it is recorded here. Changing it rolls out a new version. A name can be used once per service, including by failed or rolled-back versions, so a value set here must change with every rollout. See [Version names](../guides/services.md#version-names).
 
 ### Read-Only
 
 - `auto_rollout_enabled` (Boolean) Whether this service uses automatic rollout.
 - `base_url` (String) The base URL of this service.
-- `canary_version` (Attributes) The canary version of this service - a point-in-time snapshot of an in-progress rollout, present only while one is active and null once the service settles. Because it disappears predictably as soon as the rollout completes, treat it as observational (e.g. for dashboards or monitoring) rather than wiring it as a stable input elsewhere - anything that depends on it will see it go null on its own, with no configuration change on your end. (see [below for nested schema](#nestedatt--canary_version))
-- `cloud_id` (String) The ID of the cloud this service runs in, derived from `compute_config_id`. Exposed for parity with the `anyscale_service`/`anyscale_services` data sources.
+- `canary_version` (Attributes) The version an in-progress rollout is moving traffic to. Null once the rollout finishes, so use it for monitoring, not as an input to other resources. (see [below for nested schema](#nestedatt--canary_version))
+- `cloud_id` (String) The ID of the cloud this service runs in, derived from `compute_config_id`.
 - `created_at` (String) Timestamp when the service was created.
 - `creator_id` (String) The ID of the user who created the service.
-- `current_state` (String) The current state of this service (e.g. `RUNNING`, `UNHEALTHY`, `TERMINATED`). Ships as a plain string with no client-side enum validation, matching this provider's convention of not hand-maintaining a copy of the backend's enum list.
+- `current_state` (String) The current state of this service (e.g. `RUNNING`, `UNHEALTHY`, `TERMINATED`).
 - `ended_at` (String) Timestamp when the service was terminated. Null while the service is active.
 - `error_message` (String) Error message from processing the most recent API request against this service, if any. Null otherwise.
 - `goal_state` (String) The goal state of this service: `RUNNING`, or `TERMINATED` while it is stopped (see `stopped`).
 - `hostname` (String) The hostname of the service.
 - `id` (String) The unique identifier of the service.
-- `is_multi_version` (Boolean) Whether this service is a multi-version service (multiple active versions with no single canary). Always false for services managed by this resource in this version - multi-version is out of scope (see this resource's top-level description).
-- `primary_version` (Attributes) The primary (currently active) version of this service, as last observed from the server - including its own `ray_serve_config`/`connection_ids`, which reflect the live server-side state rather than this resource's authored `ray_serve_config`/`connection_ids` inputs above. Compare the two if you suspect drift. Can be null if the backend has not returned it yet. (see [below for nested schema](#nestedatt--primary_version))
-- `service_observability_urls` (Attributes) Dashboard URLs for this service. The whole block is null while a service is still being processed (a confirmed real transitional state, e.g. a not-yet-healthy service that has not finished its first reconcile). Once present, each individual URL is separately null if the backend has none to report for it (e.g. before the service's first successful deploy). (see [below for nested schema](#nestedatt--service_observability_urls))
-- `service_status_checklist` (Attributes) Per-component status breakdown derived from the most recent reconciler snapshot. Null for terminated services and during the brief window before the reconciler's first tick on a brand-new service. (see [below for nested schema](#nestedatt--service_status_checklist))
+- `is_multi_version` (Boolean) Whether this service has several active versions with no single canary. Always `false` for a service this resource manages.
+- `primary_version` (Attributes) The version serving traffic, as last read from Anyscale. Its `ray_serve_config` and `connection_ids` are the live values; compare them with this resource's inputs to spot drift. Null until Anyscale reports it. (see [below for nested schema](#nestedatt--primary_version))
+- `service_observability_urls` (Attributes) Dashboard URLs for this service. Null until the service finishes its first reconcile; once present, each URL is null if Anyscale has none to report yet. (see [below for nested schema](#nestedatt--service_observability_urls))
+- `service_status_checklist` (Attributes) Per-component status from Anyscale's most recent check. Null for a terminated service and briefly after a new one is created. (see [below for nested schema](#nestedatt--service_status_checklist))
 
 <a id="nestedblock--timeouts"></a>
 ### Nested Schema for `timeouts`
 
 Optional:
 
-- `create` (String) Maximum time to wait for the create rollout to reach `RUNNING` (e.g. `45m`, `2h`). Defaults to `60m`. Anyscale sets no deadline on a rollout, so this is the only limit. Local to this provider; never sent to the API.
+- `create` (String) How long to wait for the first deploy to reach `RUNNING`, e.g. `45m` or `2h`. Defaults to `60m`. See [Timeouts](../guides/services.md#timeouts).
 - `delete` (String) Maximum time to wait for termination before deleting. Defaults to `60m`.
-- `update` (String) Same as `create`, for an update that rolls out a new version, restarts the service, or stops it (waiting for `TERMINATED`). Any other update does not wait. A rollout still running at the timeout continues and is settled on the next refresh.
+- `update` (String) How long to wait for a rollout, restart, or stop. Defaults to `60m`. A rollout still running at the timeout continues, and the next refresh records its result.
 
 
 <a id="nestedatt--canary_version"></a>
@@ -244,15 +233,9 @@ The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/c
 # the anyscale_service data source's `id` attribute.
 terraform import anyscale_service.example service2_abc123
 
-# ray_serve_config is seeded once from the server's stored version on
-# import (it is otherwise never refreshed - see this resource's
-# ray_serve_config description). The first `terraform plan` after an
-# import may therefore show a normalization diff between the imported
-# value and your own HCL, which you resolve by reconciling your
-# configuration with the imported value - a known limitation of
-# importing any open/schemaless config.
-
+# Import reads ray_serve_config from the running version, so the first
+# plan may show Anyscale's normalized copy differing from your HCL.
 # rollout_strategy and max_surge_percent cannot be read back, so the
-# first plan after an import shows an in-place update of them. Applying
-# it only records the values in state; it does not redeploy.
+# first plan updates them in place; applying that records them in state
+# without redeploying.
 ```

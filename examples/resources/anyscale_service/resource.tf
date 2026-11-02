@@ -1,6 +1,14 @@
-# Deploy a Ray Serve application as an Anyscale Service. A change to a
-# deploy input (ray_serve_config, the image, compute_config_id, ...)
-# rolls out a new version, and terraform apply waits for it.
+# Package ./app and deploy it as the service's working_dir. Editing a
+# file under ./app uploads a new package and rolls out the service.
+resource "anyscale_runtime_env_package" "app" {
+  source_dir = "${path.module}/app"
+  # The cloud of the service's compute config.
+  cloud_id = "cld_abc123"
+}
+
+# A change to a deploy input (ray_serve_config, the image,
+# compute_config_id, ...) rolls out a new version, and terraform apply
+# waits for it.
 resource "anyscale_service" "example" {
   name        = "my-service"
   description = "Serves the fraud-detection model"
@@ -21,7 +29,7 @@ resource "anyscale_service" "example" {
         route_prefix = "/"
         import_path  = "fraud_detection.main:app"
         runtime_env = {
-          working_dir = "https://github.com/my-org/my-repo/archive/main.zip"
+          working_dir = anyscale_runtime_env_package.app.uri
         }
       }
     ]
@@ -37,22 +45,6 @@ resource "anyscale_service" "example" {
 
   tags = {
     team = "ml-platform"
-  }
-}
-
-# Minimal service running a build from anyscale_container_image_build
-# or anyscale_container_image_registry.
-resource "anyscale_service" "minimal" {
-  name              = "minimal-service"
-  build_id          = "cenv_def456"
-  compute_config_id = "cpt_def456"
-
-  ray_serve_config = {
-    applications = [
-      {
-        import_path = "main:app"
-      }
-    ]
   }
 }
 
