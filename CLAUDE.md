@@ -164,8 +164,9 @@ Resolution order, used by the provider **and** acceptance tests:
 2. `ANYSCALE_CLI_TOKEN`
 3. `~/.anyscale/credentials.json` (Anyscale CLI format, from `anyscale login`)
 
-Centralize resolution in a helper (e.g. `resolveToken(ctx, config)`), initialize one shared API
-client, and attach it to both `resp.ResourceData` and `resp.DataSourceData`.
+Resolution is centralized in `GetAuthToken()` / `resolveAuthToken(ctx)`
+(`internal/provider/client.go`), which acceptance tests call too. Initialize one shared API client,
+and attach it to both `resp.ResourceData` and `resp.DataSourceData`.
 
 ### Connection-level identity → singleton data source
 
@@ -267,8 +268,8 @@ Traced on both halves, each with a positive control proving the search could mat
 - CLI: no client-side derivation of Kubernetes zones. (Control: the AWS subnet→AZ resolution in
   `frontend/cli/anyscale/util.py:409` and `:918` is found.)
 - Provider: K8S zones are sent only when the practitioner declares them
-  (`resource_cloud_resource.go:1318`), and `stringListOrNull` maps an empty API list to **null**, so
-  an undeclared value cannot come back as a phantom diff.
+  (`expandKubernetesConfig` in `resource_cloud_resource.go`), and `stringListOrNull` maps an empty
+  API list to **null**, so an undeclared value cannot come back as a phantom diff.
 
 So a config that omits `zones` imports to null and plans clean, and one that sets them round-trips.
 The genuinely exposed case is narrower and is not this bug class: importing a cloud created outside
