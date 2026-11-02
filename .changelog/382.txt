@@ -3,9 +3,9 @@ resource/anyscale_service: Documentation for `anyscale_service` now describes cu
 ```
 
 ```release-note:changed
-data-source/anyscale_service: Documentation for the `version` and `checklist` attributes now describes current behavior.
+data-source/anyscale_service: Descriptions of `current_state`, the version `ray_serve_config` and the checklist `kind` are shorter and no longer describe provider internals.
 ```
 
 ```release-note:changed
-data-source/anyscale_services: Documentation for the `version` and `checklist` attributes now describes current behavior.
+data-source/anyscale_services: Descriptions of `current_state`, the version `ray_serve_config` and the checklist `kind` are shorter and no longer describe provider internals.
 ```
