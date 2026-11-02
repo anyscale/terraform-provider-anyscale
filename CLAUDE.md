@@ -528,6 +528,6 @@ every time.
   differing defaults too — `api/v2` compute-config search defaults to latest-version-only where
   `ext/v0` effectively returned all. Migrate related call sites together, not piecemeal.
 
-<!-- crystl-cli:begin v2.163.0 -->
+<!-- crystl-cli:begin v2.269.0 -->
 @AGENTS.md
 <!-- crystl-cli:end -->
