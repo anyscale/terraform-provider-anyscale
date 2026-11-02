@@ -129,3 +129,88 @@ func TestWaitForCloudReady_RetriesOn429(t *testing.T) {
 		t.Fatalf("GET calls = %d, want %d (%d attempts answered 429, then ready)", got, want, maxReadAttempts)
 	}
 }
+
+// TestCloudResourceDelete_404ConfirmsAgainstList proves a 404 from remove_resource is confirmed
+// against the cloud's resource list before Delete reports success. The endpoint also 404s with
+// "Cloud X has no primary resource." after it has found the named resource (clouds_resource.py
+// remove_resource), so a bare 404 can leave the resource in place.
+func TestCloudResourceDelete_404ConfirmsAgainstList(t *testing.T) {
+	const cloudID = "cld_delete404"
+	const listed = `{"results": [{"name": "secondary", "cloud_resource_id": "cldrsrc_x"}], "metadata": {}}`
+	const notListed = `{"results": [{"name": "main", "cloud_resource_id": "cldrsrc_main"}], "metadata": {}}`
+	const noPrimary = `{"error": {"detail": "Cloud cld_delete404 has no primary resource."}}`
+
+	tests := []struct {
+		name        string
+		deleteBody  string
+		listStatus  int
+		listBody    string
+		wantSummary string // "" means Delete must succeed
+	}{
+		{
+			name:        "still listed after a 404 is an error",
+			deleteBody:  noPrimary,
+			listStatus:  http.StatusOK,
+			listBody:    listed,
+			wantSummary: "Cloud Resource Was Not Deleted",
+		},
+		{
+			name:       "absent from the list after a 404 is deleted",
+			deleteBody: `{"error": {"detail": "Cloud resource secondary does not exist in cloud cld_delete404."}}`,
+			listStatus: http.StatusOK,
+			listBody:   notListed,
+		},
+		{
+			name:       "cloud gone after a 404 is deleted",
+			deleteBody: `{"error": {"detail": "Cloud not found."}}`,
+			listStatus: http.StatusNotFound,
+			listBody:   `{"error": {"detail": "Cloud not found."}}`,
+		},
+		{
+			name:        "a failed confirmation lookup is an error",
+			deleteBody:  noPrimary,
+			listStatus:  http.StatusForbidden,
+			listBody:    `{"error": {"detail": "Permission denied"}}`,
+			wantSummary: "Could Not Confirm Cloud Resource Deletion",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var deletes, lists atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodDelete && r.URL.Path == "/api/v2/clouds/"+cloudID+"/remove_resource":
+					deletes.Add(1)
+					w.WriteHeader(http.StatusNotFound)
+					_, _ = fmt.Fprint(w, tt.deleteBody)
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v2/clouds/"+cloudID+"/resources":
+					lists.Add(1)
+					w.WriteHeader(tt.listStatus)
+					_, _ = fmt.Fprint(w, tt.listBody)
+				default:
+					t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusTeapot)
+				}
+			}))
+			t.Cleanup(server.Close)
+
+			diags := runCloudResourceDelete(t, server.URL, cloudID+":secondary")
+
+			if tt.wantSummary == "" {
+				if diags.HasError() {
+					t.Fatalf("Delete returned errors, want success: %v", diags)
+				}
+			} else {
+				if !diags.HasError() || diags.Errors()[0].Summary() != tt.wantSummary {
+					t.Fatalf("diagnostics = %v, want an error %q", diags, tt.wantSummary)
+				}
+				if tt.wantSummary == "Cloud Resource Was Not Deleted" && !strings.Contains(diags.Errors()[0].Detail(), "has no primary resource") {
+					t.Errorf("detail = %q, want it to carry the backend's 404 detail", diags.Errors()[0].Detail())
+				}
+			}
+			if deletes.Load() != 1 || lists.Load() != 1 {
+				t.Errorf("deletes = %d, lists = %d, want exactly one of each", deletes.Load(), lists.Load())
+			}
+		})
+	}
+}
