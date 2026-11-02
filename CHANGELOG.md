@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.33.0] - 2026-11-02
+
+### New Resources
+
+- resource/anyscale_runtime_env_package: Package a local directory, upload it to a cloud's storage under a content-addressed name, and output its `uri` for a service's `runtime_env.working_dir`, so a code change rolls out a new service version.
+
+### Added
+
+- resource/anyscale_service: Add `query_auth_token_enabled` to turn bearer-token authentication on or off; changing it rolls out a new version that issues a new token or clears it.
+- resource/anyscale_service: Add `grpc_service_names` to route gRPC services through the service's load balancer.
+- resource/anyscale_service: Add `env_vars` to set environment variables on the service's cluster.
+- resource/anyscale_service: Add `image_uri` and `registry_login_secret` as an alternative to `build_id`; the image is resolved to a build at apply time, and a plan detects when the service no longer runs that image.
+- resource/anyscale_service: Add `version_name` to name the version a rollout creates; changing it rolls out a new version, and a name already used by any earlier version, including a failed one, is rejected.
+- resource/anyscale_service: Add `stopped` to turn a service off while keeping its id, hostname and record; setting it back to `false` restarts the service under the same id with a new version.
+
+### Changed
+
+- resource/anyscale_service: `compute_config_id` now rejects a value without the `cpt_` prefix before the service deploys, catching `anyscale_compute_config.<name>.id` (the config's name) passed where its `config_id` output belongs.
+- resource/anyscale_service: Documentation for `max_surge_percent` now explains that it is off by default: unless Anyscale has enabled resource-constrained upgrades for your cloud, the service is created but every later deploy fails with a 400. The registry example no longer sets it.
+- resource/anyscale_service: Each rollout now sends the service's whole `config` object, so a service deployed with the Anyscale CLI loses `max_uptime_timeout_sec`, and any gRPC routing or cluster-level environment variables not set here, on its first rollout from Terraform.
+- resource/anyscale_service: The default `create`, `update`, and `delete` timeout is now `60m` (was `30m`), because Anyscale sets no deadline on a rollout.
+- resource/anyscale_service: Documentation for `anyscale_service` now describes current behavior, with a new services guide covering rollouts, rollback, `stopped`, timeouts and import, and an example that deploys code through `anyscale_runtime_env_package`.
+- data-source/anyscale_service: Descriptions of `current_state`, the version `ray_serve_config` and the checklist `kind` are shorter and no longer describe provider internals.
+- data-source/anyscale_services: Descriptions of `current_state`, the version `ray_serve_config` and the checklist `kind` are shorter and no longer describe provider internals.
+
+### Fixed
+
+- resource/anyscale_service: A rollout that Anyscale rolls back now fails `terraform apply` with an error naming the failed and restored versions, and the change stays in the plan so re-applying retries it.
+- resource/anyscale_service: An out-of-band deploy or rollback, or a rollout that was rolled back after an interrupted apply, now shows as a `ray_serve_config` diff on the next plan.
+- resource/anyscale_service: A terminated service still in configuration, whether stopped outside Terraform or by Anyscale after its cluster failed, now plans `stopped` changing from `true` to `false`, and `terraform apply` restarts it with the same id and hostname, keeping its connections.
+- resource/anyscale_service: `terraform apply` no longer fails on a transient service-level error state such as `UNHEALTHY` while a service starts, restarts or rolls out; the wait ends only when a version or status checklist item confirms the error.
+- resource/anyscale_service: A rollout no longer silently re-enables bearer authentication on a service that had it disabled.
+
 ## [0.32.0] - 2026-10-23
 
 ### Changed
@@ -1234,7 +1267,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.32.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.33.0...HEAD
+[0.33.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.33.0
 [0.32.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.32.0
 [0.31.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.31.2
 [0.31.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.31.1
