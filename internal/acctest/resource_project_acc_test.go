@@ -168,6 +168,11 @@ resource "anyscale_project" "test" {
 
 // TestAccProjectResource_Disappears verifies that an out-of-band project
 // deletion is detected by the next plan as drift.
+//
+// The second step persists the refresh, so Read's removal of the deleted project reaches state.
+// Without it, the post-test destroy (which plugin-testing runs with -refresh=false) calls Delete
+// on the already-deleted project. The backend usually answers that DELETE with a 404, which
+// Delete accepts, but sometimes with a 403, which Delete retries for ~90s and then fails on.
 func TestAccProjectResource_Disappears(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
@@ -188,8 +193,24 @@ func TestAccProjectResource_Disappears(t *testing.T) {
 				),
 				ExpectNonEmptyPlan: true,
 			},
+			{
+				RefreshState:       true,
+				Check:              testAccCheckProjectRemovedFromState("anyscale_project.test"),
+				ExpectNonEmptyPlan: true,
+			},
 		},
 	})
+}
+
+// testAccCheckProjectRemovedFromState fails if resourceName is still in state after a refresh,
+// i.e. Read did not treat the deleted project as gone.
+func testAccCheckProjectRemovedFromState(resourceName string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		if _, ok := s.RootModule().Resources[resourceName]; ok {
+			return fmt.Errorf("%s is still in state after refresh; Read should remove a deleted project", resourceName)
+		}
+		return nil
+	}
 }
 
 // testAccDeleteProjectViaAPI deletes the project directly via the API so the next plan observes
