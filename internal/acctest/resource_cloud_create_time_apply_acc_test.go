@@ -220,3 +220,31 @@ resource "anyscale_cloud" "test" {
 		t.Errorf("update_customer_aggregated_logs_config was called with is_enabled=false, want true to match the configured value")
 	}
 }
+
+// An empty cloud (no embedded resource config) returns from Create before the
+// resource add and the readiness wait. aggregated_logs_enabled = true must still
+// be applied there; before it was, the readback reported false and the apply
+// failed as an inconsistent result.
+func TestAccCloudResource_EmptyCloudAppliesAggregatedLogsEnabled(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	server, mock := newMockCloudCreateTimeServer(t)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProviderBlock(server.URL) + `
+resource "anyscale_cloud" "test" {
+  name                    = "createtime-mock"
+  cloud_provider          = "AWS"
+  region                  = "us-east-2"
+  aggregated_logs_enabled = true
+}
+`,
+				Check: resource.TestCheckResourceAttr("anyscale_cloud.test", "aggregated_logs_enabled", "true"),
+			},
+		},
+	})
+	if putCalled, putValue := mock.snapshot(); !putCalled || !putValue {
+		t.Errorf("aggregated logs PUT called=%t value=%t, want one call with true", putCalled, putValue)
+	}
+}

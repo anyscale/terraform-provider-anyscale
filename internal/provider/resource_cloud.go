@@ -1055,6 +1055,13 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		// Skip add_resource call - resources will be added via anyscale_cloud_resource
 		tflog.Info(ctx, "Created empty cloud - resources should be added via anyscale_cloud_resource", map[string]any{"id": cloudID})
 
+		// The remaining toggles too, with step 4's semantics: without this, a configured true
+		// reads back false and the apply fails as an inconsistent result.
+		if err := r.updateMutableFields(ctx, cloudID, plan, createdCloudSettings(plan)); err != nil {
+			resp.Diagnostics.AddError("Failed to Apply Cloud Settings", fmt.Sprintf("Cloud %s was created, but applying its configured settings failed: %s", cloudID, err.Error()))
+			return
+		}
+
 		// Read back to get final state
 		if err := r.readCloudState(ctx, cloudID, &plan, nil); err != nil {
 			resp.Diagnostics.AddError("Read Error", err.Error())
@@ -1099,12 +1106,7 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	// zero-value baseline (rather than a real prior state, which doesn't
 	// exist yet) reuses the exact same diff-and-call logic Update() already
 	// uses and has already been proven against.
-	zeroValueState := CloudResourceModel{
-		AutoAddUser:            plan.AutoAddUser,
-		LineageTrackingEnabled: types.BoolValue(false),
-		AggregatedLogsEnabled:  types.BoolValue(false),
-	}
-	if err := r.updateMutableFields(ctx, cloudID, plan, zeroValueState); err != nil {
+	if err := r.updateMutableFields(ctx, cloudID, plan, createdCloudSettings(plan)); err != nil {
 		resp.Diagnostics.AddError("Failed to Apply Cloud Settings", fmt.Sprintf("Cloud %s was created, but applying its configured settings failed: %s", cloudID, err.Error()))
 		return
 	}
@@ -1116,6 +1118,17 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// createdCloudSettings is the baseline updateMutableFields diffs a new cloud's plan against: a
+// freshly created cloud starts with every toggle false, except auto_add_user, which Create has
+// already applied by the time the others are.
+func createdCloudSettings(plan CloudResourceModel) CloudResourceModel {
+	return CloudResourceModel{
+		AutoAddUser:            plan.AutoAddUser,
+		LineageTrackingEnabled: types.BoolValue(false),
+		AggregatedLogsEnabled:  types.BoolValue(false),
+	}
 }
 
 // undoCreateRefusedAutoAddUser handles an organization converted to role bindings refusing
