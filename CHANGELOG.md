@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - resource/anyscale_service: A rollout that Anyscale rolls back now fails `terraform apply` with an error naming the failed and restored versions, and the change stays in the plan so re-applying retries it.
 - resource/anyscale_service: An out-of-band deploy or rollback, or a rollout that was rolled back after an interrupted apply, now shows as a `ray_serve_config` diff on the next plan.
 - resource/anyscale_service: A terminated service still in configuration, whether stopped outside Terraform or by Anyscale after its cluster failed, now plans `stopped` changing from `true` to `false`, and `terraform apply` restarts it with the same id and hostname, keeping its connections.
-- resource/anyscale_service: Restarting a service no longer fails on the transient `UNHEALTHY` state Anyscale reports while it comes back; a service-level error state now ends the wait only when a version or status checklist item confirms it.
+- resource/anyscale_service: `terraform apply` no longer fails on a transient service-level error state such as `UNHEALTHY` while a service starts, restarts or rolls out; the wait ends only when a version or status checklist item confirms the error.
 - resource/anyscale_service: A rollout no longer silently re-enables bearer authentication on a service that had it disabled.
 
 ## [0.32.0] - 2026-10-23
