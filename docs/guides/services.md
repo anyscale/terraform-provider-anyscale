@@ -79,8 +79,8 @@ gradually, so this can take a minute or more.
 - **Not with `IN_PLACE`.** A non-null `canary_percent` is rejected at plan time.
 - **Canaries started elsewhere.** Terraform only tracks a canary it started, or one it found at
   import. Finish or roll back one started with the CLI or console before applying; otherwise a
-  deploy change fails with a "rollout already in progress" error and other applies wait until
-  the timeout.
+  deploy change whose configuration differs from the held canary fails with a "rollout already
+  in progress" error.
 - **Import.** A held canary is recovered into `canary_percent`. A configuration that omits it
   then plans a change to null, which completes that rollout.
 
