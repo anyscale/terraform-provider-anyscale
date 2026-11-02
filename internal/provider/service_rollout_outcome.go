@@ -70,10 +70,9 @@ func serviceIsTerminated(goalState types.String) bool {
 }
 
 // serviceRestartRequired is the single predicate for "the service is terminated but the
-// configuration wants it running". Every terminated service in config wants to run today; a
-// future argument that lets config ask for a stopped service gates it here.
-func serviceRestartRequired(_ *ServiceResourceModel, state *ServiceResourceModel) bool {
-	return serviceIsTerminated(state.GoalState)
+// configuration wants it running" (stopped false, or unknown until apply).
+func serviceRestartRequired(plan, state *ServiceResourceModel) bool {
+	return serviceIsTerminated(state.GoalState) && !plan.Stopped.ValueBool()
 }
 
 // reconcileServiceVersionTracking decides, on Read, whether the live service still runs what

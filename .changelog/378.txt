@@ -1,0 +1,9 @@
+```
+release-note:added
+resource/anyscale_service: Add `stopped` to turn a service off while keeping its id, hostname and record; setting it back to `false` restarts the service under the same id with a new version.
+```
+
+```
+release-note:changed
+resource/anyscale_service: A service terminated outside Terraform, or by Anyscale after its cluster failed, now shows in the plan as `stopped` changing from `true` to `false`, instead of an update with a warning; applying still restarts it.
+```
