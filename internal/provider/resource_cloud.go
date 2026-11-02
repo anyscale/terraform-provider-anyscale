@@ -1353,11 +1353,11 @@ func (r *CloudResource) updateCloudBoolField(ctx context.Context, cloudID, field
 // including a differently-worded 409, must propagate immediately rather
 // than be retried.
 func isTransientAutoAddUserConflict(err error) bool {
-	msg := err.Error()
-	if !strings.Contains(msg, "status 409") {
+	var statusErr *UnexpectedStatusError
+	if !errors.As(err, &statusErr) || statusErr.StatusCode != http.StatusConflict {
 		return false
 	}
-	return strings.Contains(msg, "still being applied") || strings.Contains(msg, "try again")
+	return strings.Contains(statusErr.Body, "still being applied") || strings.Contains(statusErr.Body, "try again")
 }
 
 // updateCloudAggregatedLogsConfig calls the aggregated-logs PUT route. Its

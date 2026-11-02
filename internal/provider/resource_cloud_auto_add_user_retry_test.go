@@ -204,6 +204,14 @@ func TestIsTransientAutoAddUserConflict(t *testing.T) {
 			want:   false,
 		},
 		{
+			// The error text includes the body, so matching "status 409" in the
+			// text would accept this 400.
+			name:   "non-409 status whose body quotes a 409 does not match",
+			status: http.StatusBadRequest,
+			body:   `{"error":{"detail":"upstream returned status 409: still being applied"}}`,
+			want:   false,
+		},
+		{
 			name:   "non-409 status does not match even with the right words",
 			status: http.StatusBadRequest,
 			body:   `{"error":{"detail":"still being applied, try again"}}`,
