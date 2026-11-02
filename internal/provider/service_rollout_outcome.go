@@ -231,6 +231,7 @@ func serviceApplyVersionFields(s *ServiceResult, preApplyPrimaryID, newVersionID
 		"goal_state":           s.GoalState,
 		"pre_apply_primary_id": preApplyPrimaryID,
 		"new_version_id":       newVersionID,
+		"has_auth_token":       s.AuthToken != nil, // presence only; never the token
 	}
 	if s.PrimaryVersion != nil {
 		fields["primary_version_id"], fields["primary_version"] = s.PrimaryVersion.ID, s.PrimaryVersion.Version
@@ -279,5 +280,6 @@ func withPriorServiceDeployFields(m, prior ServiceResourceModel) ServiceResource
 	m.QueryAuthTokenEnabled = prior.QueryAuthTokenEnabled
 	m.GRPCServiceNames = prior.GRPCServiceNames
 	m.EnvVars = prior.EnvVars
+	m.VersionName = prior.VersionName
 	return m
 }

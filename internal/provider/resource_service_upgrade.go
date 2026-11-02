@@ -342,6 +342,7 @@ func upgradeServiceResourceStateV0toV1(ctx context.Context, req resource.Upgrade
 		EnvVars:               types.MapNull(types.StringType),
 		ImageURI:              types.StringNull(),
 		RegistryLoginSecret:   types.StringNull(),
+		VersionName:           types.StringNull(),
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &newState)...)
