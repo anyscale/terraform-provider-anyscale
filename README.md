@@ -54,6 +54,7 @@ provider "anyscale" {
   - Compute configurations
   - Container images (build from a Containerfile, or register existing images from a registry)
   - Services (deploy Ray Serve applications and roll out new versions)
+  - Runtime environment packages (package a local directory for a service's working_dir)
   - Projects
   - Organization default cloud (sets which cloud is the organization default)
   - System Cluster (enables and starts a cloud's System Cluster)
