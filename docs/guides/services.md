@@ -8,8 +8,9 @@ description: |-
 # Services: Deploy, Roll Out, Stop
 
 [`anyscale_service`](../resources/service.md) deploys a Ray Serve application and rolls out a new
-version whenever the inputs that define it change. `terraform apply` waits for the rollout and
-fails if Anyscale rolls it back, so a green apply means the new version is serving.
+version whenever the inputs that define it change. With the default `ROLLOUT` strategy,
+`terraform apply` waits for the rollout and fails if Anyscale rolls it back, so a green apply
+means the new version is serving.
 
 ## First deploy
 
@@ -61,7 +62,8 @@ describe `ROLLOUT`.
 
 If the new version fails, Anyscale rolls back to the previous one, which keeps serving. The apply
 fails with "Service Rollout Rolled Back", naming both versions. The change stays in the plan, so
-the next `terraform apply` tries it again. Fix the cause first: the error does not carry the
+the next `terraform apply` tries it again. If you set `version_name`, change it before retrying:
+the failed version used the name. Fix the cause first: the error does not carry the
 reason, which is in the service's events in the Anyscale console.
 
 If the rollout is still running when the timeout expires, or you interrupt the apply, it continues
@@ -91,6 +93,10 @@ unless the configuration says `true`.
 - Change deployed inputs and restart in one apply, but not while stopped or in the apply that
   stops it: set `stopped = false`, deploy, then stop again. `tags`, `timeouts` and the rollout
   settings change freely.
+- A restart is a new version, so a `version_name` you set must change too, or the plan fails with
+  "Version Name Must Change".
+- A service restarted outside Terraform while the configuration says `stopped = true` is stopped
+  again on the next apply.
 - A restart cannot be rolled back. A failed restart fails the apply like a failed create.
 - Stopping and restarting use the `update` timeout.
 
@@ -101,7 +107,8 @@ unless the configuration says `true`.
 `query_auth_token_enabled` (default `true`) requires requests to carry a bearer token. Changing it
 is a full rollout, and re-enabling issues a new token. Read the token with the
 [`anyscale_service_credentials`](../ephemeral-resources/service_credentials.md) ephemeral
-resource, which never writes it to state.
+resource, which never writes it to state. If an organization or cloud setting blocks tokens, the
+apply fails with "Bearer Token Not Issued".
 
 ## gRPC service names and env vars
 
@@ -132,8 +139,9 @@ terraform import anyscale_service.example service2_abc123
 
 The ID is the service ID. After import, `ray_serve_config` holds the live version's config
 (possibly normalized by Anyscale), so the first plan shows any difference from yours. A
-`connection_ids` list equal to the live set is not a change. `image_uri`, `registry_login_secret`,
-`grpc_service_names` and `env_vars` are null, so a configuration that sets them plans one in-place
-update that changes nothing on Anyscale. See
+`connection_ids` list equal to the live set is not a change. `image_uri` and
+`registry_login_secret` are null, so a configuration that sets them plans one in-place update that
+changes nothing on Anyscale. `grpc_service_names` and `env_vars` are also null, but declaring
+either rolls out a new version, which is what writes them. See
 [Owning config for imported services](#owning-config-for-imported-services) before the first
 apply.
