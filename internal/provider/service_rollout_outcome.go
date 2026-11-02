@@ -35,6 +35,10 @@ type serviceVersionTracking struct {
 	// HeldVersionID is the canary this resource holds at canary_percent. Read refreshes
 	// canary_percent only from this canary.
 	HeldVersionID string `json:"held_version_id,omitempty"`
+	// PreCanaryFingerprint is serviceApplyFingerprint of the config deployed before the held
+	// canary. A deploy back to that config after a rollback re-sends nothing: re-sending it would
+	// start a new version.
+	PreCanaryFingerprint string `json:"pre_canary_fingerprint,omitempty"`
 }
 
 // getServiceVersionTracking returns nil when no tracking is stored: state from `terraform

@@ -53,6 +53,8 @@ type outcomeSnapshot struct {
 	Canary       *outcomeVersion
 	// Manual reports a canary held at a manual share (auto_rollout_enabled false).
 	Manual bool
+	// CanaryState is the canary version's current_state; "" means CurrentState.
+	CanaryState string
 }
 
 // outcomeApplyResult is the mock's reaction to one PUT /apply call: either an error status, or a
@@ -101,6 +103,11 @@ type outcomeMock struct {
 	// archivedURIs are registry URIs whose anonymous environment was archived: get_or_create
 	// answers them with the backend's 409.
 	archivedURIs map[string]bool
+
+	// rollbackScript is the GET script POST /rollback switches to. events records each apply and
+	// rollback in arrival order.
+	rollbackScript []outcomeSnapshot
+	events         []string
 }
 
 // outcomeBuild is one build as GET /builds/{id} reports it.
@@ -125,6 +132,7 @@ func newOutcomeMock(t *testing.T, serviceID, name string, onApply func(n int, bo
 		}
 		m.mu.Lock()
 		m.applyBodies = append(m.applyBodies, body)
+		m.events = append(m.events, "apply")
 		n := len(m.applyBodies)
 		stillTerminating := m.terminated && m.terminatingLeft > 0
 		if !stillTerminating {
@@ -155,6 +163,23 @@ func newOutcomeMock(t *testing.T, serviceID, name string, onApply func(n int, bo
 	})
 	mux.HandleFunc("/api/v2/services-v2/"+serviceID, func(w http.ResponseWriter, r *http.Request) {
 		serveServiceGetOrDelete(t, w, r, m.render(m.next()))
+	})
+	mux.HandleFunc("/api/v2/services-v2/"+serviceID+"/rollback", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("unexpected method %s on rollback", r.Method)
+		}
+		m.mu.Lock()
+		m.events = append(m.events, "rollback")
+		script := m.rollbackScript
+		m.mu.Unlock()
+		if len(script) == 0 {
+			t.Errorf("unexpected rollback")
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		m.setScript(script...)
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = fmt.Fprint(w, `{"result": `+m.render(script[0])+`}`)
 	})
 	mux.HandleFunc("/api/v2/services-v2/"+serviceID+"/terminate", func(w http.ResponseWriter, r *http.Request) {
 		m.mu.Lock()
@@ -389,7 +414,11 @@ func (m *outcomeMock) render(s outcomeSnapshot) string {
 	}
 	canary := "null"
 	if s.Canary != nil {
-		canary = outcomeVersionJSON(*s.Canary, s.CurrentState)
+		canaryState := s.CanaryState
+		if canaryState == "" {
+			canaryState = s.CurrentState
+		}
+		canary = outcomeVersionJSON(*s.Canary, canaryState)
 	}
 	endedAt := "null"
 	if s.CurrentState == "TERMINATED" {
