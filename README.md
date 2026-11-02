@@ -63,6 +63,8 @@ provider "anyscale" {
   - Organization invitations
   - Organization users (invites new people or adopts existing members; membership only)
   - Organization user roles (grants an organization-level role, with optional container-image deny roles)
+  - User groups and their membership (Beta)
+  - Role bindings (grant a role to a group or user on an organization, cloud or project; Beta)
   - Anyscale Scheduler configuration (resource flavors, resource queues, scheduling rules, and the
     policy for retiring and replacing managed machines)
 - Currently supported data sources:
@@ -73,6 +75,8 @@ provider "anyscale" {
   - Services (single lookup and list/filter)
   - The current authenticated user and their connected organization
   - Organization users (single lookup and list/filter)
+  - User groups (single lookup and list/filter; Beta)
+  - Roles (built-in and organization roles, for use with role bindings; Beta)
   - System Cluster status
   - Cloud IAM mapping
   - Anyscale Scheduler configuration
