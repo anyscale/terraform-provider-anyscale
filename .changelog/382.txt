@@ -1,3 +1,11 @@
 ```release-note:changed
 resource/anyscale_service: Documentation for `anyscale_service` now describes current behavior, with a new services guide covering rollouts, rollback, `stopped`, timeouts and import, and an example that deploys code through `anyscale_runtime_env_package`.
 ```
+
+```release-note:changed
+data-source/anyscale_service: Documentation for the `version` and `checklist` attributes now describes current behavior.
+```
+
+```release-note:changed
+data-source/anyscale_services: Documentation for the `version` and `checklist` attributes now describes current behavior.
+```
