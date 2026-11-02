@@ -1121,9 +1121,9 @@ func (r *ServiceResource) Read(ctx context.Context, req resource.ReadRequest, re
 	// canary_percent is the held canary's target share, refreshed only for a canary this resource
 	// holds (ImportState adopts a held canary as this resource's). A canary held from outside
 	// Terraform is not this resource's rollout, so the prior value is kept. State without tracking
-	// predates it and cannot be told apart, so it refreshes too.
+	// predates canary_percent, so any canary it sees was held from outside.
 	if c := service.CanaryVersion; c != nil && !service.AutoRolloutEnabled && c.TargetWeight != nil &&
-		(tracking == nil || tracking.HeldVersionID == c.ID) {
+		tracking != nil && tracking.HeldVersionID == c.ID {
 		state.CanaryPercent = types.Int64Value(*c.TargetWeight)
 	}
 	// project_id must be refreshed here even though it is

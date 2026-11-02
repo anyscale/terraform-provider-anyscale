@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -151,4 +152,38 @@ func expectImportedAttr(states []*terraform.InstanceState, key, want string) err
 		return fmt.Errorf("imported %s = %q, want %q", key, got, want)
 	}
 	return nil
+}
+
+// State written by a provider without version tracking has no record of a held canary, so a
+// canary held from outside Terraform must not be adopted on its first read either: the plan
+// stays empty instead of proposing to finish someone else's rollout.
+func TestAccServiceResource_CanaryPercentLegacyStateOutOfBandCanaryPlansEmpty(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const name = "canary-legacy-oob"
+	m, server := newOutcomeMock(t, "svc_canary_legacy_oob", name, func(n int, _ map[string]any) outcomeApplyResult {
+		if n > 1 {
+			t.Errorf("unexpected apply %d", n)
+		}
+		return outcomeCreate()
+	})
+	base := outcomeConfig(server.URL, name, "main:app", "")
+	legacy := map[string]func() (tfprotov6.ProviderServer, error){
+		"anyscale": func() (tfprotov6.ProviderServer, error) {
+			s, err := ProtoV6ProviderFactories["anyscale"]()
+			return privateStrippingServer{s}, err
+		},
+	}
+
+	resource.Test(t, resource.TestCase{
+		Steps: []resource.TestStep{
+			{ProtoV6ProviderFactories: legacy, Config: base},
+			{
+				ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+				PreConfig:                func() { m.setScript(heldCanary(10)) },
+				Config:                   base,
+				PlanOnly:                 true,
+			},
+		},
+	})
 }
