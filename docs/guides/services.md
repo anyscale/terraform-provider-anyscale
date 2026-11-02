@@ -30,7 +30,8 @@ A service needs a name, a Ray Serve config, an image, and a compute config:
 
 ## Rollouts
 
-A change to `ray_serve_config`, `build_id` or `image_uri`, `compute_config_id`, `connection_ids`,
+A change to `ray_serve_config`, `build_id`, an `image_uri` that resolves to a different build,
+`compute_config_id`, `connection_ids`,
 `description`, `version_name`, `query_auth_token_enabled`, `grpc_service_names` or `env_vars`
 rolls out a new version. `tags`, `rollout_strategy`, `max_surge_percent` and `timeouts` do not.
 
@@ -54,7 +55,7 @@ running cluster, which is faster but freezes everything except `ray_serve_config
 change that would roll out a new version is rejected at plan time. Create ignores the strategy, so
 it is safe to set from the start. Changing only the strategy does not redeploy.
 
-Terraform cannot detect a failed or out-of-band `IN_PLACE` upgrade, because the version does not
+Terraform cannot detect a rolled-back or out-of-band `IN_PLACE` upgrade, because the version does not
 change. [Failed rollouts](#failed-rollouts) and [out-of-band changes](#out-of-band-changes)
 describe `ROLLOUT`.
 
@@ -63,8 +64,8 @@ describe `ROLLOUT`.
 If the new version fails, Anyscale rolls back to the previous one, which keeps serving. The apply
 fails with "Service Rollout Rolled Back", naming both versions. The change stays in the plan, so
 the next `terraform apply` tries it again. If you set `version_name`, change it before retrying:
-the failed version used the name. Fix the cause first: the error does not carry the
-reason, which is in the service's events in the Anyscale console.
+the failed version used the name. Fix the cause first: the error gives the reason when Anyscale
+reports one, and otherwise points to the service's events.
 
 If the rollout is still running when the timeout expires, or you interrupt the apply, it continues
 on Anyscale. The next refresh settles it: a success needs no further change, and a rollback plans
