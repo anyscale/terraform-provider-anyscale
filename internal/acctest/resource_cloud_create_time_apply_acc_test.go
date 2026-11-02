@@ -27,8 +27,11 @@ type mockCloudCreateTimeServer struct {
 	mu                      sync.Mutex
 	cloudID                 string
 	isAggregatedLogsEnabled bool
-	logIngestionPutCalled   bool
-	logIngestionPutValue    bool
+	// isAutoAddUser is what GET reports for auto_add_user. This server does not
+	// own that PUT; a fronting server that does sets it (setAutoAddUser).
+	isAutoAddUser         bool
+	logIngestionPutCalled bool
+	logIngestionPutValue  bool
 }
 
 func newMockCloudCreateTimeServer(t *testing.T) (*httptest.Server, *mockCloudCreateTimeServer) {
@@ -127,9 +130,15 @@ func (s *mockCloudCreateTimeServer) cloudJSONLocked() string {
 	return fmt.Sprintf(`{
 		"id": %[1]q, "name": "createtime-mock", "provider": "AWS", "region": "us-east-2",
 		"status": "ready", "state": "ACTIVE", "compute_stack": "VM",
-		"auto_add_user": false, "lineage_tracking_enabled": false,
+		"auto_add_user": %[3]t, "lineage_tracking_enabled": false,
 		"is_aggregated_logs_enabled": %[2]t
-	}`, s.cloudID, s.isAggregatedLogsEnabled)
+	}`, s.cloudID, s.isAggregatedLogsEnabled, s.isAutoAddUser)
+}
+
+func (s *mockCloudCreateTimeServer) setAutoAddUser(v bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.isAutoAddUser = v
 }
 
 func (s *mockCloudCreateTimeServer) snapshot() (putCalled, putValue bool) {
