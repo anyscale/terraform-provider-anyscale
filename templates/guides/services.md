@@ -35,9 +35,54 @@ A change to `ray_serve_config`, `build_id`, an `image_uri` that resolves to a di
 `description`, `version_name`, `query_auth_token_enabled`, `grpc_service_names` or `env_vars`
 rolls out a new version. `tags`, `rollout_strategy`, `max_surge_percent` and `timeouts` do not.
 
-A rollout always goes to 100% and the apply waits for it to reach `RUNNING`. Holding at a partial
-canary and promoting later is not supported. `max_surge_percent` only paces the rollout, and the
-backend rejects it unless Anyscale support has enabled it for your cloud.
+By default a rollout goes to 100% and the apply waits for it to reach `RUNNING`. To hold the new
+version at a partial share first, see [Canary rollouts](#canary-rollouts). `max_surge_percent`
+only paces the rollout, and the backend rejects it unless Anyscale support has enabled it for
+your cloud.
+
+## Canary rollouts
+
+`canary_percent` (0-100) holds a new version at a share of traffic so you can test it before
+committing. Unset, every rollout goes to 100%.
+
+```hcl
+resource "anyscale_service" "app" {
+  # ... the new build_id or ray_serve_config ...
+
+  # Apply 1: the new version starts and serves no traffic.
+  canary_percent = 0
+  # Apply 2: change only this line. The same version takes 25%.
+  # canary_percent = 25
+  # Apply 3: remove the attribute to finish the rollout.
+}
+```
+
+Each apply waits until the canary is healthy and carries the requested share. Traffic moves
+gradually, so this can take a minute or more.
+
+- **Finishing.** Remove `canary_percent` (the rollout completes with Anyscale's automatic ramp)
+  or set it to `100` (an immediate cutover, like `anyscale service deploy --canary-percent 100`).
+  `100` completes only where Anyscale auto-completes manual rollouts. Elsewhere the apply fails
+  after a grace period saying the rollout is held at 100%; remove the attribute to finish it.
+- **Changing the deploy while a canary is held.** Terraform rolls the held canary back, then
+  deploys the new configuration, and the plan warns about it. If you revert to the configuration
+  from before the canary, it only rolls back.
+- **`version_name`.** Changing only the name of a held canary is rejected at plan time, because
+  Anyscale ignores it.
+- **Canary fails during the apply.** Terraform rolls it back and reports "Service Rollout
+  Rolled Back", as for any [failed rollout](#failed-rollouts). A canary that fails later is not
+  acted on: the service shows `UNHEALTHY`. Change the configuration to recover.
+- **No canary in flight.** Changing `canary_percent` only records it. It applies to the next
+  deploy.
+- **Create and restart.** There is no previous version to split with, so it has no effect. The
+  value is kept for the next deploy.
+- **Not with `IN_PLACE`.** A non-null `canary_percent` is rejected at plan time.
+- **Canaries started elsewhere.** Terraform only tracks a canary it started, or one it found at
+  import. Finish or roll back one started with the CLI or console before applying; otherwise a
+  deploy change fails with a "rollout already in progress" error and other applies wait until
+  the timeout.
+- **Import.** A held canary is recovered into `canary_percent`. A configuration that omits it
+  then plans a change to null, which completes that rollout.
 
 ## Version names
 
