@@ -108,8 +108,8 @@ unless the configuration says `true`.
 `query_auth_token_enabled` (default `true`) requires requests to carry a bearer token. Changing it
 is a full rollout, and re-enabling issues a new token. Read the token with the
 [`anyscale_service_credentials`](../ephemeral-resources/service_credentials.md) ephemeral
-resource, which never writes it to state. If an organization or cloud setting blocks tokens, the
-apply fails with "Bearer Token Not Issued".
+resource, which never writes it to state. If an organization or cloud setting blocks tokens, an
+update fails with "Bearer Token Not Issued" (a create only warns).
 
 ## gRPC service names and env vars
 
