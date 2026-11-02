@@ -22,26 +22,20 @@ A change to `ray_serve_config`, `build_id`, `compute_config_id`, `connection_ids
 ## Example Usage
 
 ```terraform
-# Deploy a Ray Serve application as an Anyscale Service.
-# ray_serve_config uses native HCL syntax (no jsonencode needed) - the
-# same types.Dynamic convention anyscale_compute_config's
-# advanced_instance_config/flags use for similarly open-ended,
-# schemaless config.
-#
-# A change to ray_serve_config, build_id, or compute_config_id rolls out
-# a new version automatically and terraform apply waits for it to become
-# healthy - see this resource's own description for the full
-# rollout/destroy behavior.
+# Deploy a Ray Serve application as an Anyscale Service. A change to a
+# deploy input (ray_serve_config, the image, compute_config_id, ...)
+# rolls out a new version, and terraform apply waits for it.
 resource "anyscale_service" "example" {
   name        = "my-service"
   description = "Serves the fraud-detection model"
-  # optional - omit to use your org's default project
+  # Optional: omit to use your org's default project.
   project_id = "prj_abc123"
 
-  # from anyscale_container_image_build, or an existing build
-  build_id = "cenv_abc123"
+  # An Anyscale base image or a registry URI, resolved to a build at
+  # apply time. Use build_id instead for an image Terraform manages.
+  image_uri = "anyscale/ray:2.56.1-slim-py312-cu129"
 
-  # anyscale_compute_config's config_id (not id); sets the cloud
+  # anyscale_compute_config's config_id output, not its id.
   compute_config_id = "cpt_abc123"
 
   ray_serve_config = {
@@ -51,45 +45,23 @@ resource "anyscale_service" "example" {
         route_prefix = "/"
         import_path  = "fraud_detection.main:app"
         runtime_env = {
-          working_dir = "https://github.com/my-org/my-repo/archive/refs/heads/main.zip"
+          working_dir = "https://github.com/my-org/my-repo/archive/main.zip"
         }
-        deployments = [
-          {
-            name         = "Model"
-            num_replicas = 2
-            ray_actor_options = {
-              num_cpus = 1
-            }
-          }
-        ]
       }
     ]
   }
 
-  # Optional; defaults to ROLLOUT (new cluster, shift traffic, converge
-  # to 100%). IN_PLACE upgrades the existing cluster instead (faster),
-  # but then only ray_serve_config may change: a plan that also changes
-  # build_id, compute_config_id, or connection_ids is rejected. IN_PLACE
-  # is safe to set from the first apply - create always performs a
-  # standard deploy, since there is no version to upgrade yet.
+  # IN_PLACE upgrades the running cluster but permits changing only
+  # ray_serve_config.
   rollout_strategy = "ROLLOUT"
-  # Defaults to 60m; Anyscale sets no rollout deadline of its own.
-  timeouts {
-    create = "90m"
-    update = "90m"
-  }
 
   tags = {
-    team        = "ml-platform"
-    environment = "production"
+    team = "ml-platform"
   }
 }
 
-# Minimal service - only the required inputs. project_id, tags, and the
-# rollout knobs all take sensible defaults (project_id resolves to your
-# org's default project for the compute config's cloud; rollout_strategy
-# defaults to ROLLOUT; an omitted timeouts block defaults to 60m for
-# create/update/delete alike).
+# Minimal service running a build from anyscale_container_image_build
+# or anyscale_container_image_registry.
 resource "anyscale_service" "minimal" {
   name              = "minimal-service"
   build_id          = "cenv_def456"
@@ -98,45 +70,15 @@ resource "anyscale_service" "minimal" {
   ray_serve_config = {
     applications = [
       {
-        name        = "default"
         import_path = "main:app"
       }
     ]
   }
 }
 
-# Outputs
 output "service_base_url" {
   value       = anyscale_service.example.base_url
-  description = "The base URL clients use to reach this service"
-}
-
-output "service_state" {
-  value       = anyscale_service.example.current_state
-  description = "Lifecycle state, e.g. RUNNING, UNHEALTHY, TERMINATED"
-}
-
-# canary_version is null except while a rollout is actively in progress
-# - check for null before reading fields off it. Under this resource's
-# declarative auto-rollout, a rollout always converges to 100% and
-# terraform apply already waits for RUNNING, so this is mainly useful
-# for observing an in-progress rollout from a separate `terraform
-# plan`/refresh, not for gating on.
-output "service_is_rolling_out" {
-  value       = anyscale_service.example.canary_version != null
-  description = "Whether a canary rollout is currently in progress"
-}
-
-# primary_version.ray_serve_config is the server's own live copy (a JSON
-# string, decode with jsondecode()) - compare it against the
-# ray_serve_config you authored above if you suspect the backend has
-# normalized or enriched it; the two are never reconciled automatically
-# (see this resource's ray_serve_config description).
-output "service_live_ray_serve_config" {
-  value = jsondecode(
-    anyscale_service.example.primary_version.ray_serve_config
-  )
-  description = "Ray Serve config as last observed from the server"
+  description = "The base URL clients use to reach the service"
 }
 ```
 
@@ -145,20 +87,22 @@ output "service_live_ray_serve_config" {
 
 ### Required
 
-- `build_id` (String) The ID of the container image build (cluster environment build) this service runs, e.g. from `anyscale_container_image_build`. Changing this rolls out a new service version; it is not a replace.
 - `compute_config_id` (String) The ID of the compute config this service uses: `anyscale_compute_config`'s `config_id` output, not its `id` (the name). A value without the `cpt_` prefix is rejected before the service deploys. Determines the cloud, so there is no `cloud_id` argument. Changing it rolls out a new service version, not a replace. See `project_id` for the cloud-mismatch check.
 - `name` (String) The name of the service. Unique only within `project_id`, not organization-wide. Immutable: the backend has no rename endpoint, so changing this replaces the resource.
 - `ray_serve_config` (Dynamic) The Ray Serve application config, as a native HCL object (nested objects and mixed types allowed). Not refreshed while the service runs the version this resource deployed, because the server may normalize its stored copy (readable as `primary_version.ray_serve_config`). When the primary version is one Terraform did not deploy (an out-of-band deploy or rollback, or a rolled-back rollout), and after `terraform import`, it is set from that version's config, so the next plan shows the difference, possibly including normalization.
 
 ### Optional
 
+- `build_id` (String) The ID of the container image build this service runs, e.g. from `anyscale_container_image_build` or `anyscale_container_image_registry`. Set this or `image_uri`; with `image_uri`, it is the build that URI resolved to. Changing it rolls out a new version; it is not a replace.
 - `connection_ids` (List of String) Connection IDs to associate with the new service version. Null (the default) preserves the connections already attached; `[]` removes all of them. Never refreshed from the server, because copying the live set in would turn a later "leave connections alone" apply into "remove every connection"; read the live set from `primary_version.connection_ids`. After `terraform import`, a configured list equal to the live set is not treated as a change. Changing it rolls out a new version under `ROLLOUT` and is rejected at plan time under `IN_PLACE`.
 - `description` (String) Description of the service. Null if not set. Changing it rolls out a new version under `ROLLOUT` and is rejected at plan time under `IN_PLACE`.
 - `env_vars` (Map of String) Environment variables Anyscale sets for Ray on the service's cluster nodes. Unlike the Anyscale CLI, this does not also copy them into each application's `runtime_env`; set those in `ray_serve_config`. Not refreshed: the API does not return it. Changing it rolls out a new version; rejected at plan time under `IN_PLACE`.
 - `grpc_service_names` (List of String) gRPC service names the load balancer routes to the service: a gRPC request whose path starts with `/<name>` reaches it. Null or empty disables gRPC routing. At most one name while `query_auth_token_enabled` is `true`, two otherwise. Configure Ray Serve's side with `grpc_options` in `ray_serve_config`. Not refreshed: the API does not return it. Changing it rolls out a new version; rejected at plan time under `IN_PLACE`.
+- `image_uri` (String) Container image to run: `anyscale/ray:<tag>`, `anyscale/image/<name>:<revision>`, or a registry URI. Set this or `build_id`. Resolved to a build at apply time and recorded in `build_id`; each plan checks that the build still matches. Needs permission to create images, even for Anyscale's base images. For an image managed by `anyscale_container_image_registry`, pass its `build_id` instead: a registry URI here registers a separate copy.
 - `max_surge_percent` (Number) Rollout pacing (0-100): how much excess capacity to allocate during a deploy; the rollout still converges to 100%. Off by default: unless Anyscale support has enabled resource-constrained upgrades for your cloud, create succeeds but every later deploy fails with a 400. Null lets the backend choose. Not readable from the API; a change to it alone takes effect on the next deploy.
 - `project_id` (String) The ID of the project this service starts clusters in. If omitted, the backend resolves your organization's default project for the compute config's cloud - that resolved value is written back here, so leaving this unset does not produce a diff on later plans. Immutable: changing it replaces the resource. Its cloud must match `compute_config_id`'s cloud, and a plan-time check rejects a mismatch (naming both cloud IDs; skipped when either ID is unknown or a lookup fails). To move to a compute config on a different cloud, change `project_id` in the same apply; leaving it unset keeps the project in state, so the check fails.
 - `query_auth_token_enabled` (Boolean) Whether requests to the service must carry a bearer token. Defaults to `true`. Changing it rolls out a new version that issues a new token or clears it; read the token with the `anyscale_service_credentials` ephemeral resource. Rejected at plan time under `IN_PLACE`.
+- `registry_login_secret` (String, Sensitive) Name of the secret holding credentials for the private registry in `image_uri`. Requires `image_uri`.
 - `rollout_strategy` (String) How a deploy rolls in a new version: `ROLLOUT` (default) starts a new cluster and shifts traffic to it; `IN_PLACE` upgrades the existing cluster, which is faster but permits changing only `ray_serve_config`: any other change that would roll out a new version is rejected at plan time. The create deploy ignores it and is always standard, so `IN_PLACE` is safe to set from the start. Not readable from the API, so drift is never detected. Changing only this attribute does not redeploy the service; the new value takes effect on the next deploy.
 - `tags` (Map of String) Tags to associate with the service. The backend stores tags through a separate system from the service record itself (`/api/v2/tags/resource`, not the service GET/apply endpoints), so this resource makes its own extra calls to keep it a true round trip: read back on refresh, and - since that system's write endpoint only upserts (adds/updates) rather than replaces - any key removed from this map is explicitly deleted so it does not linger on the backend forever.
 - `timeouts` (Block, Optional) (see [below for nested schema](#nestedblock--timeouts))

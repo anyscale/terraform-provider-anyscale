@@ -340,6 +340,8 @@ func upgradeServiceResourceStateV0toV1(ctx context.Context, req resource.Upgrade
 		QueryAuthTokenEnabled: types.BoolNull(),
 		GRPCServiceNames:      types.ListNull(types.StringType),
 		EnvVars:               types.MapNull(types.StringType),
+		ImageURI:              types.StringNull(),
+		RegistryLoginSecret:   types.StringNull(),
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &newState)...)

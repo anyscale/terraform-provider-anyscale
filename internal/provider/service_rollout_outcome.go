@@ -265,9 +265,14 @@ func serviceRayServeConfigFromVersion(ctx context.Context, v *ServiceVersionResu
 
 // withPriorServiceDeployFields returns m with the deploy fields (what serviceDeployFieldsChanged
 // compares) taken from prior, so a failed deploy leaves the change visible in the next plan.
+//
+// image_uri and registry_login_secret are not deploy fields themselves (the build_id they resolve
+// to is), but they are restored with it so the plan shows the image change again.
 func withPriorServiceDeployFields(m, prior ServiceResourceModel) ServiceResourceModel {
 	m.RayServeConfig = prior.RayServeConfig
 	m.BuildID = prior.BuildID
+	m.ImageURI = prior.ImageURI
+	m.RegistryLoginSecret = prior.RegistryLoginSecret
 	m.ComputeConfigID = prior.ComputeConfigID
 	m.ConnectionIDs = prior.ConnectionIDs
 	m.Description = prior.Description
