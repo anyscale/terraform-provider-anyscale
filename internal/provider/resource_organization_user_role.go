@@ -585,30 +585,37 @@ func (r *OrganizationUserRoleResource) currentDenyRoles(ctx context.Context, use
 // reading roles off the list yields a FALSE empty rather than a missing one.
 // hydrateCollaboratorRoles performs the second read and preserves the tri-state
 // (nil = undetermined, [] = genuinely none).
-//
-// Note this overlaps resolveIdentityForEmail (below), which runs the same
-// query but returns only the two IDs. Worth collapsing onto
-// one helper that returns the record, with the ID-only variant derived from it -
-// left alone here to avoid changing a shipped resource's behavior in the same
-// change that introduces this one.
 func findOrgCollaboratorByEmail(ctx context.Context, client *Client, email string) (*OrganizationCollaboratorResult, error) {
+	c, err := listOrgCollaboratorByEmail(ctx, client, email)
+	if err != nil {
+		return nil, err
+	}
+	if c == nil {
+		return nil, fmt.Errorf("%w: no organization member found with email %s", ErrNotFound, email)
+	}
+	hydrated, err := hydrateCollaboratorRoles(ctx, client, *c)
+	if err != nil {
+		return nil, err
+	}
+	return &hydrated, nil
+}
+
+// listOrgCollaboratorByEmail returns the org member whose email matches, as the
+// org-wide list reports it, or nil when there is none. The server-side email
+// query is only a narrowing hint, not guaranteed to be an exact match, so the
+// first case-insensitive (EqualFold) match is taken client-side; email identity
+// is case-insensitive.
+func listOrgCollaboratorByEmail(ctx context.Context, client *Client, email string) (*OrganizationCollaboratorResult, error) {
 	collaborators, err := listAllOrganizationCollaborators(ctx, client, url.Values{"email": []string{email}})
 	if err != nil {
 		return nil, err
 	}
-	for _, c := range collaborators {
-		// EqualFold, not ==: the server-side email filter is a narrowing hint and is
-		// not guaranteed to be an exact match, and email identity is case-insensitive.
-		if !strings.EqualFold(c.Email, email) {
-			continue
+	for i := range collaborators {
+		if strings.EqualFold(collaborators[i].Email, email) {
+			return &collaborators[i], nil
 		}
-		hydrated, err := hydrateCollaboratorRoles(ctx, client, c)
-		if err != nil {
-			return nil, err
-		}
-		return &hydrated, nil
 	}
-	return nil, fmt.Errorf("%w: no organization member found with email %s", ErrNotFound, email)
+	return nil, nil
 }
 
 // applyCollaboratorToModel copies a read API record onto the model.
@@ -998,20 +1005,17 @@ func stringListToSlice(ctx context.Context, l types.List) ([]string, diag.Diagno
 // layer above by user_id too - see the ID-namespace note on that layer) before that
 // resource was removed; this is now its only caller.
 func resolveIdentityForEmail(ctx context.Context, client *Client, email string) (identityID, userID string, err error) {
-	collaborators, err := listAllOrganizationCollaborators(ctx, client, url.Values{"email": []string{email}})
+	c, err := listOrgCollaboratorByEmail(ctx, client, email)
 	if err != nil {
 		return "", "", err
 	}
-	for _, c := range collaborators {
-		if !strings.EqualFold(c.Email, email) {
-			continue
-		}
-		if c.UserID == nil || *c.UserID == "" {
-			return "", "", fmt.Errorf("organization member %s has no user_id (some identity types do not have one) and cannot be granted a role through this resource", email)
-		}
-		return c.ID, *c.UserID, nil
+	if c == nil {
+		return "", "", fmt.Errorf("no organization member found with email %s", email)
 	}
-	return "", "", fmt.Errorf("no organization member found with email %s", email)
+	if c.UserID == nil || *c.UserID == "" {
+		return "", "", fmt.Errorf("organization member %s has no user_id (some identity types do not have one) and cannot be granted a role through this resource", email)
+	}
+	return c.ID, *c.UserID, nil
 }
 
 // sameStringSet reports whether the known, non-null list holds exactly the

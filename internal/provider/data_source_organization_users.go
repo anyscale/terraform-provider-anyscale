@@ -43,8 +43,8 @@ type OrganizationUsersDataSourceModel struct {
 type OrganizationUserModel struct {
 	ID              types.String `tfsdk:"id"`
 	UserID          types.String `tfsdk:"user_id"`
-	Name            types.String `tfsdk:"name"`
 	Email           types.String `tfsdk:"email"`
+	Name            types.String `tfsdk:"name"`
 	PermissionLevel types.String `tfsdk:"permission_level"`
 	CreatedAt       types.String `tfsdk:"created_at"`
 
@@ -170,22 +170,13 @@ func (d *OrganizationUsersDataSource) Read(ctx context.Context, req datasource.R
 			return
 		}
 
-		additionalRoles, diags := additionalRolesToList(ctx, user.AdditionalRoles)
+		model, diags := organizationCollaboratorToUserModel(ctx, user)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
-
-		users[i] = OrganizationUserModel{
-			ID:              types.StringValue(user.ID),
-			UserID:          types.StringPointerValue(user.UserID),
-			Name:            types.StringPointerValue(user.Name),
-			Email:           types.StringValue(user.Email),
-			PermissionLevel: types.StringValue(user.PermissionLevel),
-			CreatedAt:       types.StringValue(user.CreatedAt),
-			BaseRole:        types.StringValue(user.BaseRole),
-			AdditionalRoles: additionalRoles,
-		}
+		// Same fields and tags as the singular data source's model.
+		users[i] = OrganizationUserModel(*model)
 	}
 
 	usersList, diags := types.ListValueFrom(ctx, types.ObjectType{
