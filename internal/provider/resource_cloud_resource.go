@@ -1165,7 +1165,7 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 		if errors.Is(err, ErrNotFound) {
 			return fmt.Errorf("%w: cloud not found", ErrNotFound)
 		}
-		return fmt.Errorf("failed to read cloud resources: %w", err)
+		return err
 	}
 
 	foundResource := findCloudResourceByName(results, resourceName)
