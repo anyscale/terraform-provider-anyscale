@@ -64,8 +64,10 @@ type CloudSummaryModel struct {
 }
 
 // cloudSummaryFromResult maps one cloud from the API to the attributes that
-// anyscale_cloud and anyscale_clouds share, so the two data sources report
-// identical values for the same cloud.
+// anyscale_cloud and anyscale_clouds share, so both map the same API values the
+// same way. Their inputs differ: anyscale_cloud passes the single-cloud GET and
+// anyscale_clouds the list, and the two endpoints compute is_default
+// differently, so the data sources can still disagree on is_default.
 func cloudSummaryFromResult(ctx context.Context, cloud CloudResult) (CloudSummaryModel, error) {
 	azList, azDiags := types.ListValueFrom(ctx, types.StringType, cloud.AvailabilityZones)
 	if azDiags.HasError() {
