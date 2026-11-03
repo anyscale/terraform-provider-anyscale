@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -128,4 +129,32 @@ func WarnIfMultipleMatches(ctx context.Context, resourceType string, name string
 			"selected":                           selectedID,
 		})
 	}
+}
+
+// isGoneOrForbidden reports whether err means a resource's own lookup or delete found it gone: a
+// 404 (ErrNotFound) or a 403. The API answers 403 "Permission denied", not 404, for a deleted or
+// nonexistent cloud, cloud resource, project, or service when the caller cannot see it, so a 403
+// on those endpoints is the usual shape of an out-of-band deletion.
+//
+// Use it only in a managed resource's Read or Delete for those resource types, and pair every
+// 403 it accepts with addForbiddenTreatedAsDeletedWarning: a 403 is also what a token that lost
+// access receives, and the warning is the only signal the practitioner gets in that case. Data
+// sources and other resources keep a 403 as an error.
+func isGoneOrForbidden(err error) bool {
+	return errors.Is(err, ErrNotFound) || isHTTPStatus(err, http.StatusForbidden)
+}
+
+// addForbiddenTreatedAsDeletedWarning adds the warning for a 403 that isGoneOrForbidden accepted
+// as gone. It does nothing for any other error, so a caller can pass every gone error through it
+// and a 404 stays silent as before. kind is the resource's display noun ("Cloud", "Project").
+func addForbiddenTreatedAsDeletedWarning(diags *diag.Diagnostics, kind, id string, err error) {
+	if !isHTTPStatus(err, http.StatusForbidden) {
+		return
+	}
+	diags.AddWarning(
+		kind+" Treated As Deleted",
+		fmt.Sprintf("%s %s returned HTTP 403; it is treated as deleted and removed from state. "+
+			"If the token lost access instead, the next apply would create a duplicate; restore access, or run terraform state rm.",
+			kind, id),
+	)
 }

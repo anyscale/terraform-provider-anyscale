@@ -1132,8 +1132,9 @@ func (r *CloudResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	tflog.Info(ctx, "Reading Anyscale Cloud", map[string]any{"id": cloudID})
 
 	if err := r.readCloudState(ctx, cloudID, &state, &resp.Diagnostics); err != nil {
-		if errors.Is(err, ErrNotFound) {
+		if isGoneOrForbidden(err) {
 			tflog.Warn(ctx, "Cloud not found, removing from state", map[string]any{"id": cloudID})
+			addForbiddenTreatedAsDeletedWarning(&resp.Diagnostics, "Cloud", cloudID, err)
 			resp.State.RemoveResource(ctx)
 			return
 		}
@@ -1418,6 +1419,11 @@ func (r *CloudResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 
 	_, err := DoRequestRaw(ctx, r.client, "DELETE", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil,
 		http.StatusOK, http.StatusNoContent, http.StatusNotFound)
+	if isHTTPStatus(err, http.StatusForbidden) {
+		tflog.Warn(ctx, "Cloud delete returned 403, treating as already deleted", map[string]any{"id": cloudID})
+		addForbiddenTreatedAsDeletedWarning(&resp.Diagnostics, "Cloud", cloudID, err)
+		return
+	}
 	if err != nil {
 		tflog.Error(ctx, "Failed to delete cloud", map[string]any{"error": err.Error()})
 		AddAPIError(&resp.Diagnostics, "delete cloud", err)
@@ -1846,6 +1852,10 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 		return err
 	}
 
+	if resp.StatusCode == http.StatusForbidden {
+		// Typed, so Read can tell this status apart: the API answers 403 for a deleted cloud.
+		return fmt.Errorf("failed to read cloud: %w", &UnexpectedStatusError{StatusCode: resp.StatusCode, Body: string(body)})
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to read cloud: %s - %s", resp.Status, string(body))
 	}

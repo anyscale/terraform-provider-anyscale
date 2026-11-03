@@ -911,8 +911,9 @@ func (r *CloudResourceResource) Read(ctx context.Context, req resource.ReadReque
 	tflog.Info(ctx, "Reading Anyscale Cloud Resource", map[string]any{"cloud_id": cloudID, "name": resourceName})
 
 	if err := r.readCloudResource(ctx, cloudID, resourceName, &state, &resp.Diagnostics); err != nil {
-		if errors.Is(err, ErrNotFound) {
+		if isGoneOrForbidden(err) {
 			tflog.Warn(ctx, "Cloud resource not found, removing from state", map[string]any{"cloud_id": cloudID, "name": resourceName})
+			addForbiddenTreatedAsDeletedWarning(&resp.Diagnostics, "Cloud Resource", state.ID.ValueString(), err)
 			resp.State.RemoveResource(ctx)
 			return
 		}
@@ -1034,6 +1035,11 @@ func (r *CloudResourceResource) Delete(ctx context.Context, req resource.DeleteR
 		r.confirmCloudResourceGoneAfter404(ctx, cloudID, resourceName, err, &resp.Diagnostics)
 		return
 	}
+	if isHTTPStatus(err, http.StatusForbidden) {
+		tflog.Warn(ctx, "Cloud resource delete returned 403, treating as already deleted", map[string]any{"cloud_id": cloudID, "name": resourceName})
+		addForbiddenTreatedAsDeletedWarning(&resp.Diagnostics, "Cloud Resource", state.ID.ValueString(), err)
+		return
+	}
 	if err != nil {
 		// The backend refuses to remove the primary resource with a 400. That
 		// resource's lifecycle belongs to the cloud, so this is the same no-op
@@ -1061,8 +1067,9 @@ func (r *CloudResourceResource) Delete(ctx context.Context, req resource.DeleteR
 // manage or report it.
 func (r *CloudResourceResource) confirmCloudResourceGoneAfter404(ctx context.Context, cloudID, resourceName string, deleteErr error, diags *diag.Diagnostics) {
 	results, err := listCloudResources(ctx, r.client, cloudID)
-	if errors.Is(err, ErrNotFound) {
+	if isGoneOrForbidden(err) {
 		tflog.Info(ctx, "Cloud no longer exists; treating cloud resource as deleted", map[string]any{"cloud_id": cloudID, "name": resourceName})
+		addForbiddenTreatedAsDeletedWarning(diags, "Cloud Resource", cloudID+":"+resourceName, err)
 		return
 	}
 	if err != nil {
