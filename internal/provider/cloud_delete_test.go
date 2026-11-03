@@ -315,13 +315,17 @@ func TestCloudResourceDelete_FailedLoadBalancerCheckSkipsDelete(t *testing.T) {
 // One transient failure mid-poll does not fail the destroy: the cloud is
 // already DELETING, and the next check succeeds.
 func TestCloudResourceDelete_TransientLoadBalancerCheckErrorIsRetried(t *testing.T) {
-	m := &cloudDeleteMock{resources: awsVMResource, lbPending: 1, lbFailOnce: http.StatusServiceUnavailable}
-	if diags := runCloudDelete(t, m, ""); diags.HasError() {
-		t.Fatalf("a single 503 must not fail the destroy, got: %v", diags)
-	}
-	calls := m.teardownCalls()
-	if last := calls[len(calls)-1]; last != "DELETE /api/v2/clouds/cld_del" {
-		t.Errorf("last call = %q, want the DELETE; calls: %v", last, calls)
+	for _, status := range []int{http.StatusServiceUnavailable, http.StatusTooManyRequests} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			m := &cloudDeleteMock{resources: awsVMResource, lbPending: 1, lbFailOnce: status}
+			if diags := runCloudDelete(t, m, ""); diags.HasError() {
+				t.Fatalf("a single %d must not fail the destroy, got: %v", status, diags)
+			}
+			calls := m.teardownCalls()
+			if last := calls[len(calls)-1]; last != "DELETE /api/v2/clouds/cld_del" {
+				t.Errorf("last call = %q, want the DELETE; calls: %v", last, calls)
+			}
+		})
 	}
 }
 
