@@ -14,9 +14,10 @@
 # https://console.anyscale.com/ under Organization Settings.
 anyscale_org_id = "org_abc123xyz"
 
-# Free-form string used as the IAM trust policy external ID -- this example derives two distinct
-# values from it internally (one per Anyscale cloud), so you only need to set it once here.
-anyscale_external_id = "my-external-id-12345"
+# IAM trust policy external ID. It MUST start with your Organization ID (the AWS IAM module
+# rejects anything else at plan time). This example derives two distinct values from it
+# internally (one per Anyscale cloud), so you only need to set it once here.
+anyscale_external_id = "org_abc123xyz-kitchen-sink"
 
 # Comma-delimited IPv4 CIDR ranges allowed to reach the VM legs (opens 443/https and 22/ssh).
 # Replace with your own IP(s)/range(s) -- avoid "0.0.0.0/0" outside of throwaway testing.
@@ -50,7 +51,12 @@ customer_ingress_cidr_ranges = "203.0.113.0/24,198.51.100.42/32"
 
 # --- Organization: sends a REAL email if set -----------------------------------------------------
 # invite_email = "you+kitchen-sink@example.com"
-# new_member_base_role = "collaborator" # only used once you uncomment the organization_user_role block
 
-# --- Service data sources: requires an already-running service to be meaningful ------------------
-# existing_service_name = "my-service"
+# --- Organization: off by default; see README.md for what each needs -----------------------------
+# org_user_email           = "member@example.com"
+# enable_user_groups       = true
+# user_group_member_emails = ["member@example.com"]
+# enable_role_binding      = true # converted (role-binding) organizations only
+
+# --- System Cluster: destroy does not stop it; see README.md ---------------------------------------
+# enable_system_cluster = true

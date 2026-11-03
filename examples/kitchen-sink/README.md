@@ -1,10 +1,8 @@
 # Kitchen Sink Example
 
 A representative subset of this provider's resources and data sources, wired together into one
-comprehensive, multi-cloud configuration (it does not declare `anyscale_service`,
-`anyscale_scheduler_config`, `anyscale_system_cluster`, `anyscale_cloud_access`,
-`anyscale_cloud_iam_mapping`, `anyscale_organization_user_role`, or
-`anyscale_organization_default_cloud`). This absorbs what used to be a separate `multi-resource-cloud-basic`
+comprehensive, multi-cloud configuration. [What it covers and what it leaves out](#what-is-included-gated-and-excluded)
+is listed below. This absorbs what used to be a separate `multi-resource-cloud-basic`
 example (multiple resource deployments on one cloud) as one piece of a larger build. Use the other, smaller
 examples in this directory for a focused look at any one piece.
 
@@ -24,7 +22,8 @@ one set of infrastructure; nothing here provisions a second VPC, bucket, or clus
 IAM roles are the one exception: Cloud A's VM leg and Cloud B each get their own IAM role module
 call rather than sharing one. Not a missed optimization — the backend enforces a real unique index
 on a cloud's `external_id`, scoped per org, so two clouds can't present the identical value. Both role sets
-derive their `external_id` from the same `var.anyscale_external_id` you set once, suffixed `-a`
+derive their `external_id` from the same `var.anyscale_external_id` you set once (it must start with your
+Organization ID, e.g. `org_abc123xyz-kitchen-sink`; the AWS IAM module rejects anything else at plan time), suffixed `-a`
 and `-b` internally, so you still only supply one value. These are cheap, fast IAM resources
 (seconds, not the VPC/EKS/S3 layer's minutes), so splitting them doesn't undercut "one shared VPC."
 Cloud A's EKS leg is unaffected either way — `kubernetes_config` has no `external_id` field at all;
@@ -54,7 +53,7 @@ no "adopt" on a collision).
 Every one of these lists `worker_nodes` explicitly — omitting it launches zero workers rather than
 falling back to a sane default; see the [Compute Config guide](../../docs/guides/compute-config.md).
 
-**Container images, projects, and org resources (4 applied automatically, 2 shown but not applied by default):**
+**Container images, projects, and org resources:**
 
 | Resource | What it does here |
 | --- | --- |
@@ -63,17 +62,16 @@ falling back to a sane default; see the [Compute Config guide](../../docs/guides
 | `anyscale_project.a` | A project scoped to Cloud A |
 | `anyscale_project.b` | A project scoped to Cloud B |
 | `anyscale_organization_invitation` | **Opt-in.** Zero instances unless you set `var.invite_email`; see below |
-| `anyscale_organization_user` | Shown, not applied — see the note below |
+| `anyscale_organization_user` | **Opt-in.** Zero instances unless you set `var.org_user_email`; see below |
 
-`anyscale_organization_user` manages an *existing* org member's membership (not their role -
-that's `anyscale_organization_user_role`), so it can't be part of a one-shot `apply` the way
-everything above is: there's no member for it to adopt until the invitation above is accepted.
-It's included, commented out, in `organization.tf`; declaring it with the member's email adopts
-them directly once they've accepted, no import required. See
+`anyscale_organization_user` manages a member's membership (not their role -
+that's `anyscale_organization_user_role`). Set `org_user_email` to an existing member to adopt them;
+an address that is not a member yet is sent a real invitation. Destroy never removes a member
+(it cancels a still-pending invitation). See
 [`organization_user_workflow`](../resources/organization_user_workflow/main.tf) for the full
 invite -> wait -> adopt -> manage lifecycle.
 
-**Data sources (all except `anyscale_cloud_iam_mapping`, `anyscale_scheduler_config`, and `anyscale_system_cluster`):** `anyscale_cloud`, `anyscale_clouds`,
+**Data sources:** `anyscale_cloud`, `anyscale_clouds`,
 `anyscale_compute_config`, `anyscale_container_image`, `anyscale_container_images`,
 `anyscale_project`, `anyscale_projects`, `anyscale_user`, `anyscale_organization`,
 `anyscale_organization_user`, `anyscale_organization_users`, `anyscale_services`,
@@ -87,16 +85,35 @@ auto-created `default` project from the backend in addition to `project.a`. Not 
 something this data source got wrong; if you're counting projects per cloud elsewhere, expect that
 implicit extra one.
 
-`anyscale_services` is unconditional and filters by `anyscale_project.a`'s id — safe even with zero results.
-`anyscale_service` (singular) is **opt-in**: it needs an id or name to look up, and this example
-deliberately doesn't declare a live `anyscale_service` resource to satisfy that (see
-[`examples/resources/anyscale_service`](../resources/anyscale_service/) for a worked resource
-example), so a fresh apply sets it to zero instances unless you set `var.existing_service_name` to
-a real, pre-existing service in your org.
+`anyscale_services` (filtered to `anyscale_project.b`) and `anyscale_service` read back the
+`anyscale_service.hello` this example creates, so both always apply.
 
-Scheduler resources/data sources are not included. The earlier machine-pool-backed surface was
-never registered in a released provider and has been removed; the replacement built on the
-Anyscale Scheduler API is not implemented yet.
+## What is included, gated, and excluded
+
+**Included (applied by default, on Cloud B):**
+
+- `anyscale_runtime_env_package` packages `./app`, and `anyscale_service` runs it as a Ray Serve
+  hello-world on the built image. Apply waits for `RUNNING`; destroy terminates the service.
+- `anyscale_cloud_iam_mapping` maps jobs and services to Cloud B's own node role (a no-op at runtime).
+- Data sources `anyscale_cloud_iam_mapping` and `anyscale_role` (`project_viewer`); `anyscale_system_cluster` is gated (below).
+
+**Gated (zero instances unless you set the variable):**
+
+| Variable | Enables | Needs |
+| --- | --- | --- |
+| `enable_system_cluster` | `anyscale_system_cluster` (Cloud B) and its data source | Nothing extra, but destroying it only removes it from state and deleting the cloud leaves its instance running: stop or terminate it yourself first |
+| `org_user_email` | `anyscale_organization_user` and its data source | An existing member's email (a non-member gets a real invitation) |
+| `enable_user_groups` | `anyscale_user_group`, `anyscale_user_group_members`, and the `anyscale_user_group` / `anyscale_user_groups` data sources | User groups enabled for your org (org-wide objects behind a feature flag) |
+| `user_group_member_emails` | Group membership | Each email must be an accepted org member |
+| `enable_role_binding` | `anyscale_role_binding` | `enable_user_groups`, and an org on role bindings (converted); legacy orgs answer `409` |
+
+**Excluded (never declared here):**
+
+- `anyscale_scheduler_config` - an org-wide singleton with no delete; destroy cannot undo it.
+- `anyscale_organization_default_cloud` - an org-wide setting the API cannot clear.
+- `anyscale_cloud_access`, `anyscale_organization_user_role`, and `anyscale_cloud.auto_add_user` - the
+  deprecated legacy access model.
+- Ephemeral `anyscale_service_credentials` - a root module has nothing to consume it; see its own example.
 
 ## Before you apply
 
@@ -111,14 +128,20 @@ Anyscale Scheduler API is not implemented yet.
    `terraform apply`/`terraform destroy`: this repo's sweeper only reaches Anyscale-side
    resources, never your AWS account, so an abandoned apply leaves a real VPC and EKS cluster
    billing. Track your own state and tear it down when you're done.
-2. **This creates two real clouds, two projects, three compute configs, and two container images**
-   in your Anyscale org, plus the AWS infrastructure above.
+2. **This creates two real clouds, two projects, three compute configs, two container images, and a
+   running Ray Serve service** in your Anyscale org, plus the AWS infrastructure above. Deleting a
+   cloud does not stop its running clusters: Cloud B's System Cluster, if you enabled it (and any service cluster that has
+   not finished terminating) keeps its EC2 instances, which pin the VPC's internet gateway, so
+   `terraform destroy` can hang or leak the VPC. A service's load balancer
+   (ALB, target group and ACM certificate, named after the cloud ID) also survives the cloud's deletion and
+   blocks the VPC. After destroying, terminate leftover instances in the VPC, delete the ALB, then its target
+   group, then the certificate (each is in use until the one before is gone), and re-run destroy.
 3. **The real invitation email is opt-in, not automatic.** Leave `invite_email` unset (the
    default) and `anyscale_organization_invitation` applies zero instances. Set it to an address you
    own or control if you want to exercise that resource — it will receive a real invitation.
-4. **The existing-service lookup is opt-in, not automatic.** Leave `existing_service_name` unset
-   (the default) and the singular `anyscale_service` data source applies zero instances. Set it to
-   the name of a real service already running in your org if you want to exercise that lookup.
+4. **Org-wide pieces are opt-in.** `org_user_email`, `enable_user_groups`, `user_group_member_emails`
+   and `enable_role_binding` (see [the gated table](#what-is-included-gated-and-excluded)) default to
+   off. User groups and role bindings are org-wide objects; set them only in an org you can change.
 5. **Re-applying against the same org**: every name is derived from `var.name_prefix` (default
    `kitchen-sink`) and is stable across reapplies — nothing timestamp-based. Either
    `terraform destroy` between runs or change `name_prefix` to avoid the `409` collision the

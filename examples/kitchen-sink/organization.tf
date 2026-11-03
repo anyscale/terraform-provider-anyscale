@@ -1,46 +1,67 @@
-# --- anyscale_organization_invitation (gated) --------------------------------------------------
-# Gated behind var.invite_email, which defaults to "" -- count = 0 means this resource simply
-# doesn't exist until you set it, so a heavy multi-cloud apply never has the side effect of emailing
-# someone by accident. Set invite_email to a real address you own or control to include it.
-#
-# There's no role argument here: every invitation grants default collaborator access on
-# acceptance, full stop -- the invitations API has no way to set a different role up front.
-# var.new_member_base_role is used below instead, once the invite is accepted, via the
-# anyscale_organization_user_role resource -- the only place an organization role can actually be
-# chosen. See that resource's own guide page (RBAC) for why this is a separate resource from
-# anyscale_organization_user below, rather than one combined resource.
+# Organization-wide resources, all off by default (count = 0) and enabled by a variable: each
+# sends real email, needs a real member, or needs an organization feature. See README.md.
+
+# --- anyscale_organization_invitation (gated by invite_email) -----------------------------------
+# Sends a real invitation email. Every invitation grants default collaborator access on
+# acceptance; the invitations API cannot set another role up front.
 resource "anyscale_organization_invitation" "new_member" {
   count = var.invite_email != "" ? 1 : 0
 
   email = var.invite_email
 }
 
-# --- anyscale_organization_user (commented out; needs an accepted member) ------------
-# This resource manages only whether new_member is a member of the organization at all -- it has
-# no other writable attributes. It's included here, commented out, so the kitchen sink still
-# shows every resource type this provider registers; uncomment once new_member has actually
-# accepted the invitation above (which can take anywhere from seconds to days, and happens
-# outside Terraform). Keyed by email directly, same as anyscale_organization_user_role below --
-# no identity_id or user_id lookup needed, though importing instead of declaring it works
-# identically:
-#
-# See examples/resources/organization_user_workflow/main.tf for the full invite -> wait ->
-# manage lifecycle this resource is meant to slot into.
-#
-# resource "anyscale_organization_user" "new_member" {
-#   email = var.invite_email
-# }
+# --- anyscale_organization_user (gated by org_user_email) ---------------------------------------
+# Manages membership only, keyed by email. Declaring an existing member adopts them with no API
+# call, and destroying it removes nobody. An email that is not a member yet gets a real
+# invitation, which destroy cancels if it is still pending.
+resource "anyscale_organization_user" "member" {
+  count = var.org_user_email != "" ? 1 : 0
 
-# --- anyscale_organization_user_role (commented out; needs an accepted member) --------
-# Sets new_member's actual organization role, same email key as anyscale_organization_user
-# above -- but it still needs a real, accepted member to point at, so the same "outside
-# Terraform" wait applies before uncommenting:
-#
-# resource "anyscale_organization_user_role" "new_member" {
-#   email     = var.invite_email
-#   base_role = var.new_member_base_role
-#
-#   # deny_roles is omitted here, which leaves any existing container-image restrictions
-#   # untouched and keeps this resource on the ungated endpoint that works in every
-#   # organization. Set it -- including to [] -- only when you want Terraform to own that set.
-# }
+  email = var.org_user_email
+}
+
+data "anyscale_organization_user" "member" {
+  count = var.org_user_email != "" ? 1 : 0
+
+  email = anyscale_organization_user.member[0].email
+}
+
+# --- anyscale_user_group + anyscale_user_group_members (gated by enable_user_groups) ------------
+# Beta, and enabled per organization. The members list is authoritative: anyone in the group who
+# is not listed is removed. Each email must belong to an accepted member.
+resource "anyscale_user_group" "team" {
+  count = var.enable_user_groups ? 1 : 0
+
+  name = "${var.name_prefix}-team"
+}
+
+resource "anyscale_user_group_members" "team" {
+  count = var.enable_user_groups ? 1 : 0
+
+  user_group_id = anyscale_user_group.team[0].id
+  members       = var.user_group_member_emails
+}
+
+data "anyscale_user_group" "team" {
+  count = var.enable_user_groups ? 1 : 0
+
+  # Read after the members are written, so the data source shows them.
+  id = anyscale_user_group_members.team[0].user_group_id
+}
+
+data "anyscale_user_groups" "all" {
+  count = var.enable_user_groups ? 1 : 0
+
+  depends_on = [anyscale_user_group.team]
+}
+
+# --- anyscale_role_binding (gated by enable_role_binding) ---------------------------------------
+# Beta. Only organizations converted to role bindings accept it; others answer 409. Gives every
+# member of the group the built-in project_viewer role on Cloud B's project.
+resource "anyscale_role_binding" "team_project_viewer" {
+  count = var.enable_role_binding ? 1 : 0
+
+  user_group_id = anyscale_user_group.team[0].id
+  role_id       = data.anyscale_role.project_viewer[0].id
+  project_id    = anyscale_project.b.id
+}

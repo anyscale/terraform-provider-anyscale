@@ -72,20 +72,36 @@ data "anyscale_organization_user" "self" {
 data "anyscale_organization_users" "all" {}
 
 # --- anyscale_services + anyscale_service ---------------------------------------------------------
-# anyscale_services (plural) runs unconditionally: this example deliberately does not declare an
-# anyscale_service resource (deploying one needs a real container image build and a running Ray
-# Serve app, more moving parts than this already-large example needs), so an empty result is
-# expected and still a meaningful, assertable state -- it needs no external fixture to be safe to
-# include by default. See examples/resources/anyscale_service for a worked resource example.
-data "anyscale_services" "in_project_a" {
-  project_id = anyscale_project.a.id
+data "anyscale_services" "in_project_b" {
+  project_id = anyscale_project.b.id
+
+  depends_on = [anyscale_service.hello]
 }
 
-# anyscale_service (singular) is gated behind var.existing_service_name for the opposite reason:
-# looking one up by name 404s unless a real, already-running service happens to exist with that
-# name, which this example has no way to create. Skipped (count = 0) until you point it at one.
-data "anyscale_service" "existing" {
-  count = var.existing_service_name != "" ? 1 : 0
+# By id: a name lookup matches by substring.
+data "anyscale_service" "hello" {
+  id = anyscale_service.hello.id
+}
 
-  name = var.existing_service_name
+# --- anyscale_system_cluster (gated by enable_system_cluster) ------------------------------------
+data "anyscale_system_cluster" "b" {
+  count = var.enable_system_cluster ? 1 : 0
+
+  cloud_id = anyscale_system_cluster.b[0].cloud_id
+}
+
+# --- anyscale_cloud_iam_mapping ------------------------------------------------------------------
+# Reads back the mapping cloud_iam_mapping.tf wrote. cloud_iam_mapping.b's cloud_id gives the
+# read a dependency edge onto the write.
+data "anyscale_cloud_iam_mapping" "b" {
+  cloud_id = anyscale_cloud_iam_mapping.b.cloud_id
+}
+
+# --- anyscale_role (gated by enable_role_binding) ------------------------------------------------
+# A built-in role by exact name, for organization.tf's role binding. Gated with it because the
+# roles API only answers in organizations with role bindings enabled.
+data "anyscale_role" "project_viewer" {
+  count = var.enable_role_binding ? 1 : 0
+
+  name = "project_viewer"
 }

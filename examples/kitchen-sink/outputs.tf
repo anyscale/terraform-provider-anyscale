@@ -120,12 +120,52 @@ output "ds_organization_user_count" {
   description = "Total number of users in the organization."
 }
 
-output "ds_services_in_project_a_count" {
-  value       = length(data.anyscale_services.in_project_a.services)
-  description = "Number of services in project A. Expected to be 0 unless you've separately deployed a Ray Serve service there -- this example deliberately doesn't declare an anyscale_service resource (see examples/resources/anyscale_service for one)."
+output "service_base_url" {
+  value       = anyscale_service.hello.base_url
+  description = "Base URL of the hello-world service. Requests need its query auth token (see the service's docs)."
 }
 
-output "ds_existing_service_state" {
-  value       = length(data.anyscale_service.existing) > 0 ? data.anyscale_service.existing[0].current_state : null
-  description = "Current lifecycle state of the service named by existing_service_name. Null when that variable is left at its default (the lookup is skipped)."
+output "service_state" {
+  value       = data.anyscale_service.hello.current_state
+  description = "The service's current state, read back by the anyscale_service data source."
+}
+
+output "ds_services_in_project_b_count" {
+  value       = length(data.anyscale_services.in_project_b.services)
+  description = "Number of services in project B: at least the hello-world service."
+}
+
+output "package_uri" {
+  value       = anyscale_runtime_env_package.app.uri
+  description = "Storage URI of the uploaded ./app package, the service's working_dir."
+}
+
+output "system_cluster_state" {
+  value       = var.enable_system_cluster ? data.anyscale_system_cluster.b[0].state : null
+  description = "Cloud B's System Cluster state. Null unless enable_system_cluster is set."
+}
+
+output "iam_mapping_rules" {
+  value       = data.anyscale_cloud_iam_mapping.b.rules
+  description = "Cloud B's IAM mapping rules, read back by the data source."
+}
+
+output "project_viewer_role_id" {
+  value       = var.enable_role_binding ? data.anyscale_role.project_viewer[0].id : null
+  description = "ID of the built-in project_viewer role. Null unless enable_role_binding is set."
+}
+
+output "user_group_member_count" {
+  value       = var.enable_user_groups ? length(data.anyscale_user_group.team[0].members) : null
+  description = "Members of the kitchen-sink user group. Null unless enable_user_groups is set."
+}
+
+output "user_group_count" {
+  value       = var.enable_user_groups ? length(data.anyscale_user_groups.all[0].groups) : null
+  description = "User groups in the organization. Null unless enable_user_groups is set."
+}
+
+output "org_user_base_role" {
+  value       = var.org_user_email != "" ? data.anyscale_organization_user.member[0].base_role : null
+  description = "Base role of the org_user_email member. Null unless org_user_email is set."
 }
