@@ -121,8 +121,8 @@ away from a 404.
   image into Anyscale. See the [Container Images guide](./container-images.md).
 - **Projects and org resources** - one project per cloud, plus
   `anyscale_organization_user`, user groups and role bindings, each off by default behind a variable
-  (`org_user_email`, `enable_user_groups`, `enable_role_binding`); `anyscale_organization_user` manages an
-  *existing* member, so see
+  (`org_user_email`, `enable_user_groups`, `enable_role_binding`); `anyscale_organization_user` adopts an
+  existing member (a new address gets a real invitation); see
   [`organization_user_workflow`](https://github.com/anyscale/terraform-provider-anyscale/blob/main/examples/resources/organization_user_workflow/main.tf)
   for the invite -> adopt flow.
 - **Most data sources**, in one file, including the two zero-argument connection-level singletons,

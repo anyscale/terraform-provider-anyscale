@@ -64,9 +64,10 @@ falling back to a sane default; see the [Compute Config guide](../../docs/guides
 | `anyscale_organization_invitation` | **Opt-in.** Zero instances unless you set `var.invite_email`; see below |
 | `anyscale_organization_user` | **Opt-in.** Zero instances unless you set `var.org_user_email`; see below |
 
-`anyscale_organization_user` manages an *existing* org member's membership (not their role -
-that's `anyscale_organization_user_role`), so it only applies once you set `org_user_email` to a member
-who has already accepted an invitation; destroy never removes the member. See
+`anyscale_organization_user` manages a member's membership (not their role -
+that's `anyscale_organization_user_role`). Set `org_user_email` to an existing member to adopt them;
+an address that is not a member yet is sent a real invitation. Destroy never removes a member
+(it cancels a still-pending invitation). See
 [`organization_user_workflow`](../resources/organization_user_workflow/main.tf) for the full
 invite -> wait -> adopt -> manage lifecycle.
 
@@ -101,7 +102,7 @@ implicit extra one.
 
 | Variable | Enables | Needs |
 | --- | --- | --- |
-| `org_user_email` | `anyscale_organization_user` and its data source | An existing, accepted org member's email |
+| `org_user_email` | `anyscale_organization_user` and its data source | An existing member's email (a non-member gets a real invitation) |
 | `enable_user_groups` | `anyscale_user_group`, `anyscale_user_group_members`, and the `anyscale_user_group` / `anyscale_user_groups` data sources | User groups enabled for your org (org-wide objects behind a feature flag) |
 | `user_group_member_emails` | Group membership | Each email must be an accepted org member |
 | `enable_role_binding` | `anyscale_role_binding` | `enable_user_groups`, and an org on role bindings (converted); legacy orgs answer `409` |
