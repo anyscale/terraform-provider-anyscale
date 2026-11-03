@@ -118,11 +118,11 @@ The steps, each one `terraform apply`:
    Changing the inputs or `version_name` while a canary is held rolls it back or is rejected.
 4. Apply with no value to finish.
 
-To abort, revert the inputs and apply: the held canary is rolled back, and nothing is
-redeployed if the configuration matches the one from before the canary. A canary that fails during an apply is rolled back by Terraform and the apply
-fails with "Service Rollout Rolled Back", which fails the job. A canary that fails afterwards
-is not acted on: check `canary_version.current_state` for `UNHEALTHY` in your monitoring step
-and abort as above.
+To abort, revert the inputs and apply: the held canary is rolled back, and nothing is redeployed
+if the configuration matches the one from before the canary. A canary that fails during an apply
+is rolled back by Terraform and the apply fails with "Service Rollout Rolled Back", which fails
+the job. A canary that fails afterwards is not acted on: check `canary_version.current_state` for
+`UNHEALTHY` in your monitoring step and abort as above.
 
 A GitHub Actions workflow that triggers it. The configuration lives in the repository root with
 a remote backend (a runner has no state of its own); add the `ANYSCALE_CLI_TOKEN` secret and your
