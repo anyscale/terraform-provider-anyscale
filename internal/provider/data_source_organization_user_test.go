@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"strings"
 	"testing"
 )
 
@@ -61,13 +59,14 @@ func TestFindUserByID_PagesBeyondFirstPage(t *testing.T) {
 // filter is still sent server-side (as a narrowing hint) while pagination is
 // applied on top of it, and that a case-insensitive match past page 1 is found.
 func TestFindUserByEmail_PagesBeyondFirstPageAndSendsFilter(t *testing.T) {
-	var sawEmailParam string
+	var sawEmailParam, sawTypeParam string
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
 		if e := r.URL.Query().Get("email"); e != "" {
 			sawEmailParam = e
 		}
+		sawTypeParam = r.URL.Query().Get(orgCollaboratorTypeParam)
 		w.WriteHeader(http.StatusOK)
 
 		if requestCount == 1 {
@@ -90,9 +89,7 @@ func TestFindUserByEmail_PagesBeyondFirstPageAndSendsFilter(t *testing.T) {
 	}
 
 	const targetEmail = "target@example.com"
-	user, diags, err := d.findUser(context.Background(), url.Values{"email": []string{targetEmail}}, func(u OrganizationCollaboratorResult) bool {
-		return strings.EqualFold(u.Email, targetEmail)
-	})
+	user, diags, err := d.findUserByEmail(context.Background(), targetEmail)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -104,6 +101,9 @@ func TestFindUserByEmail_PagesBeyondFirstPageAndSendsFilter(t *testing.T) {
 	}
 	if sawEmailParam != "target@example.com" {
 		t.Errorf("email query param = %q, want the requested email to be sent server-side", sawEmailParam)
+	}
+	if sawTypeParam != orgCollaboratorTypeAllAccounts {
+		t.Errorf("collaborator_type = %q, want %q so service accounts are found too", sawTypeParam, orgCollaboratorTypeAllAccounts)
 	}
 	if requestCount != 2 {
 		t.Errorf("expected 2 requests (one per page), got %d", requestCount)

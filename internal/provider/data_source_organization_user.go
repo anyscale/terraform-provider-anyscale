@@ -71,7 +71,7 @@ func (d *OrganizationUserDataSource) Schema(ctx context.Context, req datasource.
 	}
 
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Use this data source to retrieve information about a specific user in your organization. You can look up a user by their identity ID, user ID, or email address.\n\n" +
+		MarkdownDescription: "Use this data source to retrieve information about a specific member of your organization, a user or a service account. You can look it up by identity ID, user ID, or email address.\n\n" +
 			"The role attributes (`permission_level`, `base_role`, `additional_roles`) are deprecated: in an organization converted to role bindings they report access from before conversion. See " + legacyRBACGuideLink + ".",
 		Attributes: attributes,
 	}
@@ -109,24 +109,23 @@ func (d *OrganizationUserDataSource) Read(ctx context.Context, req datasource.Re
 	var lookupDiags diag.Diagnostics
 	var err error
 
+	// Every lookup mode covers service accounts as well as users.
+	allAccounts := url.Values{orgCollaboratorTypeParam: []string{orgCollaboratorTypeAllAccounts}}
 	if !config.ID.IsNull() {
 		// Look up by identity ID
 		id := config.ID.ValueString()
-		user, lookupDiags, err = d.findUser(ctx, nil, func(u OrganizationCollaboratorResult) bool { return u.ID == id })
+		user, lookupDiags, err = d.findUser(ctx, allAccounts, func(u OrganizationCollaboratorResult) bool { return u.ID == id })
 	} else if !config.UserID.IsNull() {
 		// Look up by user ID
 		userID := config.UserID.ValueString()
-		user, lookupDiags, err = d.findUser(ctx, nil, func(u OrganizationCollaboratorResult) bool {
+		user, lookupDiags, err = d.findUser(ctx, allAccounts, func(u OrganizationCollaboratorResult) bool {
 			return u.UserID != nil && *u.UserID == userID
 		})
 	} else if !config.Email.IsNull() {
-		// Look up by email. The email query param narrows results server-side, but pagination is
-		// still applied in case that filter is not a strict exact match, rather than only ever
-		// inspecting its first page.
-		email := config.Email.ValueString()
-		user, lookupDiags, err = d.findUser(ctx, url.Values{"email": []string{email}}, func(u OrganizationCollaboratorResult) bool {
-			return strings.EqualFold(u.Email, email)
-		})
+		// Look up by email through the same lookup the member resources use: it covers
+		// service accounts as well as users, matches case-insensitively, and reports an
+		// email shared by more than one member instead of picking one.
+		user, lookupDiags, err = d.findUserByEmail(ctx, config.Email.ValueString())
 	} else {
 		AddConfigError(&resp.Diagnostics,
 			"Missing Required Attribute",
@@ -188,10 +187,27 @@ func organizationCollaboratorToUserModel(ctx context.Context, u OrganizationColl
 	}, diags
 }
 
+// findUserByEmail looks up an organization member of any account type by email.
+func (d *OrganizationUserDataSource) findUserByEmail(ctx context.Context, email string) (*OrganizationUserDataSourceModel, diag.Diagnostics, error) {
+	c, err := listOrgCollaboratorByEmail(ctx, d.client, email)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to fetch organization users: %w", err)
+	}
+	if c == nil {
+		return nil, nil, nil
+	}
+	hydrated, err := hydrateCollaboratorRoles(ctx, d.client, *c)
+	if err != nil {
+		return nil, nil, err
+	}
+	model, diags := organizationCollaboratorToUserModel(ctx, hydrated)
+	return model, diags, nil
+}
+
 // findUser looks up a user among all organization collaborators satisfying match, paging
 // through the full list (optionally narrowed server-side via queryParams) rather than only
-// inspecting the first page. Shared by Read's three lookup modes (by identity ID, by user ID,
-// by email), which differ only in how they filter the request and match a candidate.
+// inspecting the first page. Used by Read's by-identity-ID and by-user-ID lookups, which differ
+// only in how they match a candidate; the by-email lookup is findUserByEmail.
 func (d *OrganizationUserDataSource) findUser(ctx context.Context, queryParams url.Values, match func(OrganizationCollaboratorResult) bool) (*OrganizationUserDataSourceModel, diag.Diagnostics, error) {
 	users, err := listAllOrganizationCollaborators(ctx, d.client, queryParams)
 	if err != nil {

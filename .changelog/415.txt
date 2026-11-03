@@ -1,0 +1,9 @@
+```
+release-note:fixed
+resource/anyscale_cloud_access: A service account declared as a member is now resolved by email instead of reported as an unresolvable member, so it is no longer listed in `ungranted_members` and no longer blocks removals.
+resource/anyscale_organization_user_role: A service account is now resolved by email instead of reported as not an organization member.
+resource/anyscale_organization_user: A service account that is already a member is now resolved by email and adopted instead of being treated as missing and invited.
+resource/anyscale_user_group_members: A service account declared as a member is now resolved by email instead of reported as not an organization member.
+data-source/anyscale_organization_user: A service account looked up by `email`, `id` or `user_id` is now found instead of reported as "User Not Found".
+provider: In `anyscale_cloud_access`, `anyscale_organization_user_role`, `anyscale_organization_user`, `anyscale_user_group_members` and the `anyscale_organization_user` data source, if an email matches both a user and a service account, these lookups now fail and name both, instead of silently using the user.
+```

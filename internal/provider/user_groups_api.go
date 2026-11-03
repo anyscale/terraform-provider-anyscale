@@ -283,29 +283,47 @@ func removeAllUserGroupMembers(ctx context.Context, client *Client, groupID stri
 // email, rather than one lookup per member. Emails are matched
 // case-insensitively; the result is keyed by the email as given.
 //
+// The listing asks for every account type, so a service account resolves like
+// a user. An email that matches more than one record (a user and a service
+// account sharing the address) is reported rather than resolved to either.
+//
 // Every email that cannot be resolved is reported together, so one apply
 // names all of them.
 func resolveOrgUserIDsByEmail(ctx context.Context, client *Client, emails []string) (map[string]string, error) {
-	collaborators, err := listAllOrganizationCollaborators(ctx, client, nil)
+	collaborators, err := listAllOrganizationCollaborators(ctx, client, url.Values{
+		orgCollaboratorTypeParam: []string{orgCollaboratorTypeAllAccounts},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("list organization members: %w", err)
 	}
-	byFolded := make(map[string]OrganizationCollaboratorResult, len(collaborators))
+	byFolded := make(map[string][]OrganizationCollaboratorResult, len(collaborators))
 	for _, c := range collaborators {
-		byFolded[strings.ToLower(c.Email)] = c
+		key := strings.ToLower(c.Email)
+		duplicate := false
+		for _, existing := range byFolded[key] {
+			if existing.ID == c.ID {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			byFolded[key] = append(byFolded[key], c)
+		}
 	}
 
 	resolved := make(map[string]string, len(emails))
-	var missing, noUserID []string
+	var missing, noUserID, ambiguous []string
 	for _, email := range emails {
-		c, ok := byFolded[strings.ToLower(email)]
+		records := byFolded[strings.ToLower(email)]
 		switch {
-		case !ok:
+		case len(records) == 0:
 			missing = append(missing, email)
-		case c.UserID == nil || *c.UserID == "":
+		case len(records) > 1:
+			ambiguous = append(ambiguous, ambiguousOrgCollaboratorEmailError(email, records).Error())
+		case records[0].UserID == nil || *records[0].UserID == "":
 			noUserID = append(noUserID, email)
 		default:
-			resolved[email] = *c.UserID
+			resolved[email] = *records[0].UserID
 		}
 	}
 
@@ -320,6 +338,10 @@ func resolveOrgUserIDsByEmail(ctx context.Context, client *Client, emails []stri
 		sort.Strings(noUserID)
 		problems = append(problems, fmt.Sprintf(
 			"organization members with no user ID, which cannot belong to a user group: %s", strings.Join(noUserID, ", ")))
+	}
+	if len(ambiguous) > 0 {
+		sort.Strings(ambiguous)
+		problems = append(problems, ambiguous...)
 	}
 	if len(problems) > 0 {
 		return nil, errors.New(strings.Join(problems, "; "))

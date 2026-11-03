@@ -1002,6 +1002,16 @@ func (r *OrganizationUserResource) ImportState(ctx context.Context, req resource
 
 // Helper functions
 
+// The organization_collaborators list returns only USER accounts unless asked
+// otherwise: with no account-type parameter the backend filters service
+// accounts out. collaborator_type=all_accounts returns both kinds and takes
+// precedence over is_service_account when both are sent. A lookup that must
+// find any member by email, whatever kind of account it is, sends this pair.
+const (
+	orgCollaboratorTypeParam       = "collaborator_type"
+	orgCollaboratorTypeAllAccounts = "all_accounts"
+)
+
 // listAllOrganizationCollaborators pages through the full /api/v2/organization_collaborators
 // list via PaginatedRequest, across every page rather than stopping at the
 // first, so a collaborator past page 1 is never mistaken for missing or

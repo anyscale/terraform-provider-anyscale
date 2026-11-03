@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"sort"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
@@ -594,19 +595,54 @@ func findOrgCollaboratorByEmail(ctx context.Context, client *Client, email strin
 // listOrgCollaboratorByEmail returns the org member whose email matches, as the
 // org-wide list reports it, or nil when there is none. The server-side email
 // query is only a narrowing hint, not guaranteed to be an exact match, so the
-// first case-insensitive (EqualFold) match is taken client-side; email identity
+// match is made client-side and case-insensitively (EqualFold); email identity
 // is case-insensitive.
+//
+// The request asks for every account type, so a service account resolves too.
+// One email can then match two records (a user and a service account); that is
+// an error naming both rather than a guess at which one was meant.
 func listOrgCollaboratorByEmail(ctx context.Context, client *Client, email string) (*OrganizationCollaboratorResult, error) {
-	collaborators, err := listAllOrganizationCollaborators(ctx, client, url.Values{"email": []string{email}})
+	collaborators, err := listAllOrganizationCollaborators(ctx, client, url.Values{
+		"email":                  []string{email},
+		orgCollaboratorTypeParam: []string{orgCollaboratorTypeAllAccounts},
+	})
 	if err != nil {
 		return nil, err
 	}
-	for i := range collaborators {
-		if strings.EqualFold(collaborators[i].Email, email) {
-			return &collaborators[i], nil
+	var matches []OrganizationCollaboratorResult
+	seen := map[string]bool{}
+	for _, c := range collaborators {
+		if !strings.EqualFold(c.Email, email) || seen[c.ID] {
+			continue
 		}
+		seen[c.ID] = true
+		matches = append(matches, c)
 	}
-	return nil, nil
+	switch len(matches) {
+	case 0:
+		return nil, nil
+	case 1:
+		return &matches[0], nil
+	default:
+		return nil, ambiguousOrgCollaboratorEmailError(email, matches)
+	}
+}
+
+// ambiguousOrgCollaboratorEmailError reports that email names more than one
+// organization member, listing each record so the operator can tell which
+// accounts collide.
+func ambiguousOrgCollaboratorEmailError(email string, matches []OrganizationCollaboratorResult) error {
+	described := make([]string, 0, len(matches))
+	for _, m := range matches {
+		userID := "none"
+		if m.UserID != nil && *m.UserID != "" {
+			userID = *m.UserID
+		}
+		described = append(described, fmt.Sprintf("%s (identity %s, user %s)", m.Email, m.ID, userID))
+	}
+	sort.Strings(described)
+	return fmt.Errorf("email %s matches more than one organization member, for example a user and a service account "+
+		"sharing the address: %s. It cannot be resolved to a single member", email, strings.Join(described, "; "))
 }
 
 // applyCollaboratorToModel copies a read API record onto the model.

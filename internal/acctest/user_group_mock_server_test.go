@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -64,6 +65,8 @@ type userGroupMockUser struct {
 	IdentityID string
 	Email      string
 	Name       string
+	// IsServiceAccount marks a service account (see userGroupMockListIncludes).
+	IsServiceAccount bool
 }
 
 func newUserGroupMockServer(t *testing.T, users ...userGroupMockUser) *userGroupMockServer {
@@ -389,9 +392,29 @@ func (m *userGroupMockServer) serveMembers(w http.ResponseWriter, r *http.Reques
 	m.reply(w, http.StatusNoContent, nil)
 }
 
+// userGroupMockListIncludes applies the account-type precedence described on
+// orgCollaboratorTypeAllAccounts (provider/resource_organization_user.go).
+func userGroupMockListIncludes(q url.Values, isServiceAccount bool) bool {
+	switch q.Get("collaborator_type") {
+	case "all_accounts":
+		return true
+	case "only_service_accounts":
+		return isServiceAccount
+	case "only_user_accounts":
+		return !isServiceAccount
+	}
+	if v := q.Get("is_service_account"); v != "" {
+		return (v == "true") == isServiceAccount
+	}
+	return !isServiceAccount
+}
+
 func (m *userGroupMockServer) serveCollaborators(w http.ResponseWriter, r *http.Request) {
 	ids := make([]string, 0, len(m.users))
-	for id := range m.users {
+	for id, u := range m.users {
+		if !userGroupMockListIncludes(r.URL.Query(), u.IsServiceAccount) {
+			continue
+		}
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
@@ -401,7 +424,7 @@ func (m *userGroupMockServer) serveCollaborators(w http.ResponseWriter, r *http.
 		results = append(results, map[string]any{
 			"base_role": "collaborator", "additional_roles": []any{}, "permission_level": "collaborator",
 			"id": u.IdentityID, "name": u.Name, "created_at": "2026-01-01T00:00:00.000000+00:00",
-			"email": u.Email, "user_id": u.UserID, "is_service_account": false,
+			"email": u.Email, "user_id": u.UserID, "is_service_account": u.IsServiceAccount,
 		})
 	}
 	m.reply(w, http.StatusOK, map[string]any{"results": results, "metadata": map[string]any{"total": len(results), "next_paging_token": nil}})
