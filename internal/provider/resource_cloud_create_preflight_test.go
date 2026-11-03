@@ -202,7 +202,7 @@ func TestCloudResourceCreate_LocalRequirementsCheckedBeforePost(t *testing.T) {
 
 		_, diags := runCloudResourceCreate(t, r, p)
 
-		if !diagsContainSummary(diags, "Cloud Creation Failed") {
+		if !diagsContainSummary(diags, "API Request Failed") || !strings.Contains(diags[0].Detail(), "Failed to create cloud (HTTP ") {
 			t.Fatalf("want the mock's POST refusal, got: %v", diags)
 		}
 		if n := posts.Load(); n != 1 {

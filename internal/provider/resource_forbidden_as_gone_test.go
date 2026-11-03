@@ -526,8 +526,9 @@ func TestReadCloudState_ForbiddenIsTyped(t *testing.T) {
 		t.Errorf("a 403 must not wrap ErrNotFound: %v", err)
 	}
 
+	// Any other status is an error carrying its own status, not a 403.
 	err = r.readCloudState(context.Background(), "cld_bad", &CloudResourceModel{}, nil)
-	if want := "failed to read cloud: 400 Bad Request - bad"; err == nil || err.Error() != want {
-		t.Errorf("400 error = %v, want %q", err, want)
+	if !isHTTPStatus(err, http.StatusBadRequest) {
+		t.Errorf("400 error = %v, want an UnexpectedStatusError with status 400", err)
 	}
 }
