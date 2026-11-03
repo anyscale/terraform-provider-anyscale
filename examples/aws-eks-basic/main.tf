@@ -30,7 +30,6 @@ resource "anyscale_cloud" "primary" {
   # Object Storage (S3) - required for K8S
   object_storage {
     bucket_name = module.anyscale_s3.s3_bucket_id
-    region      = var.aws_region
   }
 
   # Optional: File storage (EFS)

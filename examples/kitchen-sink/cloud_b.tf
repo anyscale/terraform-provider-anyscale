@@ -21,6 +21,5 @@ resource "anyscale_cloud" "b" {
 
   object_storage {
     bucket_name = module.anyscale_s3.s3_bucket_id
-    region      = var.aws_region
   }
 }

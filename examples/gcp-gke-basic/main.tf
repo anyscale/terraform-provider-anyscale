@@ -44,6 +44,5 @@ resource "anyscale_cloud_resource" "primary" {
   # because there's no reason to change a value that already works.
   object_storage {
     bucket_name = module.anyscale_cloudstorage.cloudstorage_bucket_name
-    region      = var.gcp_region
   }
 }
