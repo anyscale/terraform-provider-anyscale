@@ -1,3 +1,0 @@
-```release-note:fixed
-provider: Errors from listing a cloud's resources no longer repeat "failed to list cloud resources" in the `anyscale_cloud` data source, `anyscale_cloud_resource`, and `anyscale_cloud_iam_mapping`.
-```

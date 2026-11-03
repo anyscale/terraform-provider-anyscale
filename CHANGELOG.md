@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.1] - 2026-11-03
+
+### Changed
+
+- data-source/anyscale_cloud: An `availability_zones` conversion error now names the cloud, as `anyscale_clouds` already did. `anyscale_user` reports a clouds parse error as "failed to parse clouds response".
+- resource/anyscale_cloud: Creating an AWS cloud whose `aws_config.external_id` does not start with your organization ID now warns at plan: the value is not recorded on the cloud itself, so services on that cloud cannot reach their load balancer. The create itself behaves as before.
+
+### Fixed
+
+- provider: An API error from a read that was retried now shows the API's own message instead of the raw response, and says that every attempt failed and the problem is usually transient.
+- resource/anyscale_cloud_access: Refuses to change a cloud's members when /api/v2/userinfo returns no user ID, instead of treating the response as an unknown identity that could revoke the caller's own access.
+- provider: Errors from listing a cloud's resources no longer repeat "failed to list cloud resources" in the `anyscale_cloud` data source, `anyscale_cloud_resource`, and `anyscale_cloud_iam_mapping`.
+- provider: Errors from `anyscale_cloud` (resource and data source), `anyscale_organization_default_cloud` and `anyscale_organization_invitation` now show the HTTP status and the API's own message instead of the raw status line and response body.
+- provider: `anyscale_cloud`, `anyscale_cloud_resource`, `anyscale_project` and `anyscale_service`: a destroy whose delete call answers HTTP 403 now reads the object back, and fails if it still exists, instead of treating every 403 as already deleted. Credentials that can see an object but may not delete it no longer drop it from state while it keeps running.
+- resource/anyscale_cloud: An AWS cloud created with an `aws_config.external_id` that starts with your organization ID now records it as the cloud's own external ID, so its services can pass the load balancer step instead of failing with an `sts:AssumeRole` denial. The API cannot change this on an existing cloud: an AWS cloud created by an earlier version with `aws_config.external_id` set has to be recreated before its services can work. Recreating (`terraform apply -replace=anyscale_cloud.<name>`) destroys the cloud first, and with it everything that depends on it, such as projects, compute configs and services.
+
 ## [0.34.0] - 2026-11-03
 
 ### Added
@@ -1293,7 +1309,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.34.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.34.1...HEAD
+[0.34.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.34.1
 [0.34.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.34.0
 [0.33.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.33.0
 [0.32.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.32.0
