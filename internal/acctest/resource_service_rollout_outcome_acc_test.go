@@ -40,6 +40,8 @@ type outcomeVersion struct {
 	// RoutePrefix, when set, is added to the stored application the way the backend may enrich
 	// a stored ray_serve_config, so the live copy no longer equals the authored one.
 	RoutePrefix string
+	// TargetWeight and CurrentWeight, when set, are rendered as a canary's traffic shares.
+	TargetWeight, CurrentWeight *int
 }
 
 // outcomeSnapshot is what GET /services-v2/{id} returns at one point in time.
@@ -49,6 +51,12 @@ type outcomeSnapshot struct {
 	PrimaryState string // the primary version's current_state; "" means CurrentState
 	Primary      outcomeVersion
 	Canary       *outcomeVersion
+	// Manual reports a canary held at a manual share (auto_rollout_enabled false).
+	Manual bool
+	// CanaryState is the canary version's current_state; "" means CurrentState.
+	CanaryState string
+	// CanaryRow, when set, is the state of the canary's one per-version checklist row.
+	CanaryRow string
 }
 
 // outcomeApplyResult is the mock's reaction to one PUT /apply call: either an error status, or a
@@ -97,6 +105,11 @@ type outcomeMock struct {
 	// archivedURIs are registry URIs whose anonymous environment was archived: get_or_create
 	// answers them with the backend's 409.
 	archivedURIs map[string]bool
+
+	// rollbackScript is the GET script POST /rollback switches to. events records each apply and
+	// rollback in arrival order.
+	rollbackScript []outcomeSnapshot
+	events         []string
 }
 
 // outcomeBuild is one build as GET /builds/{id} reports it.
@@ -121,6 +134,7 @@ func newOutcomeMock(t *testing.T, serviceID, name string, onApply func(n int, bo
 		}
 		m.mu.Lock()
 		m.applyBodies = append(m.applyBodies, body)
+		m.events = append(m.events, "apply")
 		n := len(m.applyBodies)
 		stillTerminating := m.terminated && m.terminatingLeft > 0
 		if !stillTerminating {
@@ -151,6 +165,23 @@ func newOutcomeMock(t *testing.T, serviceID, name string, onApply func(n int, bo
 	})
 	mux.HandleFunc("/api/v2/services-v2/"+serviceID, func(w http.ResponseWriter, r *http.Request) {
 		serveServiceGetOrDelete(t, w, r, m.render(m.next()))
+	})
+	mux.HandleFunc("/api/v2/services-v2/"+serviceID+"/rollback", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("unexpected method %s on rollback", r.Method)
+		}
+		m.mu.Lock()
+		m.events = append(m.events, "rollback")
+		script := m.rollbackScript
+		m.mu.Unlock()
+		if len(script) == 0 {
+			t.Errorf("unexpected rollback")
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		m.setScript(script...)
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = fmt.Fprint(w, `{"result": `+m.render(script[0])+`}`)
 	})
 	mux.HandleFunc("/api/v2/services-v2/"+serviceID+"/terminate", func(w http.ResponseWriter, r *http.Request) {
 		m.mu.Lock()
@@ -360,12 +391,18 @@ func outcomeVersionJSON(v outcomeVersion, state string) string {
 	if v.RoutePrefix != "" {
 		routePrefix = fmt.Sprintf(`, "route_prefix": %q`, v.RoutePrefix)
 	}
+	weightJSON := func(w *int) string {
+		if w == nil {
+			return "null"
+		}
+		return fmt.Sprint(*w)
+	}
 	return fmt.Sprintf(`{
 		"id": %q, "created_at": "2026-01-01T00:00:00Z", "version": %q,
-		"current_state": %q, "weight": 100, "build_id": %q,
+		"current_state": %q, "weight": 100, "target_weight": %s, "current_weight": %s, "build_id": %q,
 		"compute_config_id": "cpt_outcome", "production_job_ids": [], "connection_ids": %s,
 		"ray_serve_config": {"applications": [{"import_path": %q%s}]}
-	}`, v.ID, v.Name, state, buildID, conns, v.ImportPath, routePrefix)
+	}`, v.ID, v.Name, state, weightJSON(v.TargetWeight), weightJSON(v.CurrentWeight), buildID, conns, v.ImportPath, routePrefix)
 }
 
 func (m *outcomeMock) render(s outcomeSnapshot) string {
@@ -379,7 +416,17 @@ func (m *outcomeMock) render(s outcomeSnapshot) string {
 	}
 	canary := "null"
 	if s.Canary != nil {
-		canary = outcomeVersionJSON(*s.Canary, s.CurrentState)
+		canaryState := s.CanaryState
+		if canaryState == "" {
+			canaryState = s.CurrentState
+		}
+		canary = outcomeVersionJSON(*s.Canary, canaryState)
+	}
+	checklist := "null"
+	if s.Canary != nil && s.CanaryRow != "" {
+		checklist = fmt.Sprintf(`{"shared": [], "per_version": [{"version_id": %q, "items": [
+			{"kind": "APPLICATION", "label": "Application", "state": %q, "message": "application failed", "version_id": %q, "observed_at": null}
+		]}]}`, s.Canary.ID, s.CanaryRow, s.Canary.ID)
 	}
 	endedAt := "null"
 	if s.CurrentState == "TERMINATED" {
@@ -397,11 +444,11 @@ func (m *outcomeMock) render(s outcomeSnapshot) string {
 		"auth_token": %s, "secondary_auth_token": null,
 		"current_state": %q, "goal_state": %q, "ended_at": %s,
 		"creator_id": "usr_outcome", "created_at": "2026-01-01T00:00:00Z",
-		"is_multi_version": false, "auto_rollout_enabled": true,
+		"is_multi_version": false, "auto_rollout_enabled": %t,
 		"service_observability_urls": {},
-		"primary_version": %s, "canary_version": %s, "service_status_checklist": null
-	}`, m.serviceID, m.name, m.projectID, token, s.CurrentState, goal, endedAt,
-		outcomeVersionJSON(s.Primary, primaryState), canary)
+		"primary_version": %s, "canary_version": %s, "service_status_checklist": %s
+	}`, m.serviceID, m.name, m.projectID, token, s.CurrentState, goal, endedAt, !s.Manual,
+		outcomeVersionJSON(s.Primary, primaryState), canary, checklist)
 }
 
 // outcomeConfig renders the service with the given import_path and extra attribute lines.

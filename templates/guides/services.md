@@ -35,9 +35,157 @@ A change to `ray_serve_config`, `build_id`, an `image_uri` that resolves to a di
 `description`, `version_name`, `query_auth_token_enabled`, `grpc_service_names` or `env_vars`
 rolls out a new version. `tags`, `rollout_strategy`, `max_surge_percent` and `timeouts` do not.
 
-A rollout always goes to 100% and the apply waits for it to reach `RUNNING`. Holding at a partial
-canary and promoting later is not supported. `max_surge_percent` only paces the rollout, and the
-backend rejects it unless Anyscale support has enabled it for your cloud.
+By default a rollout goes to 100% and the apply waits for it to reach `RUNNING`. To hold the new
+version at a partial share first, see [Canary rollouts](#canary-rollouts). `max_surge_percent`
+only paces the rollout, and the backend rejects it unless Anyscale support has enabled it for
+your cloud.
+
+## Canary rollouts
+
+`canary_percent` (0-100) holds a new version at a share of traffic so you can test it before
+committing. Unset, every rollout goes to 100%.
+
+```hcl
+resource "anyscale_service" "app" {
+  # ... the new build_id or ray_serve_config ...
+
+  # Apply 1: the new version starts and serves no traffic.
+  canary_percent = 0
+  # Apply 2: change only this line. The same version takes 25%.
+  # canary_percent = 25
+  # Apply 3: remove the attribute to finish the rollout.
+}
+```
+
+Each apply waits until the canary is healthy and carries the requested share. Traffic moves
+gradually, so this can take a minute or more.
+
+- **Finishing.** Remove `canary_percent` (the rollout completes with Anyscale's automatic ramp)
+  or set it to `100` (an immediate cutover, like `anyscale service deploy --canary-percent 100`).
+  `100` completes only where Anyscale auto-completes manual rollouts. Elsewhere the apply fails
+  after a 5-minute grace period saying the rollout is held at 100%; remove the attribute to
+  finish it.
+- **Changing the deploy while a canary is held.** Terraform rolls the held canary back, then
+  deploys the new configuration, and the plan warns about it. If you revert to the configuration
+  from before the canary, it only rolls back, unless `version_name` changed: a new name deploys
+  a new version.
+- **`version_name`.** Changing only the name of a held canary is rejected at plan time, because
+  Anyscale ignores it.
+- **Canary fails during the apply.** Terraform rolls it back and reports "Service Rollout
+  Rolled Back", as for any [failed rollout](#failed-rollouts). A canary that fails later is not
+  acted on: the service shows `UNHEALTHY`. Change the configuration to recover.
+- **No canary in flight.** Changing `canary_percent` only records it. It applies to the next
+  deploy.
+- **Create and restart.** There is no previous version to split with, so it has no effect. The
+  value is kept for the next deploy.
+- **Not with `IN_PLACE`.** A non-null `canary_percent` is rejected at plan time.
+- **Canaries started elsewhere.** Terraform only tracks a canary it started, or one it found at
+  import. Finish or roll back one started with the CLI or console before applying; otherwise a
+  deploy change whose configuration differs from the held canary fails with a "rollout already
+  in progress" error.
+- **Import.** A held canary is recovered into `canary_percent`. A configuration that omits it
+  then plans a change to null, which completes that rollout.
+
+### Example: staged rollout from CI
+
+Drive each stage with one apply by making `canary_percent` a variable. Unset, it is `null`, which
+finishes the rollout. These are fragments of a configuration that already defines the service.
+
+```hcl
+variable "canary_percent" {
+  type    = number
+  default = null
+}
+
+resource "anyscale_service" "app" {
+  # ... name, compute_config_id, build_id, ray_serve_config ...
+  canary_percent = var.canary_percent
+}
+
+output "service_url" {
+  value = anyscale_service.app.base_url
+}
+```
+
+The steps, each one `terraform apply`:
+
+1. Change the new version's inputs (for example `build_id`) and apply with `canary_percent=0`.
+   The canary starts, the apply waits until it is healthy, and it serves no traffic. Only its
+   health can be checked at this stage.
+2. Apply with `canary_percent=10`, changing nothing else. The same version takes 10% of traffic,
+   and the apply returns once it does. Watch error rates and latency on your monitoring.
+3. Raise the percentage in further applies (for example 50), again changing only the percent.
+   Changing the inputs or `version_name` while a canary is held rolls it back or is rejected.
+4. Apply with no value to finish.
+
+To abort, revert the inputs and apply: the held canary is rolled back, and nothing is redeployed
+if the configuration matches the one from before the canary. A canary that fails during an apply
+is rolled back by Terraform and the apply fails with "Service Rollout Rolled Back", which fails
+the job. A canary that fails afterwards is not acted on: check `canary_version.current_state` for
+`UNHEALTHY` in your monitoring step and abort as above.
+
+A GitHub Actions workflow that triggers it. The configuration lives in the repository root with
+a remote backend (a runner has no state of its own); add the `ANYSCALE_CLI_TOKEN` secret and your
+backend credentials.
+
+```yaml
+name: service-rollout
+on:
+  # Stage 0: merging the new build_id (or other input) to main
+  # deploys it as a canary with no traffic.
+  push:
+    branches: [main]
+  # Later stages: click "Run workflow" and pick a stage.
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Canary percent, or finish"
+        type: choice
+        options: ["0", "10", "50", "finish"]
+        default: "10"
+
+concurrency: service-rollout
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: production # add required reviewers for a manual gate
+    env:
+      ANYSCALE_CLI_TOKEN: ${{ secrets.ANYSCALE_CLI_TOKEN }}
+      STAGE: ${{ inputs.stage || '0' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+      - run: terraform init -input=false
+      - name: Apply stage
+        run: |
+          if [ "$STAGE" = "finish" ]; then
+            terraform apply -input=false -auto-approve
+          else
+            terraform apply -input=false -auto-approve \
+              -var "canary_percent=$STAGE"
+          fi
+      - name: Smoke test
+        if: env.STAGE != 'finish'
+        run: ./scripts/smoke-test.sh "$(terraform output -raw service_url)"
+```
+
+How a rollout runs:
+
+1. **Merge the change.** The push applies stage `0`: the canary starts and takes no traffic. The
+   job's smoke test can check only that it is healthy.
+2. **Shift traffic.** In the Actions tab, run the workflow on `main` with stage `10`. Look at your
+   monitoring, then run it again with `50`. Run each stage on the same commit; merging
+   another change in between starts a new rollout.
+3. **Finish.** Run it with `finish`.
+4. **Abort.** Revert the change on `main`. Reverting to the configuration deployed before the
+   canary rolls the canary back and deploys nothing. If any deploy setting differs, Terraform
+   deploys the result as a new version, held at stage `0`.
+
+`./scripts/smoke-test.sh` is a placeholder for your own checks. `concurrency` stops two stages
+applying at once.
 
 ## Version names
 

@@ -87,6 +87,7 @@ output "service_base_url" {
 ### Optional
 
 - `build_id` (String) The ID of the container image build this service runs, e.g. from `anyscale_container_image_build` or `anyscale_container_image_registry`. Set this or `image_uri`; with `image_uri`, it is the build that URI resolved to. Changing it rolls out a new version; it is not a replace.
+- `canary_percent` (Number) Traffic share, 0-100 percent, for a new version while it rolls out. When set, a deploy holds the new version at this share, and changing it shifts traffic. Remove it to finish the rollout; `100` also finishes it where Anyscale completes manual rollouts. No effect on create or restart. See [Canary rollouts](../guides/services.md#canary-rollouts).
 - `connection_ids` (List of String) Connection IDs for the new service version. Null (the default) keeps the attached connections; `[]` removes them all. Not refreshed, so that null keeps meaning "leave them alone"; read the live set from `primary_version.connection_ids`. Changing it rolls out a new version, which `IN_PLACE` rejects.
 - `description` (String) Description of the service. Null if not set. Changing it rolls out a new version under `ROLLOUT` and is rejected at plan time under `IN_PLACE`.
 - `env_vars` (Map of String) Environment variables Anyscale sets for Ray on the service's cluster nodes. Unlike the Anyscale CLI, this does not also copy them into each application's `runtime_env`; set those in `ray_serve_config`. Not refreshed: the API does not return it. Changing it rolls out a new version.
