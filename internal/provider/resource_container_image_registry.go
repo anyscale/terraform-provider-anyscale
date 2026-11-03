@@ -328,7 +328,7 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 
 // getTemplateLatestBuild returns the latest build of cluster environment templateID:
 // GET the template, then GET its latest_build. It returns (nil, nil) when the template
-// has no build. Read resolves the build the same way, through getBuild.
+// has no build. Read resolves the build the same way, through fetchBuild.
 func (r *ContainerImageRegistryResource) getTemplateLatestBuild(ctx context.Context, templateID string) (*BuildResult, error) {
 	template, err := fetchApplicationTemplate(ctx, r.client, templateID)
 	if err != nil {

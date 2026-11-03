@@ -267,9 +267,10 @@ func getServiceByID(ctx context.Context, client *Client, serviceID string) (*Ser
 	return &serviceResp.Result, nil
 }
 
-// listServices returns every service from GET /api/v2/services-v2 across all pages. params carries
-// the caller's filters and page size unchanged. The error is returned
-// unwrapped so each caller keeps its own context.
+// listServices returns every service from GET /api/v2/services-v2
+// across all pages. params carries the caller's filters and page size
+// unchanged. The error is returned unwrapped so each caller keeps its own
+// context.
 func listServices(ctx context.Context, client *Client, params url.Values) ([]ServiceResult, error) {
 	return PaginatedRequest(ctx, client, "/api/v2/services-v2", params,
 		func(body []byte) ([]ServiceResult, *string, error) {

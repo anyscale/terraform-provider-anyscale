@@ -223,9 +223,10 @@ func (d *ProjectsDataSource) fetchProjects(ctx context.Context, params url.Value
 	return allProjects, nil
 }
 
-// listProjects returns every project from GET /api/v2/projects across all pages. params carries
-// the caller's filters and page size unchanged. The error is returned
-// unwrapped so each caller keeps its own context.
+// listProjects returns every project from GET /api/v2/projects
+// across all pages. params carries the caller's filters and page size
+// unchanged. The error is returned unwrapped so each caller keeps its own
+// context.
 func listProjects(ctx context.Context, client *Client, params url.Values) ([]ProjectResult, error) {
 	return PaginatedRequest(ctx, client, "/api/v2/projects", params,
 		func(body []byte) ([]ProjectResult, *string, error) {

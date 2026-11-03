@@ -219,9 +219,10 @@ func fetchApplicationTemplate(ctx context.Context, client *Client, templateID st
 	return &templateResp.Result, nil
 }
 
-// listApplicationTemplates returns every application template from GET /api/v2/application_templates/ across all pages. params carries
-// the caller's filters and page size unchanged. The error is returned
-// unwrapped so each caller keeps its own context.
+// listApplicationTemplates returns every application template from GET /api/v2/application_templates/
+// across all pages. params carries the caller's filters and page size
+// unchanged. The error is returned unwrapped so each caller keeps its own
+// context.
 func listApplicationTemplates(ctx context.Context, client *Client, params url.Values) ([]ApplicationTemplateResult, error) {
 	return PaginatedRequest(ctx, client, "/api/v2/application_templates/", params,
 		func(body []byte) ([]ApplicationTemplateResult, *string, error) {
