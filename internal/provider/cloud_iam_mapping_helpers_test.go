@@ -87,6 +87,33 @@ func TestValidateIAMMappingSelector(t *testing.T) {
 		{"invalid key", "team=platform", true},
 		{"invalid workload-type value", "workload-type=notebook", true},
 		{"invalid selector syntax", "===", true},
+
+		// The full Kubernetes label-selector grammar is supported, matching
+		// the API's own validator: set-based, inequality, and existence forms.
+		{"valid set-based in", "workload-type in (job,service)", false},
+		{"valid set-based in with space after comma", "workload-type in (job, service)", false},
+		{"valid set-based notin", "workload-type notin (workspace)", false},
+		{"valid inequality", "project!=my-project", false},
+		{"valid existence user", "user", false},
+		{"valid non-existence user", "!user", false},
+		{"valid non-existence workload-type", "!workload-type", false},
+		{"valid email inside a set", "user in (alice@example.com,bob@example.org)", false},
+		{"valid user inequality with email", "user!=alice@example.com", false},
+		{"invalid workload-type value inside in", "workload-type in (job,notebook)", true},
+		{"invalid workload-type value inside notin", "workload-type notin (notebook)", true},
+		{"invalid workload-type value with inequality", "workload-type!=notebook", true},
+		{"invalid key in set form", "team in (platform)", true},
+		{"invalid project value with a space", "project=my project", true},
+
+		// Accepted because the API accepts them, though none is useful: an
+		// empty selector parses to match-everything (a catch-all rule), `>`
+		// is a numeric comparison that never matches a non-numeric name, and
+		// a contradictory AND never matches. Rejecting any of them would be
+		// stricter than the API and would break importing a mapping written
+		// outside Terraform.
+		{"accepted empty selector", "", false},
+		{"accepted greater-than", "project>1", false},
+		{"accepted contradictory AND", "workload-type=job,workload-type=service", false},
 	}
 
 	for _, tt := range tests {
