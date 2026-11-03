@@ -378,7 +378,7 @@ func TestProjectResourceDelete_403Retry(t *testing.T) {
 		}
 	})
 
-	t.Run("old project does NOT retry a 403 - surfaces immediately", func(t *testing.T) {
+	t.Run("old project does NOT retry a 403 - treated as gone immediately", func(t *testing.T) {
 		const projectID = "prj_old_no_retry"
 		var requestCount int
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -395,11 +395,10 @@ func TestProjectResourceDelete_403Retry(t *testing.T) {
 			CreatedAt: types.StringValue(time.Now().Add(-1 * time.Hour).Format(time.RFC3339)),
 		})
 
-		if !diags.HasError() {
-			t.Fatal("expected a diagnostic error for an old project's genuine-looking 403, got none")
-		}
+		// The API answers 403 for a deleted project, so an unretried 403 means gone, with a warning.
+		assertProjectTreatedAsDeleted(t, diags)
 		if requestCount != 1 {
-			t.Fatalf("an old project's 403 must NOT be retried (a real, long-standing permission denial must surface immediately) - expected exactly 1 request, got %d", requestCount)
+			t.Fatalf("an old project's 403 must NOT be retried - expected exactly 1 request, got %d", requestCount)
 		}
 	})
 
@@ -433,7 +432,7 @@ func TestProjectResourceDelete_403Retry(t *testing.T) {
 		}
 	})
 
-	t.Run("recently created project exhausts retries and still surfaces the error", func(t *testing.T) {
+	t.Run("recently created project exhausts retries, then is treated as gone", func(t *testing.T) {
 		const projectID = "prj_recent_exhausts"
 		var requestCount int
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -450,9 +449,7 @@ func TestProjectResourceDelete_403Retry(t *testing.T) {
 			CreatedAt: types.StringValue(time.Now().Format(time.RFC3339)),
 		})
 
-		if !diags.HasError() {
-			t.Fatal("expected the error to still surface once retries are exhausted, got none")
-		}
+		assertProjectTreatedAsDeleted(t, diags)
 		// Derived from withFastRetryTiming's 1ms/4ms-cap/15ms-ceiling schedule: elapsed reaches
 		// 0,1,3,7,11,15ms across attempts 1-6, and the 6th check (elapsed 15 >= ceiling 15) stops
 		// the loop without a further sleep. This is a direct trace of the production loop in
@@ -464,7 +461,7 @@ func TestProjectResourceDelete_403Retry(t *testing.T) {
 		}
 	})
 
-	t.Run("missing created_at fails closed - no retry", func(t *testing.T) {
+	t.Run("missing created_at fails closed - no retry, treated as gone", func(t *testing.T) {
 		const projectID = "prj_missing_created_at"
 		var requestCount int
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -481,9 +478,7 @@ func TestProjectResourceDelete_403Retry(t *testing.T) {
 			// CreatedAt deliberately left unset (empty string).
 		})
 
-		if !diags.HasError() {
-			t.Fatal("expected a diagnostic error, got none")
-		}
+		assertProjectTreatedAsDeleted(t, diags)
 		if requestCount != 1 {
 			t.Fatalf("an unparseable/missing created_at must fail closed to no-retry, expected exactly 1 request, got %d", requestCount)
 		}

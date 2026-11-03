@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -146,6 +147,7 @@ func TestCloudResourceDelete_404ConfirmsAgainstList(t *testing.T) {
 		listStatus  int
 		listBody    string
 		wantSummary string // "" means Delete must succeed
+		wantWarning string // a warning summary a successful Delete must carry
 	}{
 		{
 			name:        "still listed after a 404 is an error",
@@ -167,10 +169,18 @@ func TestCloudResourceDelete_404ConfirmsAgainstList(t *testing.T) {
 			listBody:   `{"error": {"detail": "Cloud not found."}}`,
 		},
 		{
-			name:        "a failed confirmation lookup is an error",
-			deleteBody:  noPrimary,
+			// The API answers 403 for a deleted cloud, so the lookup's 403 means gone, with a warning.
+			name:        "a 403 lookup after a 404 is deleted with a warning",
+			deleteBody:  `{"error": {"detail": "Cloud not found."}}`,
 			listStatus:  http.StatusForbidden,
 			listBody:    `{"error": {"detail": "Permission denied"}}`,
+			wantWarning: "Cloud Resource Treated As Deleted",
+		},
+		{
+			name:        "a failed confirmation lookup is an error",
+			deleteBody:  noPrimary,
+			listStatus:  http.StatusBadRequest,
+			listBody:    `{"error": {"detail": "Invalid cloud."}}`,
 			wantSummary: "Could Not Confirm Cloud Resource Deletion",
 		},
 	}
@@ -199,6 +209,11 @@ func TestCloudResourceDelete_404ConfirmsAgainstList(t *testing.T) {
 			if tt.wantSummary == "" {
 				if diags.HasError() {
 					t.Fatalf("Delete returned errors, want success: %v", diags)
+				}
+				if got := diagsWarningSummaries(diags); tt.wantWarning != "" && !slices.Contains(got, tt.wantWarning) {
+					t.Fatalf("warnings = %v, want %q", got, tt.wantWarning)
+				} else if tt.wantWarning == "" && len(got) != 0 {
+					t.Fatalf("warnings = %v, want none (a 404 stays silent)", got)
 				}
 			} else {
 				if !diags.HasError() || diags.Errors()[0].Summary() != tt.wantSummary {
