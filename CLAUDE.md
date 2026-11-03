@@ -410,8 +410,13 @@ Unit tests for schema validation and model conversions; acceptance tests via `re
 
 Real EKS and GKE clouds (and what they provision) may be created for acceptance and example testing
 without asking, provided **everything is torn down within 24 hours**. Covers `make testacc` and the
-scenario targets below. Real **AKS** infrastructure is **not** covered — hold Azure creation until
-told otherwise.
+scenario targets below when run locally, by hand or by an agent. Real **AKS** infrastructure is
+**not** covered — hold Azure creation until told otherwise.
+
+The 24-hour rule is for local testing, not Buildkite. The static fixture clouds the Buildkite e2e
+lane runs against (`tfp-test-<platform>-STATIC`, see `docs/decisions/e2e-coverage`) are long-lived
+on purpose: never tear one down, and never mutate one. What a Buildkite run creates for itself is
+still cleaned up by that run.
 
 ### Test cloud selection
 
