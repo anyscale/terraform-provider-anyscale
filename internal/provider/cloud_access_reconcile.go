@@ -244,9 +244,6 @@ func fetchCloudAccessCallerIdentity(ctx context.Context, client *Client) (cloudA
 	if err != nil {
 		return cloudAccessCallerIdentity{}, err
 	}
-	if userResp == nil {
-		return cloudAccessCallerIdentity{}, fmt.Errorf("userinfo returned no result for the authenticated token")
-	}
 	return cloudAccessCallerIdentity{UserID: userResp.Result.ID, Email: userResp.Result.Email}, nil
 }
 

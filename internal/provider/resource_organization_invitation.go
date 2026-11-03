@@ -273,12 +273,12 @@ func (r *OrganizationInvitationResource) Read(ctx context.Context, req resource.
 	state.Status = types.StringValue(status)
 
 	switch status {
-	case "expired":
+	case invitationStatusExpired:
 		tflog.Warn(ctx, "Invitation has expired", map[string]interface{}{
 			"invitation_id": invitationID,
 			"expires_at":    invitation.ExpiresAt,
 		})
-	case "accepted":
+	case invitationStatusAccepted:
 		tflog.Info(ctx, "Invitation has been accepted", map[string]interface{}{
 			"invitation_id": invitationID,
 			"accepted_at":   *invitation.AcceptedAt,

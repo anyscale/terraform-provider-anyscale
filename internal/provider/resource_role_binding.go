@@ -281,16 +281,27 @@ func (r *RoleBindingResource) Create(ctx context.Context, req resource.CreateReq
 // the principal or role does not exist, in which case the API's own detail says
 // which.
 func (r *RoleBindingResource) addCreateNotFoundError(ctx context.Context, diags *diag.Diagnostics, createErr error) {
-	enabled, err := roleBindingsEnabled(ctx, r.client)
-	if err != nil {
-		addRoleBindingsProbeFailedError(diags, "create role binding", createErr, err)
-		return
+	if r.roleBindingsOnAfterNotFound(ctx, diags, "create role binding", createErr, "") {
+		AddAPIError(diags, "create role binding", createErr)
 	}
-	if !enabled {
-		addRoleBindingsDisabledError(diags, "")
-		return
+}
+
+// roleBindingsOnAfterNotFound settles what a role-bindings 404 means by probing
+// whether the feature is enabled. It reports false after adding the diagnostic
+// when the probe fails (op names the failed call) or the feature is off
+// (disabledOutcome says what happens to the binding). It reports true when the
+// feature is on, leaving the caller to say what the 404 means for its operation.
+func (r *RoleBindingResource) roleBindingsOnAfterNotFound(ctx context.Context, diags *diag.Diagnostics, op string, notFoundErr error, disabledOutcome string) bool {
+	enabled, probeErr := roleBindingsEnabled(ctx, r.client)
+	switch {
+	case probeErr != nil:
+		addRoleBindingsProbeFailedError(diags, op, notFoundErr, probeErr)
+		return false
+	case !enabled:
+		addRoleBindingsDisabledError(diags, disabledOutcome)
+		return false
 	}
-	AddAPIError(diags, "create role binding", createErr)
+	return true
 }
 
 // addDuplicateError reports a 409 from create: the principal already holds this
@@ -329,13 +340,7 @@ func (r *RoleBindingResource) Read(ctx context.Context, req resource.ReadRequest
 	binding, err := findRoleBindingForPrincipal(ctx, r.client, resourceType, resourceID, principalType, principalID, bindingID)
 	if err != nil {
 		if isRoleBindingsDisabled(err) {
-			enabled, probeErr := roleBindingsEnabled(ctx, r.client)
-			switch {
-			case probeErr != nil:
-				addRoleBindingsProbeFailedError(&resp.Diagnostics, "read role binding", err, probeErr)
-			case !enabled:
-				addRoleBindingsDisabledError(&resp.Diagnostics, roleBindingsDisabledReadOutcome)
-			default:
+			if r.roleBindingsOnAfterNotFound(ctx, &resp.Diagnostics, "read role binding", err, roleBindingsDisabledReadOutcome) {
 				// The feature is on, so the principal no longer exists.
 				tflog.Warn(ctx, "Role binding's principal not found, removing from state",
 					map[string]any{"role_binding_id": bindingID, "detail": extractAPIErrorDetail(err)})
@@ -430,13 +435,7 @@ func (r *RoleBindingResource) Delete(ctx context.Context, req resource.DeleteReq
 // the binding or its principal is gone, so there is nothing left to revoke; with
 // it off, the binding stays in state.
 func (r *RoleBindingResource) handleDeleteNotFound(ctx context.Context, diags *diag.Diagnostics, bindingID string, notFoundErr error) {
-	enabled, probeErr := roleBindingsEnabled(ctx, r.client)
-	switch {
-	case probeErr != nil:
-		addRoleBindingsProbeFailedError(diags, "delete role binding", notFoundErr, probeErr)
-	case !enabled:
-		addRoleBindingsDisabledError(diags, roleBindingsDisabledDeleteOutcome)
-	default:
+	if r.roleBindingsOnAfterNotFound(ctx, diags, "delete role binding", notFoundErr, roleBindingsDisabledDeleteOutcome) {
 		tflog.Info(ctx, "Role binding already gone", map[string]any{"role_binding_id": bindingID, "detail": extractAPIErrorDetail(notFoundErr)})
 	}
 }
@@ -487,13 +486,7 @@ func (r *RoleBindingResource) resolveRoleBindingNaturalKey(ctx context.Context, 
 	if err != nil {
 		switch {
 		case isRoleBindingsDisabled(err):
-			enabled, probeErr := roleBindingsEnabled(ctx, r.client)
-			switch {
-			case probeErr != nil:
-				addRoleBindingsProbeFailedError(diags, "list role bindings for import", err, probeErr)
-			case !enabled:
-				addRoleBindingsDisabledError(diags, "")
-			default:
+			if r.roleBindingsOnAfterNotFound(ctx, diags, "list role bindings for import", err, "") {
 				AddConfigError(diags, "Role Binding Principal Not Found",
 					fmt.Sprintf("The %s %q could not be found: %s", key.PrincipalType, key.PrincipalID, extractAPIErrorDetail(err)))
 			}
@@ -542,13 +535,7 @@ func (r *RoleBindingResource) ImportState(ctx context.Context, req resource.Impo
 	if err != nil {
 		switch {
 		case isRoleBindingsDisabled(err):
-			enabled, probeErr := roleBindingsEnabled(ctx, r.client)
-			switch {
-			case probeErr != nil:
-				addRoleBindingsProbeFailedError(&resp.Diagnostics, "read role binding for import", err, probeErr)
-			case !enabled:
-				addRoleBindingsDisabledError(&resp.Diagnostics, "")
-			default:
+			if r.roleBindingsOnAfterNotFound(ctx, &resp.Diagnostics, "read role binding for import", err, "") {
 				AddAPIError(&resp.Diagnostics, "read role binding for import", err)
 			}
 		case isHTTPStatus(err, http.StatusForbidden):
