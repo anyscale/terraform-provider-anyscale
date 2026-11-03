@@ -79,20 +79,9 @@ func (r *OrganizationDefaultCloudResource) Schema(ctx context.Context, req resou
 
 // Configure adds the provider configured client to the resource.
 func (r *OrganizationDefaultCloudResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	if req.ProviderData == nil {
-		return
+	if client, ok := clientFromProviderData(req.ProviderData, "Unexpected Resource Configure Type", &resp.Diagnostics); ok {
+		r.client = client
 	}
-
-	client, ok := req.ProviderData.(*Client)
-	if !ok {
-		AddConfigError(&resp.Diagnostics,
-			"Unexpected Resource Configure Type",
-			fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
-		)
-		return
-	}
-
-	r.client = client
 }
 
 // setOrganizationDefaultCloud validates cloudID exists (the backend's own

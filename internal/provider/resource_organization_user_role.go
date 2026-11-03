@@ -356,18 +356,9 @@ func (r *OrganizationUserRoleResource) Schema(ctx context.Context, req resource.
 }
 
 func (r *OrganizationUserRoleResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	if req.ProviderData == nil {
-		return
+	if client, ok := clientFromProviderData(req.ProviderData, "Unexpected Resource Configure Type", &resp.Diagnostics); ok {
+		r.client = client
 	}
-	client, ok := req.ProviderData.(*Client)
-	if !ok {
-		resp.Diagnostics.AddError(
-			"Unexpected Resource Configure Type",
-			fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
-		)
-		return
-	}
-	r.client = client
 }
 
 // orgUserRoleDenyRolesDeclaredKey records, in provider private state, whether

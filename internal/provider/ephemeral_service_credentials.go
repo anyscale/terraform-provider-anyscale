@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework/ephemeral"
 	"github.com/hashicorp/terraform-plugin-framework/ephemeral/schema"
@@ -68,20 +67,9 @@ Every read re-fetches fresh: there is no caching, renewal, or automatic refresh 
 }
 
 func (e *ServiceCredentialsEphemeralResource) Configure(ctx context.Context, req ephemeral.ConfigureRequest, resp *ephemeral.ConfigureResponse) {
-	if req.ProviderData == nil {
-		return
+	if client, ok := clientFromProviderData(req.ProviderData, "Unexpected Ephemeral Resource Configure Type", &resp.Diagnostics); ok {
+		e.client = client
 	}
-
-	client, ok := req.ProviderData.(*Client)
-	if !ok {
-		resp.Diagnostics.AddError(
-			"Unexpected Ephemeral Resource Configure Type",
-			fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
-		)
-		return
-	}
-
-	e.client = client
 }
 
 // Open fetches the service via the existing getServiceByID helper (shared with

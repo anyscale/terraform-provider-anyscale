@@ -220,16 +220,9 @@ func (r *RoleBindingResource) ConfigValidators(ctx context.Context) []resource.C
 }
 
 func (r *RoleBindingResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	if req.ProviderData == nil {
-		return
+	if client, ok := clientFromProviderData(req.ProviderData, "Unexpected Resource Configure Type", &resp.Diagnostics); ok {
+		r.client = client
 	}
-	client, ok := req.ProviderData.(*Client)
-	if !ok {
-		AddConfigError(&resp.Diagnostics, "Unexpected Resource Configure Type",
-			fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", req.ProviderData))
-		return
-	}
-	r.client = client
 }
 
 func (r *RoleBindingResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {

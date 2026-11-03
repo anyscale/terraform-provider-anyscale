@@ -124,20 +124,9 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 
 // Configure adds the provider configured client to the data source.
 func (d *UserDataSource) Configure(ctx context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
-	if req.ProviderData == nil {
-		return
+	if client, ok := clientFromProviderData(req.ProviderData, "Unexpected Data Source Configure Type", &resp.Diagnostics); ok {
+		d.client = client
 	}
-
-	client, ok := req.ProviderData.(*Client)
-	if !ok {
-		AddConfigError(&resp.Diagnostics,
-			"Unexpected Data Source Configure Type",
-			fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
-		)
-		return
-	}
-
-	d.client = client
 }
 
 // userInfoResponse is the subset of GET /api/v2/userinfo this data source

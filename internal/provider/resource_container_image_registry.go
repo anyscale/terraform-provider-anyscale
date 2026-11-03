@@ -182,18 +182,9 @@ func containerImageRegistryAttributes() map[string]schema.Attribute {
 
 // Configure adds the provider configured client to the resource.
 func (r *ContainerImageRegistryResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	if req.ProviderData == nil {
-		return
+	if client, ok := clientFromProviderData(req.ProviderData, "Unexpected Resource Configure Type", &resp.Diagnostics); ok {
+		r.client = client
 	}
-
-	client, ok := req.ProviderData.(*Client)
-	if !ok {
-		AddConfigError(&resp.Diagnostics, "Unexpected Resource Configure Type",
-			fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", req.ProviderData))
-		return
-	}
-
-	r.client = client
 }
 
 // Create creates the resource and sets the initial Terraform state.
