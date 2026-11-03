@@ -334,6 +334,10 @@ ci: deps check test ## Run CI pipeline (deps, check, test)
 #   gcp-gke-basic : GCP + K8S + kubernetes_config
 # ============================================================================
 
+# Unique per run, so concurrent runs never collide on names: the GitHub Actions run ID, else the
+# Buildkite build number and retry count, else the time and shell PID.
+SCENARIO_SUFFIX = $${GITHUB_RUN_ID:-$${BUILDKITE_BUILD_NUMBER:+bk$${BUILDKITE_BUILD_NUMBER}-$${BUILDKITE_RETRY_COUNT:-0}}}; SUFFIX=$${SUFFIX:-$$(date +%s)-$$$$}
+
 .PHONY: test-primary
 test-primary: build ## Run primary test suite (6 tests covering all variations)
 	@echo "==> Running primary test suite..."
@@ -385,14 +389,14 @@ test-primary-gcp: build ## Run primary GCP tests only (3 tests)
 .PHONY: test-aws-vm-basic
 test-aws-vm-basic: build ## Test AWS VM basic (all-in-one pattern)
 	@echo "==> Testing aws-vm-basic scenario..."
-	@SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	@SUFFIX=$(SCENARIO_SUFFIX); \
 	  export TF_VAR_cloud_name=tfacc-aws-vm-basic-$$SUFFIX; \
 	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/aws-vm-basic $(BUILD_DIR)/aws-vm-basic-$$SUFFIX.tfstate
 
 .PHONY: test-aws-vm-full
 test-aws-vm-full: build ## Test AWS VM full (split pattern + EFS + MemoryDB)
 	@echo "==> Testing aws-vm-full scenario..."
-	@SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	@SUFFIX=$(SCENARIO_SUFFIX); \
 	  export TF_VAR_cloud_name=tfacc-aws-vm-full-$$SUFFIX TF_VAR_common_prefix=aws-vm-full-$$SUFFIX- TF_VAR_enable_efs=true TF_VAR_enable_memorydb=true TF_VAR_vpc_cidr_block=172.27.0.0/16 TF_VAR_vpc_public_subnets='["172.27.21.0/24","172.27.22.0/24","172.27.23.0/24"]'; \
 	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/aws-vm $(BUILD_DIR)/aws-vm-full-$$SUFFIX.tfstate
 
@@ -437,7 +441,7 @@ destroy-aws-vm-full: ## Destroy AWS VM full (must match SUFFIX used by apply)
 .PHONY: test-aws-eks-basic
 test-aws-eks-basic: build ## Test AWS EKS basic (K8S)
 	@echo "==> Testing aws-eks-basic scenario..."
-	@SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	@SUFFIX=$(SCENARIO_SUFFIX); \
 	  export TF_VAR_cloud_name=tfacc-aws-eks-basic-$$SUFFIX TF_VAR_eks_cluster_name=tfacc-eks-$$SUFFIX TF_VAR_tags='{"Environment":"test","workload":"tf-provider-e2e-test","Test":"true","Repo":"terraform-kubernetes-anyscale-foundation-modules","Example":"aws/eks-public"}'; \
 	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/aws-eks-basic $(BUILD_DIR)/aws-eks-basic-$$SUFFIX.tfstate
 
@@ -467,14 +471,14 @@ destroy-aws-eks-basic: ## Destroy AWS EKS basic (must match SUFFIX used by apply
 .PHONY: test-gcp-vm-basic
 test-gcp-vm-basic: build ## Test GCP VM basic (all-in-one pattern)
 	@echo "==> Testing gcp-vm-basic scenario..."
-	@SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	@SUFFIX=$(SCENARIO_SUFFIX); \
 	  export TF_VAR_cloud_name=tfacc-gcp-vm-basic-$$SUFFIX; \
 	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/gcp-vm-basic $(BUILD_DIR)/gcp-vm-basic-$$SUFFIX.tfstate
 
 .PHONY: test-gcp-vm-full
 test-gcp-vm-full: build ## Test GCP VM full (split pattern + Filestore + Memorystore)
 	@echo "==> Testing gcp-vm-full scenario..."
-	@SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	@SUFFIX=$(SCENARIO_SUFFIX); \
 	  export TF_VAR_cloud_name=tfacc-gcp-vm-full-$$SUFFIX TF_VAR_common_prefix=gcp-vm-full-$$SUFFIX- TF_VAR_enable_filestore=true TF_VAR_enable_memorystore=true TF_VAR_vpc_public_subnet_cidr=10.103.0.0/16; \
 	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/gcp-vm $(BUILD_DIR)/gcp-vm-full-$$SUFFIX.tfstate
 
@@ -517,7 +521,7 @@ destroy-gcp-vm-full: ## Destroy GCP VM full (must match SUFFIX used by apply)
 .PHONY: test-gcp-gke-basic
 test-gcp-gke-basic: build ## Test GCP GKE basic (K8S)
 	@echo "==> Testing gcp-gke-basic scenario..."
-	@SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	@SUFFIX=$(SCENARIO_SUFFIX); \
 	  export TF_VAR_cloud_name=tfacc-gcp-gke-basic-$$SUFFIX; \
 	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/gcp-gke-basic $(BUILD_DIR)/gcp-gke-basic-$$SUFFIX.tfstate
 
@@ -541,14 +545,14 @@ destroy-gcp-gke-basic: ## Destroy GCP GKE basic (must match SUFFIX used by apply
 .PHONY: test-aws-vm-basic-resource
 test-aws-vm-basic-resource: build ## Test AWS VM split pattern (empty cloud + anyscale_cloud_resource)
 	@echo "==> Testing aws-vm-basic-resource scenario..."
-	@SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	@SUFFIX=$(SCENARIO_SUFFIX); \
 	  export TF_VAR_cloud_name=tfacc-aws-vm-basic-resource-$$SUFFIX TF_VAR_common_prefix=tfacc-avbr-$$SUFFIX-; \
 	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/aws-vm-basic-resource $(BUILD_DIR)/aws-vm-basic-resource-$$SUFFIX.tfstate
 
 .PHONY: test-kitchen-sink
 test-kitchen-sink: build ## Test kitchen-sink (two clouds incl. EKS split pattern, projects, images, compute configs)
 	@echo "==> Testing kitchen-sink scenario..."
-	@SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	@SUFFIX=$(SCENARIO_SUFFIX); \
 	  export TF_VAR_name_prefix=tfacc-ks-$$SUFFIX; \
 	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/kitchen-sink $(BUILD_DIR)/kitchen-sink-$$SUFFIX.tfstate
 
@@ -556,7 +560,7 @@ test-kitchen-sink: build ## Test kitchen-sink (two clouds incl. EKS split patter
 test-container-image-compute-config: build ## Test container image + compute config on an existing cloud (TF_VAR_cloud_id required)
 	@echo "==> Testing container-image-compute-config scenario..."
 	@test -n "$$TF_VAR_cloud_id" || { echo "TF_VAR_cloud_id must name an existing cloud for this scenario" >&2; exit 2; }
-	@SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	@SUFFIX=$(SCENARIO_SUFFIX); \
 	  export SCENARIO_NO_CLOUD=1 TF_VAR_image_name=tfacc-cicc-$$SUFFIX TF_VAR_compute_config_name=tfacc-cicc-$$SUFFIX; \
 	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/container-image-compute-config $(BUILD_DIR)/container-image-compute-config-$$SUFFIX.tfstate
 
@@ -564,7 +568,7 @@ test-container-image-compute-config: build ## Test container image + compute con
 test-azure-aks-basic: build ## Test Azure AKS basic (K8S). Creates real Azure infra; refuses to run without ANYSCALE_TEST_AZURE_APPROVED=1
 	@echo "==> Testing azure-aks-basic scenario..."
 	@test "$$ANYSCALE_TEST_AZURE_APPROVED" = "1" || { echo "Real Azure infrastructure is not approved for testing. Set ANYSCALE_TEST_AZURE_APPROVED=1 only once it is." >&2; exit 2; }
-	@SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	@SUFFIX=$(SCENARIO_SUFFIX); \
 	  export TF_VAR_cloud_name=tfacc-azure-aks-basic-$$SUFFIX TF_VAR_aks_cluster_name=tfacc-aks-$$SUFFIX; \
 	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/azure-aks-basic $(BUILD_DIR)/azure-aks-basic-$$SUFFIX.tfstate
 
