@@ -97,11 +97,13 @@ module "aws_anyscale_v2" {
 
 A few things worth knowing before you run this:
 
-- `anyscale_external_id` is not issued by Anyscale - it's a string you make up, used as the
+- `anyscale_external_id` is not issued by Anyscale - it's a string you make up, but it must start
+  with your Organization ID (for example `org_abc123xyz-my-cloud`): the IAM module rejects other
+  values, and a cloud whose external ID lacks the prefix cannot run services. It is used as the
   external ID on the IAM trust policy this module creates. Anyscale's control plane presents this
   same value back when it assumes the role, which is what prevents the
   [confused deputy problem](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-user_externalid.html)
-  for cross-account role assumption. Pick any value and reuse it consistently for this cloud; it
+  for cross-account role assumption. Reuse the same value consistently for this cloud; it
   doesn't need to be a secret.
 - `security_group_ingress_allow_access_from_cidr_range` takes a single CIDR block (a string), not a
   list - if you need more than one range, look at the module's own variables for the multi-range
