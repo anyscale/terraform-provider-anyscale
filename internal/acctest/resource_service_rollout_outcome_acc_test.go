@@ -55,6 +55,8 @@ type outcomeSnapshot struct {
 	Manual bool
 	// CanaryState is the canary version's current_state; "" means CurrentState.
 	CanaryState string
+	// CanaryRow, when set, is the state of the canary's one per-version checklist row.
+	CanaryRow string
 }
 
 // outcomeApplyResult is the mock's reaction to one PUT /apply call: either an error status, or a
@@ -420,6 +422,12 @@ func (m *outcomeMock) render(s outcomeSnapshot) string {
 		}
 		canary = outcomeVersionJSON(*s.Canary, canaryState)
 	}
+	checklist := "null"
+	if s.Canary != nil && s.CanaryRow != "" {
+		checklist = fmt.Sprintf(`{"shared": [], "per_version": [{"version_id": %q, "items": [
+			{"kind": "APPLICATION", "label": "Application", "state": %q, "message": "application failed", "version_id": %q, "observed_at": null}
+		]}]}`, s.Canary.ID, s.CanaryRow, s.Canary.ID)
+	}
 	endedAt := "null"
 	if s.CurrentState == "TERMINATED" {
 		endedAt = `"2026-01-02T00:00:00Z"`
@@ -438,9 +446,9 @@ func (m *outcomeMock) render(s outcomeSnapshot) string {
 		"creator_id": "usr_outcome", "created_at": "2026-01-01T00:00:00Z",
 		"is_multi_version": false, "auto_rollout_enabled": %t,
 		"service_observability_urls": {},
-		"primary_version": %s, "canary_version": %s, "service_status_checklist": null
+		"primary_version": %s, "canary_version": %s, "service_status_checklist": %s
 	}`, m.serviceID, m.name, m.projectID, token, s.CurrentState, goal, endedAt, !s.Manual,
-		outcomeVersionJSON(s.Primary, primaryState), canary)
+		outcomeVersionJSON(s.Primary, primaryState), canary, checklist)
 }
 
 // outcomeConfig renders the service with the given import_path and extra attribute lines.

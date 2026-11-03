@@ -4,11 +4,14 @@ import (
 	"fmt"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+
+	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 )
 
 // Mock acceptance tests for anyscale_service canary_percent (docs/decisions/service-canary-percent).
@@ -375,7 +378,7 @@ func TestAccServiceResource_CanaryPercentFailedHoldRollsBack(t *testing.T) {
 
 	const name = "canary-failed"
 	failed := heldAt(10, intPtr(0))
-	failed.CanaryState, failed.CurrentState = "UNHEALTHY", "UNHEALTHY"
+	failed.CanaryState, failed.CurrentState, failed.CanaryRow = "UNHEALTHY", "UNHEALTHY", "UNHEALTHY"
 	m, server := newOutcomeMock(t, "svc_canary_failed", name, func(n int, _ map[string]any) outcomeApplyResult {
 		if n == 1 {
 			return outcomeCreate()
@@ -475,4 +478,106 @@ func TestAccServiceResource_CanaryPercentCutoverCompletes(t *testing.T) {
 			},
 		},
 	})
+}
+
+// A single error reading of the canary version, with its checklist row not in error, is not a
+// failure: rolling back is destructive. A canary that recovers is held as planned.
+func TestAccServiceResource_CanaryPercentUnconfirmedFailureNotRolledBack(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const name = "canary-blip"
+	blip := heldAt(10, intPtr(0))
+	blip.CanaryState, blip.CanaryRow = "UNHEALTHY", "STARTING"
+	m, server := newOutcomeMock(t, "svc_canary_blip", name, func(n int, _ map[string]any) outcomeApplyResult {
+		if n == 1 {
+			return outcomeCreate()
+		}
+		return outcomeApplyResult{Response: heldAt(10, nil), Script: []outcomeSnapshot{blip, heldAt(10, intPtr(10))}}
+	})
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: outcomeConfig(server.URL, name, "main:app", "")},
+			{
+				Config: outcomeConfig(server.URL, name, "main:app_v2", "  canary_percent    = 10"),
+				Check:  resource.TestCheckResourceAttr("anyscale_service.test", "canary_version.current_weight", "10"),
+			},
+		},
+	})
+	for _, e := range m.eventLog() {
+		if e == "rollback" {
+			t.Errorf("events = %v, want no rollback for an unconfirmed failure", m.eventLog())
+		}
+	}
+}
+
+// A 100 cutover that Anyscale does not complete fails the apply after the grace period, and the
+// canary stays this resource's hold: removing canary_percent then re-sends the held config
+// without it, which finishes the rollout.
+func TestAccServiceResource_CanaryPercentCutoverNotCompletedThenNullFinishes(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	t.Cleanup(provider.SetServiceCutoverGraceForTest(time.Millisecond))
+
+	const name = "canary-cutover-stuck"
+	m, server := newOutcomeMock(t, "svc_canary_cutover_stuck", name, func(n int, _ map[string]any) outcomeApplyResult {
+		switch n {
+		case 1:
+			return outcomeCreate()
+		case 2:
+			return outcomeApplyResult{Response: heldAt(100, intPtr(0)), Script: []outcomeSnapshot{heldAt(100, intPtr(100))}}
+		default:
+			return outcomeApplyResult{Response: heldAt(100, intPtr(100)), Script: []outcomeSnapshot{{CurrentState: "RUNNING", Primary: outcomeV2}}}
+		}
+	})
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: outcomeConfig(server.URL, name, "main:app", "")},
+			{
+				Config:      outcomeConfig(server.URL, name, "main:app_v2", "  canary_percent    = 100"),
+				ExpectError: regexp.MustCompile(`Canary Rollout Not Completed`),
+			},
+			{
+				Config: outcomeConfig(server.URL, name, "main:app_v2", ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					expectOutcomeApplyCount(m, 3),
+					canaryApplyBodyCheck(m, 2, nil, "main:app_v2", false),
+					resource.TestCheckResourceAttr("anyscale_service.test", "primary_version.id", "svcver_v2"),
+				),
+			},
+		},
+	})
+}
+
+// A canary failing at 100 is a manual rollout too, so Anyscale never rolls it back; the apply
+// does, rather than leave all traffic on a failed version.
+func TestAccServiceResource_CanaryPercentCutoverFailureRollsBack(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const name = "canary-cutover-failed"
+	failed := heldAt(100, intPtr(100))
+	failed.CanaryState, failed.CurrentState, failed.CanaryRow = "UNHEALTHY", "UNHEALTHY", "UNHEALTHY"
+	m, server := newOutcomeMock(t, "svc_canary_cutover_failed", name, func(n int, _ map[string]any) outcomeApplyResult {
+		if n == 1 {
+			return outcomeCreate()
+		}
+		return outcomeApplyResult{Response: heldAt(100, intPtr(0)), Script: []outcomeSnapshot{failed}}
+	})
+	m.rollbackScript = []outcomeSnapshot{{CurrentState: "RUNNING", Primary: outcomeV1}}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: outcomeConfig(server.URL, name, "main:app", "")},
+			{
+				Config:      outcomeConfig(server.URL, name, "main:app_v2", "  canary_percent    = 100"),
+				ExpectError: regexp.MustCompile(`Service Rollout Rolled Back`),
+			},
+		},
+	})
+	if got := m.eventLog(); fmt.Sprint(got) != fmt.Sprint([]string{"apply", "apply", "rollback"}) {
+		t.Errorf("events = %v, want the failed cutover rolled back", got)
+	}
 }

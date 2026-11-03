@@ -48,7 +48,7 @@ func TestServiceCutoverObserver(t *testing.T) {
 	at := func(weight *int64) *ServiceResult {
 		return &ServiceResult{CanaryVersion: &ServiceVersionResult{ID: "v2", CurrentWeight: weight}}
 	}
-	observe := serviceCutoverObserver(nil)
+	observe := serviceCutoverObserver(nil, true)
 	if observe(at(w(100))) {
 		t.Fatal("ended the wait the moment the canary reached 100%; want a grace period for completion")
 	}
@@ -61,7 +61,7 @@ func TestServiceCutoverObserver(t *testing.T) {
 	if !observe(at(w(100))) {
 		t.Fatal("still waiting after the canary served 100% past the grace period; want the wait to end")
 	}
-	if serviceCutoverObserver(func(*ServiceResult) bool { return true })(at(w(5))) != true {
+	if serviceCutoverObserver(func(*ServiceResult) bool { return true }, true)(at(w(5))) != true {
 		t.Fatal("did not pass through the wrapped observer's decision")
 	}
 }

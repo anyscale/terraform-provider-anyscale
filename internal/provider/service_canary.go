@@ -95,6 +95,27 @@ func serviceHoldSettled(s *ServiceResult, percent int64) bool {
 	return true
 }
 
+// serviceCanaryFailed reports a canary that has failed: its version is in an error state, and so is
+// at least one of its own checklist rows. Rolling back is destructive, so a single error reading
+// of the version alone is not enough; on a real failure the row follows within seconds.
+func serviceCanaryFailed(s *ServiceResult) bool {
+	c := s.CanaryVersion
+	if c == nil || !serviceErrorStates[c.CurrentState] || s.ServiceStatusChecklist == nil {
+		return false
+	}
+	for _, group := range s.ServiceStatusChecklist.PerVersion {
+		if group.VersionID != c.ID {
+			continue
+		}
+		for _, item := range group.Items {
+			if serviceErrorStates[item.State] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // waitForServiceHold waits for the canary canaryID to serve percent of traffic. It fails when the
 // service is terminated or the canary is gone (rolled back or completed outside this apply), and
 // on timeout.
@@ -118,7 +139,7 @@ func waitForServiceHoldWithTiming(ctx context.Context, client *Client, serviceID
 				canaryID, service.CurrentState)
 		case serviceHoldSettled(service, percent):
 			return service, nil
-		case serviceErrorStates[service.CanaryVersion.CurrentState]:
+		case serviceCanaryFailed(service):
 			return service, fmt.Errorf("%w: canary %s is %s", errServiceCanaryFailed, service.CanaryVersion.ID, service.CanaryVersion.CurrentState)
 		}
 		if time.Now().After(deadline) {
@@ -236,8 +257,14 @@ func (r *ServiceResource) shiftHeldCanary(ctx context.Context, plan, state *Serv
 		return
 	}
 
-	// Completing: the held version becomes primary. Tracking keeps it pending until then.
+	// Completing: the held version becomes primary. Tracking keeps it pending until then. A 100
+	// cutover is still a held manual canary until it completes, so a later null can finish it.
+	cutover := plan.CanaryPercent.ValueInt64() == serviceCanaryCutover && !plan.CanaryPercent.IsNull()
 	pending := &serviceVersionTracking{VersionID: tracking.VersionID, Pending: true, PendingVersionID: heldID}
+	if cutover {
+		pending.HeldVersionID = heldID
+		pending.PreCanaryFingerprint = tracking.PreCanaryFingerprint
+	}
 	resp.Diagnostics.Append(setServiceVersionTracking(ctx, resp.Private, pending)...)
 	resp.Diagnostics.Append(populateServiceResourceModelComputed(ctx, plan, &applyResp.Result)...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
@@ -246,7 +273,7 @@ func (r *ServiceResource) shiftHeldCanary(ctx context.Context, plan, state *Serv
 	}
 	observer := newServiceRolloutObserver(heldID)
 	observer.observe(&applyResp.Result)
-	final, err := waitForServiceRollout(ctx, r.client, serviceID, timeout, serviceCutoverObserver(observer.observeUntilRolledBack))
+	final, err := waitForServiceRollout(ctx, r.client, serviceID, timeout, serviceCutoverObserver(observer.observeUntilRolledBack, cutover))
 	if final != nil {
 		resp.Diagnostics.Append(populateServiceResourceModelComputed(ctx, plan, final)...)
 		refreshServiceTagsIntoModel(ctx, r.client, serviceID, &plan.Tags)
@@ -256,8 +283,7 @@ func (r *ServiceResource) shiftHeldCanary(ctx context.Context, plan, state *Serv
 		AddAPIError(&resp.Diagnostics, "wait for service rollout", err)
 		return
 	}
-	if final.CanaryVersion != nil {
-		addServiceCutoverNotCompletedError(&resp.Diagnostics, serviceID, final)
+	if cutover && r.settleCutover(ctx, plan, state, final, timeout, resp) {
 		return
 	}
 	if final.PrimaryVersion == nil {
@@ -283,11 +309,17 @@ var serviceCutoverGrace = 5 * time.Minute
 // serviceCutoverObserver ends a rollout wait (successfully, from the poller's view) once the
 // canary has served 100% for longer than serviceCutoverGrace: where Anyscale does not complete
 // manual rollouts, it never will. The caller then reports the canary still present.
-func serviceCutoverObserver(next func(*ServiceResult) bool) func(*ServiceResult) bool {
+func serviceCutoverObserver(next func(*ServiceResult) bool, cutover bool) func(*ServiceResult) bool {
 	var fullSince time.Time
 	return func(s *ServiceResult) bool {
 		if next != nil && next(s) {
 			return true
+		}
+		if !cutover {
+			return false
+		}
+		if serviceCanaryFailed(s) {
+			return true // a manual rollout's failed canary is never rolled back by Anyscale
 		}
 		c := s.CanaryVersion
 		if c == nil || c.CurrentWeight == nil || *c.CurrentWeight != serviceCanaryCutover {
@@ -299,6 +331,30 @@ func serviceCutoverObserver(next func(*ServiceResult) bool) func(*ServiceResult)
 		}
 		return time.Since(fullSince) > serviceCutoverGrace
 	}
+}
+
+// SetServiceCutoverGraceForTest shortens the 100% cutover grace for acceptance tests in another
+// package, returning a func that restores it.
+func SetServiceCutoverGraceForTest(d time.Duration) (restore func()) {
+	orig := serviceCutoverGrace
+	serviceCutoverGrace = d
+	return func() { serviceCutoverGrace = orig }
+}
+
+// settleCutover handles a canary still present when a 100% cutover wait ended: a failed canary is
+// rolled back (decision 14 applies, as Anyscale never rolls back a manual rollout); otherwise the
+// rollout did not complete. It reports whether it handled final.
+func (r *ServiceResource) settleCutover(ctx context.Context, plan, prior *ServiceResourceModel, final *ServiceResult,
+	timeout time.Duration, resp *resource.UpdateResponse) bool {
+	if final == nil || final.CanaryVersion == nil {
+		return false
+	}
+	if serviceCanaryFailed(final) {
+		r.rollBackFailedCanary(ctx, plan, prior, final.CanaryVersion.ID, final, timeout, resp)
+		return true
+	}
+	addServiceCutoverNotCompletedError(&resp.Diagnostics, plan.ID.ValueString(), final)
+	return true
 }
 
 // addServiceCutoverNotCompletedError reports a canary still present after the 100 cutover's grace.

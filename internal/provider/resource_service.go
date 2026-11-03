@@ -1419,6 +1419,8 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 	}
 	holdPercent, hold := serviceHoldPercent(&plan)
 	hold = hold && !restart
+	// A 100 cutover is a held manual canary until it completes, so a later null can finish it.
+	cutover := !restart && !plan.CanaryPercent.IsNull() && plan.CanaryPercent.ValueInt64() == serviceCanaryCutover
 	if !restart && !plan.CanaryPercent.IsNull() && !plan.CanaryPercent.IsUnknown() {
 		v := plan.CanaryPercent.ValueInt64()
 		applyBody.CanaryPercent = &v
@@ -1466,7 +1468,7 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 	if priorTracking != nil && priorTracking.VersionID != "" {
 		pending.VersionID = priorTracking.VersionID
 	}
-	if hold {
+	if hold || cutover {
 		pending.HeldVersionID = newVersionID
 		pending.PreCanaryFingerprint = preCanaryFingerprint
 	}
@@ -1487,7 +1489,7 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 
 	observer := newServiceRolloutObserver(newVersionID)
 	observer.observe(&service)
-	finalService, err := waitForServiceRollout(ctx, r.client, service.ID, timeout, serviceCutoverObserver(observer.observeUntilRolledBack))
+	finalService, err := waitForServiceRollout(ctx, r.client, service.ID, timeout, serviceCutoverObserver(observer.observeUntilRolledBack, cutover))
 	if finalService != nil {
 		diags := populateServiceResourceModelComputed(ctx, &plan, finalService)
 		resp.Diagnostics.Append(diags...)
@@ -1497,6 +1499,9 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 	if err != nil {
 		// The rollout continues server-side; the pending tracking lets Read settle it later.
 		AddAPIError(&resp.Diagnostics, "wait for service rollout", err)
+		return
+	}
+	if cutover && r.settleCutover(ctx, &plan, &state, finalService, timeout, resp) {
 		return
 	}
 
