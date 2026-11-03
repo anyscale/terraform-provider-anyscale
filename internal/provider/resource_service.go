@@ -1616,9 +1616,13 @@ func (r *ServiceResource) Delete(ctx context.Context, req resource.DeleteRequest
 		http.StatusAccepted,
 	)
 	if err != nil {
-		if isGoneOrForbidden(err) {
+		if errors.Is(err, ErrNotFound) {
 			tflog.Info(ctx, "Service already gone", map[string]any{"service_id": serviceID})
-			addForbiddenTreatedAsDeletedOnDestroyWarning(&resp.Diagnostics, "Service", serviceID, err)
+			return
+		}
+		if isHTTPStatus(err, http.StatusForbidden) {
+			confirmGoneAfterForbiddenDelete(ctx, &resp.Diagnostics, "Service", serviceID, err,
+				readBackByGET(ctx, r.client, fmt.Sprintf("/api/v2/services-v2/%s", serviceID)))
 			return
 		}
 		AddAPIError(&resp.Diagnostics, "terminate service", err)
@@ -1653,7 +1657,8 @@ func (r *ServiceResource) Delete(ctx context.Context, req resource.DeleteRequest
 		http.StatusNoContent, http.StatusNotFound,
 	)
 	if isHTTPStatus(err, http.StatusForbidden) {
-		addForbiddenTreatedAsDeletedOnDestroyWarning(&resp.Diagnostics, "Service", serviceID, err)
+		confirmGoneAfterForbiddenDelete(ctx, &resp.Diagnostics, "Service", serviceID, err,
+			readBackByGET(ctx, r.client, fmt.Sprintf("/api/v2/services-v2/%s", serviceID)))
 		return
 	}
 	if err != nil {

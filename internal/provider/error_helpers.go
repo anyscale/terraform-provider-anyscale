@@ -173,3 +173,50 @@ func addForbiddenTreatedAsDeletedOnDestroyWarning(diags *diag.Diagnostics, kind,
 			kind, id, strings.ToLower(kind)),
 	)
 }
+
+// confirmGoneAfterForbiddenDelete decides a destroy whose delete call answered 403. That status
+// is ambiguous: the API answers 403 for an object that is already gone, but also for one the
+// credentials can see and are not allowed to delete. Accepting every 403 as gone would end the
+// destroy successfully while the object keeps running, unmanaged. So the object is read back:
+//
+//   - still readable: the delete was refused, so the destroy fails and state is kept;
+//   - 404: it is gone, and the destroy finishes silently;
+//   - 403: it is not visible either, so it is treated as gone with the destroy warning;
+//   - any other failure: whether it is gone is unknown, so the destroy fails and can be retried.
+//
+// readBack returns nil when the object can still be read, and otherwise the error that stopped
+// it. kind is the resource's display noun ("Cloud", "Cloud Resource").
+func confirmGoneAfterForbiddenDelete(ctx context.Context, diags *diag.Diagnostics, kind, id string, deleteErr error, readBack func() error) {
+	noun := strings.ToLower(kind)
+	err := readBack()
+	switch {
+	case err == nil:
+		tflog.Warn(ctx, "Delete returned 403 but the object can still be read", map[string]any{"kind": kind, "id": id})
+		diags.AddError(
+			kind+" Was Not Deleted",
+			fmt.Sprintf("Deleting %s %s was refused with HTTP 403 (%s), and the %s can still be read, so it still exists: "+
+				"the credentials in use can see it but are not allowed to delete it. Destroy it with an identity that may delete it, "+
+				"or run terraform state rm to stop managing it without deleting it.",
+				noun, id, extractAPIErrorDetail(deleteErr), noun),
+		)
+	case isGoneOrForbidden(err):
+		tflog.Info(ctx, "Delete returned 403 and the object can no longer be read; treating it as deleted", map[string]any{"kind": kind, "id": id})
+		addForbiddenTreatedAsDeletedOnDestroyWarning(diags, kind, id, err)
+	default:
+		diags.AddError(
+			"Could Not Confirm "+kind+" Deletion",
+			fmt.Sprintf("Deleting %s %s was refused with HTTP 403 (%s), and reading it back to tell whether it is already gone failed: %s. "+
+				"Retry the destroy.",
+				noun, id, extractAPIErrorDetail(deleteErr), extractAPIErrorDetail(err)),
+		)
+	}
+}
+
+// readBackByGET is the readBack for confirmGoneAfterForbiddenDelete when one GET of path tells
+// whether the object still exists.
+func readBackByGET(ctx context.Context, client *Client, path string) func() error {
+	return func() error {
+		_, err := DoRequestRaw(ctx, client, "GET", path, nil, http.StatusOK)
+		return err
+	}
+}

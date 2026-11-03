@@ -335,8 +335,8 @@ func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest
 		// Reached only after deleteProjectWithRetry has ridden out the just-created permission
 		// race, or for a project outside its window, so a fresh project is not dropped early.
 		if isHTTPStatus(err, http.StatusForbidden) {
-			tflog.Warn(ctx, "Project delete returned 403, treating as already deleted", map[string]any{"project_id": projectID})
-			addForbiddenTreatedAsDeletedOnDestroyWarning(&resp.Diagnostics, "Project", projectID, err)
+			confirmGoneAfterForbiddenDelete(ctx, &resp.Diagnostics, "Project", projectID, err,
+				readBackByGET(ctx, r.client, fmt.Sprintf("/api/v2/projects/%s", projectID)))
 			return
 		}
 		AddAPIError(&resp.Diagnostics, "delete project", err)
