@@ -560,6 +560,14 @@ test-container-image-compute-config: build ## Test container image + compute con
 	  export SCENARIO_NO_CLOUD=1 TF_VAR_image_name=tfacc-cicc-$$SUFFIX TF_VAR_compute_config_name=tfacc-cicc-$$SUFFIX; \
 	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/container-image-compute-config $(BUILD_DIR)/container-image-compute-config-$$SUFFIX.tfstate
 
+.PHONY: test-azure-aks-basic
+test-azure-aks-basic: build ## Test Azure AKS basic (K8S). Creates real Azure infra; refuses to run without ANYSCALE_TEST_AZURE_APPROVED=1
+	@echo "==> Testing azure-aks-basic scenario..."
+	@test "$$ANYSCALE_TEST_AZURE_APPROVED" = "1" || { echo "Real Azure infrastructure is not approved for testing. Set ANYSCALE_TEST_AZURE_APPROVED=1 only once it is." >&2; exit 2; }
+	@SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	  export TF_VAR_cloud_name=tfacc-azure-aks-basic-$$SUFFIX TF_VAR_aks_cluster_name=tfacc-aks-$$SUFFIX; \
+	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/azure-aks-basic $(BUILD_DIR)/azure-aks-basic-$$SUFFIX.tfstate
+
 # ============================================================================
 # VERSION HELPERS
 # ============================================================================
