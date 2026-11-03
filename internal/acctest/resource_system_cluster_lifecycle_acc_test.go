@@ -88,7 +88,7 @@ func newMockSystemClusterServer(t *testing.T) (*httptest.Server, *mockSystemClus
 					"zones": ["us-east-2a", "us-east-2b"], "security_group_ids": ["sg-lc-1"],
 					"anyscale_iam_role_id": "arn:aws:iam::123456789012:role/syscluster-lc-crossaccount",
 					"cluster_iam_role_id": "arn:aws:iam::123456789012:role/syscluster-lc-cluster-node",
-					"external_id": "syscluster-lc-external-id"
+					"external_id": "org_syscluster-lc-external-id"
 				},
 				"object_storage": {"bucket_name": "s3://syscluster-lc-bucket"}
 			}],
@@ -237,7 +237,7 @@ resource "anyscale_cloud" "test" {
     security_group_ids        = ["sg-lc-1"]
     controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/syscluster-lc-crossaccount"
     dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/syscluster-lc-cluster-node"
-    external_id               = "syscluster-lc-external-id"
+    external_id               = "org_syscluster-lc-external-id"
   }
 
   object_storage {

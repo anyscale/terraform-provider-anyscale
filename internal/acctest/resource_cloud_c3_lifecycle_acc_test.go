@@ -146,7 +146,7 @@ func TestAccCloudResource_Lifecycle_AWS_MockServer(t *testing.T) {
 			"anyscale_iam_role_id": "arn:aws:iam::123456789012:role/real-crossaccount",
 			"cluster_iam_role_id": "arn:aws:iam::123456789012:role/real-cluster-node",
 			"cluster_instance_profile_id": "arn:aws:iam::123456789012:instance-profile/real-cluster-node",
-			"external_id": "real-external-id"
+			"external_id": "org_real-external-id"
 		},
 		"object_storage": {"bucket_name": "s3://real-bucket-name"}
 	}]`
@@ -169,7 +169,7 @@ resource "anyscale_cloud" "test" {
     controlplane_iam_role_arn   = "arn:aws:iam::123456789012:role/real-crossaccount"
     dataplane_iam_role_arn      = "arn:aws:iam::123456789012:role/real-cluster-node"
     cluster_instance_profile_id = "arn:aws:iam::123456789012:instance-profile/real-cluster-node"
-    external_id                = "real-external-id"
+    external_id                = "org_real-external-id"
   }
 
   object_storage {
@@ -699,7 +699,7 @@ func TestAccCloudResource_CloudResourceIDPopulated_MockServer(t *testing.T) {
 			"security_group_ids": ["sg-real1"],
 			"anyscale_iam_role_id": "arn:aws:iam::123456789012:role/real-crossaccount",
 			"cluster_iam_role_id": "arn:aws:iam::123456789012:role/real-cluster-node",
-			"external_id": "real-external-id"
+			"external_id": "org_real-external-id"
 		},
 		"object_storage": {"bucket_name": "s3://real-bucket-name"}
 	}]`, wantResourceID)
@@ -721,7 +721,7 @@ resource "anyscale_cloud" "test" {
     security_group_ids        = ["sg-real1"]
     controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/real-crossaccount"
     dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/real-cluster-node"
-    external_id               = "real-external-id"
+    external_id               = "org_real-external-id"
   }
 
   object_storage {

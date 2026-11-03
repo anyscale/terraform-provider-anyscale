@@ -17,7 +17,7 @@ variable "customer_ingress_cidr_ranges" {
 }
 
 variable "anyscale_external_id" {
-  description = "A string that will be used for the IAM trust policy external ID."
+  description = "IAM trust policy external ID. Must start with your org ID."
   type        = string
 }
 

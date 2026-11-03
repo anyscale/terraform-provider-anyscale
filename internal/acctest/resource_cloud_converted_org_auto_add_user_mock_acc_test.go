@@ -137,7 +137,7 @@ resource "anyscale_cloud" "test" {
     security_group_ids        = ["sg-realct1"]
     controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/real-crossaccount"
     dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/real-cluster-node"
-    external_id               = "real-external-id-ct"
+    external_id               = "org_real-external-id-ct"
   }
 
   object_storage {
