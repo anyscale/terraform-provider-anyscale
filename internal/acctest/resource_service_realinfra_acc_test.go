@@ -37,11 +37,7 @@ func TestAccServiceResource_RealInfra(t *testing.T) {
 	SkipIfNoRealInfra(t)
 	t.Parallel()
 
-	cloud := pinnedVMCloud(t)
-	instanceTypes := cloud.InstanceTypes()
-	if !instanceTypes.IsValid() {
-		t.Skip("No valid instance types on the resolved cloud")
-	}
+	cloud, headInstanceType := pinnedWorkloadCloud(t)
 
 	// CreateEphemeralTestProjectForCloud, NOT an auto-discovered org-wide "default" project: that
 	// default project can legitimately be homed on a DIFFERENT cloud than the one resolved above,
@@ -98,7 +94,7 @@ resource "anyscale_service" "test" {
     purpose = "tfacc-real-infra-gate"
   }
 }
-`, computeConfigName, cloud.ID, instanceTypes.Small, serviceName, projectID)
+`, computeConfigName, cloud.ID, headInstanceType, serviceName, projectID)
 
 	// updatedConfig changes ONLY ray_serve_config (adds a real env_var) - a genuine
 	// deploy-affecting field change, so it must roll out a new version in place (same id, not
@@ -147,7 +143,7 @@ resource "anyscale_service" "test" {
     purpose = "tfacc-real-infra-gate"
   }
 }
-`, computeConfigName, cloud.ID, instanceTypes.Small, serviceName, projectID)
+`, computeConfigName, cloud.ID, headInstanceType, serviceName, projectID)
 
 	var serviceIDAfterCreate string
 
@@ -228,11 +224,7 @@ func TestAccServiceResource_RealInfra_InPlaceRollout(t *testing.T) {
 	SkipIfNoRealInfra(t)
 	t.Parallel()
 
-	cloud := pinnedVMCloud(t)
-	instanceTypes := cloud.InstanceTypes()
-	if !instanceTypes.IsValid() {
-		t.Skip("No valid instance types on the resolved cloud")
-	}
+	cloud, headInstanceType := pinnedWorkloadCloud(t)
 
 	// CreateEphemeralTestProjectForCloud, NOT an auto-discovered default project - see the
 	// identical comment on TestAccServiceResource_RealInfra above for why.
@@ -280,7 +272,7 @@ resource "anyscale_service" "test" {
     purpose = "tfacc-real-infra-gate-inplace"
   }
 }
-`, computeConfigName, cloud.ID, instanceTypes.Small, serviceName, projectID)
+`, computeConfigName, cloud.ID, headInstanceType, serviceName, projectID)
 
 	// updatedConfig switches to rollout_strategy = IN_PLACE AND changes ray_serve_config in the
 	// same apply - the one field IN_PLACE permits changing (enforced at plan time by ModifyPlan;
@@ -326,7 +318,7 @@ resource "anyscale_service" "test" {
     purpose = "tfacc-real-infra-gate-inplace"
   }
 }
-`, computeConfigName, cloud.ID, instanceTypes.Small, serviceName, projectID)
+`, computeConfigName, cloud.ID, headInstanceType, serviceName, projectID)
 
 	var serviceIDAfterCreate string
 

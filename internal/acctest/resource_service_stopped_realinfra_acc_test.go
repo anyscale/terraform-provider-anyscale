@@ -31,11 +31,7 @@ func TestAccServiceResource_RealInfra_StopAndRestart(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	SkipIfNoRealInfra(t)
 
-	cloud := pinnedVMCloud(t)
-	instanceTypes := cloud.InstanceTypes()
-	if !instanceTypes.IsValid() {
-		t.Skip("No valid instance types on the resolved cloud")
-	}
+	cloud, headInstanceType := pinnedWorkloadCloud(t)
 	// Scoped to the cloud: see TestAccServiceResource_RealInfra for why not the default project.
 	projectID, _, err := CreateEphemeralTestProjectForCloud(t, cloud.ID)
 	if err != nil {
@@ -76,7 +72,7 @@ resource "anyscale_service" "test" {
     ]
   }
 }
-`, computeConfigName, cloud.ID, instanceTypes.Small, serviceName, projectID, stopped)
+`, computeConfigName, cloud.ID, headInstanceType, serviceName, projectID, stopped)
 	}
 
 	var serviceID, hostname, createdVersionID string
