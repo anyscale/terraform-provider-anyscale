@@ -145,14 +145,23 @@ func (m *cloudAccessReconcileMock) handler(t *testing.T, cloudID string) http.Ha
 	mux.HandleFunc("/api/v2/organization_collaborators", func(w http.ResponseWriter, r *http.Request) {
 		// Filtered as the backend does: email is a case-insensitive substring match; with no
 		// type parameter only user accounts come back; is_service_account=true returns only
-		// service accounts; collaborator_type=all_accounts returns both.
+		// service accounts; collaborator_type, when set, takes priority, and an unknown value is
+		// a 422.
 		q := r.URL.Query()
 		wantUsers, wantServiceAccounts := true, false
-		switch {
-		case q.Get("collaborator_type") == "all_accounts":
+		switch q.Get("collaborator_type") {
+		case "all_accounts":
 			wantServiceAccounts = true
-		case q.Get("collaborator_type") == "only_service_accounts", q.Get("is_service_account") == "true":
+		case "only_service_accounts":
 			wantUsers, wantServiceAccounts = false, true
+		case "only_user_accounts":
+		case "":
+			if q.Get("is_service_account") == "true" {
+				wantUsers, wantServiceAccounts = false, true
+			}
+		default:
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			return
 		}
 		emailFilter := strings.ToLower(q.Get("email"))
 		results := []map[string]interface{}{}
