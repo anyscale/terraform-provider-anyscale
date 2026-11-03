@@ -16,12 +16,10 @@ import (
 )
 
 // orgCollaboratorListIncludes reports whether GET /api/v2/organization_collaborators
-// returns a record of the given account type for query q, following the
-// backend's precedence: collaborator_type wins when present; otherwise
-// is_service_account selects one kind; with neither, only user accounts are
-// returned. A mock that filters through it cannot find a service account for a
-// lookup that forgets the account-type parameter, any more than the real API
-// can.
+// returns a record of the given account type for query q, with the precedence
+// described on orgCollaboratorTypeAllAccounts. A mock that filters through it
+// cannot find a service account for a lookup that forgets the account-type
+// parameter, any more than the real API can.
 func orgCollaboratorListIncludes(q url.Values, isServiceAccount bool) bool {
 	switch q.Get(orgCollaboratorTypeParam) {
 	case orgCollaboratorTypeAllAccounts:
@@ -138,8 +136,7 @@ var (
 
 // The by-email lookup behind anyscale_cloud_access, anyscale_organization_user_role
 // and anyscale_organization_user resolves a service account, asking for every
-// account type in the same request as the email. The backend lists user
-// accounts only unless asked.
+// account type in the same request as the email.
 func TestListOrgCollaboratorByEmail_AsksForAllAccountsInOneRequest(t *testing.T) {
 	client, queries := newOrgCollaboratorAccountTypeMock(t, accountTypeUser, accountTypeSA)
 

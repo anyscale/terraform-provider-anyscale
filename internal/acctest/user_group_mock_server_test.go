@@ -65,8 +65,7 @@ type userGroupMockUser struct {
 	IdentityID string
 	Email      string
 	Name       string
-	// IsServiceAccount marks a service account. The collaborator list returns
-	// one only when asked for that account type, as the backend does.
+	// IsServiceAccount marks a service account (see userGroupMockListIncludes).
 	IsServiceAccount bool
 }
 
@@ -393,10 +392,8 @@ func (m *userGroupMockServer) serveMembers(w http.ResponseWriter, r *http.Reques
 	m.reply(w, http.StatusNoContent, nil)
 }
 
-// userGroupMockListIncludes follows the backend's account-type precedence for
-// GET /api/v2/organization_collaborators: collaborator_type wins when present,
-// otherwise is_service_account selects one kind, and with neither only user
-// accounts are returned.
+// userGroupMockListIncludes applies the account-type precedence described on
+// orgCollaboratorTypeAllAccounts (provider/resource_organization_user.go).
 func userGroupMockListIncludes(q url.Values, isServiceAccount bool) bool {
 	switch q.Get("collaborator_type") {
 	case "all_accounts":

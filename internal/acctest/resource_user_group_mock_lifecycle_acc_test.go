@@ -207,9 +207,7 @@ func TestAccUserGroupMembersResource_MockLifecycle(t *testing.T) {
 }
 
 // TestAccUserGroupMembersResource_MockServiceAccountMember: a service account
-// declared by email resolves and is added like a user. The organization list
-// returns user accounts only unless asked for every account type, so a lookup
-// that does not ask reports the service account as not a member.
+// declared by email resolves and is added like a user.
 func TestAccUserGroupMembersResource_MockServiceAccountMember(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	robot := userGroupMockUser{

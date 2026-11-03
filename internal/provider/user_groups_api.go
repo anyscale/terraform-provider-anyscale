@@ -284,9 +284,8 @@ func removeAllUserGroupMembers(ctx context.Context, client *Client, groupID stri
 // case-insensitively; the result is keyed by the email as given.
 //
 // The listing asks for every account type, so a service account resolves like
-// a user; without that the backend returns user accounts only. An email that
-// matches more than one record (a user and a service account sharing the
-// address) is reported rather than resolved to either.
+// a user. An email that matches more than one record (a user and a service
+// account sharing the address) is reported rather than resolved to either.
 //
 // Every email that cannot be resolved is reported together, so one apply
 // names all of them.

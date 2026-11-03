@@ -109,8 +109,7 @@ func (d *OrganizationUserDataSource) Read(ctx context.Context, req datasource.Re
 	var lookupDiags diag.Diagnostics
 	var err error
 
-	// Every lookup mode covers service accounts as well as users; the list returns user
-	// accounts only unless asked for every account type.
+	// Every lookup mode covers service accounts as well as users.
 	allAccounts := url.Values{orgCollaboratorTypeParam: []string{orgCollaboratorTypeAllAccounts}}
 	if !config.ID.IsNull() {
 		// Look up by identity ID

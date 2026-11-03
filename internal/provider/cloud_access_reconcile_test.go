@@ -110,8 +110,7 @@ type cloudAccessMockIdentity struct {
 	// Defaults to "collaborator" when unset, so only a test that cares about
 	// J.22's org-admin guard needs to set it.
 	PermissionLevel string
-	// ServiceAccount marks a service account, which the organization collaborators list returns
-	// only when asked for service accounts (see the list handler).
+	// ServiceAccount marks a service account (see the list handler).
 	ServiceAccount bool
 }
 
@@ -143,10 +142,7 @@ func (m *cloudAccessReconcileMock) handler(t *testing.T, cloudID string) http.Ha
 	})
 
 	mux.HandleFunc("/api/v2/organization_collaborators", func(w http.ResponseWriter, r *http.Request) {
-		// Filtered as the backend does: email is a case-insensitive substring match; with no
-		// type parameter only user accounts come back; is_service_account=true returns only
-		// service accounts; collaborator_type, when set, takes priority, and an unknown value is
-		// a 422.
+		// Filtered as the backend does; see handleList in resource_organization_user_role_test.go.
 		q := r.URL.Query()
 		wantUsers, wantServiceAccounts := true, false
 		switch q.Get("collaborator_type") {

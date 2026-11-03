@@ -44,8 +44,7 @@ type orgUserFixture struct {
 	identityID string
 	userID     string
 	email      string
-	// isServiceAccount marks a service account, which the list returns only
-	// when asked for that account type (see orgCollaboratorListIncludes).
+	// isServiceAccount marks a service account (see orgCollaboratorListIncludes).
 	isServiceAccount bool
 }
 
@@ -268,9 +267,7 @@ func TestOrganizationUserCreate_AdoptsExistingMemberWithoutInviting(t *testing.T
 }
 
 // TestOrganizationUserCreate_AdoptsExistingServiceAccount: a service account
-// that is already a member is adopted, not invited. The list returns user
-// accounts only unless asked for every account type; a lookup that does not ask
-// misses the service account and sends an invitation to its address instead.
+// that is already a member is adopted, not invited.
 func TestOrganizationUserCreate_AdoptsExistingServiceAccount(t *testing.T) {
 	httpServer, mock := newMockOrgUserServer(t)
 	r := &OrganizationUserResource{client: NewClientWithToken(httpServer.URL, "test-token")}

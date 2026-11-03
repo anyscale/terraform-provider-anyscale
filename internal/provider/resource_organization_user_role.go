@@ -598,11 +598,9 @@ func findOrgCollaboratorByEmail(ctx context.Context, client *Client, email strin
 // match is made client-side and case-insensitively (EqualFold); email identity
 // is case-insensitive.
 //
-// The request asks for every account type. Without that the backend returns
-// user accounts only, and a service account declared by email is reported as
-// not a member at all. Because both kinds are now listed, one email can match
-// two different records (a user and a service account); that is an error
-// naming both rather than a guess at which one was meant.
+// The request asks for every account type, so a service account resolves too.
+// One email can then match two records (a user and a service account); that is
+// an error naming both rather than a guess at which one was meant.
 func listOrgCollaboratorByEmail(ctx context.Context, client *Client, email string) (*OrganizationCollaboratorResult, error) {
 	collaborators, err := listAllOrganizationCollaborators(ctx, client, url.Values{
 		"email":                  []string{email},

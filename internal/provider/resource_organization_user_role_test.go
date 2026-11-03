@@ -999,9 +999,8 @@ func TestResolveIdentityForEmail_ResolvesBothIDs(t *testing.T) {
 	}
 }
 
-// A service account is an organization member too. The list endpoint hides service accounts
-// unless asked, so a lookup that only asks the default way reports the account as missing,
-// and anyscale_cloud_access then lists it in ungranted_members on every apply.
+// A service account is an organization member too: it resolves by email instead of being
+// reported missing, so anyscale_cloud_access does not list it in ungranted_members.
 func TestResolveIdentityForEmail_ResolvesServiceAccount(t *testing.T) {
 	httpServer, mock := newMockOrgUserRoleServer(t)
 	client := NewClientWithToken(httpServer.URL, "test-token")
@@ -1017,8 +1016,7 @@ func TestResolveIdentityForEmail_ResolvesServiceAccount(t *testing.T) {
 }
 
 // TestOrganizationUserRoleCreate_ResolvesServiceAccountByEmail: the role of a
-// service account is managed by email like any other member's. Without asking
-// for every account type, Create reports it as not a member.
+// service account is managed by email like any other member's.
 func TestOrganizationUserRoleCreate_ResolvesServiceAccountByEmail(t *testing.T) {
 	httpServer, mock := newMockOrgUserRoleServer(t)
 	r := &OrganizationUserRoleResource{client: NewClientWithToken(httpServer.URL, "test-token")}
