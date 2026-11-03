@@ -139,12 +139,12 @@ func (r *CloudIAMMappingResource) Schema(ctx context.Context, req resource.Schem
 						"selector": schema.StringAttribute{
 							Required: true,
 							MarkdownDescription: "A Kubernetes label-selector expression matched against the " +
-								"launching workload. Equality (`workload-type=job`, `project!=my-project`), " +
-								"set-based (`workload-type in (job,service)`, `user notin (a@example.com)`), " +
-								"and existence (`user`, `!user`) forms are accepted; comma-separated " +
-								"requirements are ANDed. Allowed keys: `workload-type` (values `job`, " +
-								"`service`, `workspace`), `project`, `user`. Validated at plan time with the " +
-								"same grammar the API enforces.",
+								"launching workload: equality (`workload-type=job`, `project!=my-project`), " +
+								"set-based (`workload-type in (job,service)`), or existence (`user`, `!user`); " +
+								"commas AND requirements. Keys: `workload-type` (`job`, `service`, " +
+								"`workspace`), `project`, `user`. An empty string matches every workload, so " +
+								"use it only as the last rule (first match wins). Validated at plan time " +
+								"with the API's grammar.",
 						},
 						"value": schema.StringAttribute{
 							Required: true,
