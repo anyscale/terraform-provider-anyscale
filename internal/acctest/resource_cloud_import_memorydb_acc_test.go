@@ -2,7 +2,6 @@ package acctest
 
 import (
 	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -22,54 +21,12 @@ import (
 // endpoint, so this mock stays valid whichever one it uses.
 func newMemoryDBImportMockCloudServer(t *testing.T, cloudID, cloudJSON, resourcesJSON, awsConfigJSON, cloudResourceID string) *httptest.Server {
 	t.Helper()
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/api/v2/clouds", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		switch r.Method {
-		case http.MethodPost:
-			_, _ = fmt.Fprintf(w, `{"result": %s}`, cloudJSON)
-		case http.MethodGet:
-			_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"total": 0, "next_paging_token": null}}`)
-		default:
-			t.Errorf("unexpected method %s on /api/v2/clouds", r.Method)
-		}
-	})
-
-	mux.HandleFunc("/api/v2/clouds/"+cloudID, func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			w.WriteHeader(http.StatusOK)
-			_, _ = fmt.Fprintf(w, `{"result": %s}`, cloudJSON)
-		case http.MethodDelete:
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			t.Errorf("unexpected method %s on /api/v2/clouds/%s", r.Method, cloudID)
-		}
-	})
-
-	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/resources", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintf(w, `{"results": %s, "metadata": {"total": 1, "next_paging_token": null}}`, resourcesJSON)
-	})
-
-	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/add_resource", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		// Deliberately realistic, not the minimal shape newC3MockCloudServer
-		// returns: a real add_resource response carries the full resource,
-		// aws_config included - a merge sourced directly from this response
-		// (rather than the resources-list) must see the same data.
-		_, _ = fmt.Fprintf(w, `{"result": {"cloud_deployment_id": "cldrsrc_memorydb_mock_default", "cloud_resource_id": %q, "aws_config": %s}}`, cloudResourceID, awsConfigJSON)
-	})
-
-	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/machine_pools", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"total": 0, "next_paging_token": null}}`)
-	})
-
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-	return server
+	// Deliberately realistic, not the minimal shape newC3MockCloudServer
+	// returns: a real add_resource response carries the full resource,
+	// aws_config included - a merge sourced directly from this response
+	// (rather than the resources-list) must see the same data.
+	return newStaticCloudMockServer(t, cloudID, cloudJSON, resourcesJSON,
+		fmt.Sprintf(`{"cloud_deployment_id": "cldrsrc_memorydb_mock_default", "cloud_resource_id": %q, "aws_config": %s}`, cloudResourceID, awsConfigJSON))
 }
 
 // TestAccCloudResource_MemoryDBFieldsRecoverOnImport_AWSVM is the regression

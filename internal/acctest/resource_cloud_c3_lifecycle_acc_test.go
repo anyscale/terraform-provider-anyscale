@@ -29,17 +29,13 @@ import (
 // the schema stores it bare; GCP is analogous. An echo-mock that just replays
 // whatever the config sent would pass trivially and prove nothing.
 
-// newC3MockCloudServer serves a single fixed cloud consistently across every
-// step of a resource.Test lifecycle (create, refresh, import, destroy).
+// newStaticCloudMockServer serves a single fixed cloud consistently across
+// every step of a resource.Test lifecycle (create, refresh, import, destroy).
 // cloudJSON is the `result` body for GET/POST /clouds; resourcesJSON is the
-// `results` array body for GET /clouds/{id}/resources. cloudResourceID is the
-// id add_resource returns for cloud_resource_id - almost every caller passes
-// the same literal "cldrsrc_mock_default" also baked into resourcesJSON's
-// default entry (its value gets overwritten by the resources-list entry
-// before Create's final State.Set anyway, see readCloudState ->
-// backfillComputedCloudFields), but a caller proving the cloud_resource_id
-// attribute's own lifecycle needs a distinct, assertable value here.
-func newC3MockCloudServer(t *testing.T, cloudID, cloudJSON, resourcesJSON, cloudResourceID string) *httptest.Server {
+// `results` array body for GET /clouds/{id}/resources; addResourceResult is
+// the `result` object add_resource returns. Callers own the add_resource
+// shape because it is what distinguishes their tests.
+func newStaticCloudMockServer(t *testing.T, cloudID, cloudJSON, resourcesJSON, addResourceResult string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 
@@ -76,14 +72,7 @@ func newC3MockCloudServer(t *testing.T, cloudID, cloudJSON, resourcesJSON, cloud
 
 	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/add_resource", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		// add_resource's own response is only used for its cloud_resource_id;
-		// the resources listing above is what config-block population reads,
-		// and its own cloud_resource_id overwrites this one before Create's
-		// final State.Set (see readCloudState -> backfillComputedCloudFields).
-		// cloud_deployment_id is included alongside it because the real
-		// backend still sends both (removal is provider-side only) - keeping
-		// it here implicitly proves the provider ignores it.
-		_, _ = fmt.Fprintf(w, `{"result": {"cloud_deployment_id": "cldrsrc_mock_default", "cloud_resource_id": %q}}`, cloudResourceID)
+		_, _ = fmt.Fprintf(w, `{"result": %s}`, addResourceResult)
 	})
 
 	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/machine_pools", func(w http.ResponseWriter, r *http.Request) {
@@ -94,6 +83,27 @@ func newC3MockCloudServer(t *testing.T, cloudID, cloudJSON, resourcesJSON, cloud
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	return server
+}
+
+// newC3MockCloudServer is newStaticCloudMockServer with a minimal add_resource
+// response. cloudResourceID is the id add_resource returns for
+// cloud_resource_id - almost every caller passes the same literal
+// "cldrsrc_mock_default" also baked into resourcesJSON's default entry (its
+// value gets overwritten by the resources-list entry before Create's final
+// State.Set anyway, see readCloudState -> backfillComputedCloudFields), but a
+// caller proving the cloud_resource_id attribute's own lifecycle needs a
+// distinct, assertable value here.
+func newC3MockCloudServer(t *testing.T, cloudID, cloudJSON, resourcesJSON, cloudResourceID string) *httptest.Server {
+	t.Helper()
+	// add_resource's own response is only used for its cloud_resource_id;
+	// the resources listing is what config-block population reads, and its
+	// own cloud_resource_id overwrites this one before Create's final
+	// State.Set (see readCloudState -> backfillComputedCloudFields).
+	// cloud_deployment_id is included alongside it because the real backend
+	// still sends both (removal is provider-side only) - keeping it here
+	// implicitly proves the provider ignores it.
+	return newStaticCloudMockServer(t, cloudID, cloudJSON, resourcesJSON,
+		fmt.Sprintf(`{"cloud_deployment_id": "cldrsrc_mock_default", "cloud_resource_id": %q}`, cloudResourceID))
 }
 
 // TestAccCloudResource_Lifecycle_AWS_MockServer proves C3's headline gates for the AWS
