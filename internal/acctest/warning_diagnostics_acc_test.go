@@ -3,7 +3,6 @@ package acctest
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -75,52 +74,20 @@ func buildProviderBinaryForCLICheck(t *testing.T) string {
 	return binDir
 }
 
-// runTerraformValidate writes a scratch CLI config pointing dev_overrides at
-// binDir, a main.tf with the given resource body, and runs
-// `terraform validate -json` against it - self-contained, no dependency on
-// the ambient ~/.terraformrc.
+// runTerraformValidate runs `terraform validate -json` on the given resource
+// body in a scratch workspace (writeCLIWorkspace) - self-contained, no
+// dependency on the ambient ~/.terraformrc.
 func runTerraformValidate(t *testing.T, binDir, resourceHCL string) tfValidateJSON {
 	t.Helper()
-
-	workDir := t.TempDir()
-
-	tfConfig := fmt.Sprintf(`
-provider_installation {
-  dev_overrides {
-    "terraform-providers/anyscale" = %[1]q
-  }
-  direct {}
-}
-`, binDir)
-	cliConfigPath := filepath.Join(workDir, "dev.tfrc")
-	if err := os.WriteFile(cliConfigPath, []byte(tfConfig), 0o600); err != nil {
-		t.Fatalf("failed to write scratch CLI config: %v", err)
-	}
-
-	mainTF := fmt.Sprintf(`
-terraform {
-  required_providers {
-    anyscale = {
-      source = "terraform-providers/anyscale"
-    }
-  }
-}
-
+	workDir, cliConfigPath := writeCLIWorkspace(t, binDir, fmt.Sprintf(`
 provider "anyscale" {
   token = "deprecation-check-fake-token"
 }
 
 %s
-`, resourceHCL)
-	if err := os.WriteFile(filepath.Join(workDir, "main.tf"), []byte(mainTF), 0o600); err != nil {
-		t.Fatalf("failed to write scratch main.tf: %v", err)
-	}
+`, resourceHCL))
 
-	cmd := exec.Command("terraform", "validate", "-json")
-	cmd.Dir = workDir
-	cmd.Env = append(os.Environ(), "TF_CLI_CONFIG_FILE="+cliConfigPath)
-
-	out, _ := cmd.CombinedOutput() // validate exits non-zero on warnings-as-well in some versions; parse regardless
+	out, _ := runTerraformCLI(workDir, cliConfigPath, "validate", "-json") // validate exits non-zero on warnings-as-well in some versions; parse regardless
 	var result tfValidateJSON
 	if err := json.Unmarshal(out, &result); err != nil {
 		t.Fatalf("failed to parse `terraform validate -json` output: %v\nraw output:\n%s", err, out)
@@ -223,60 +190,17 @@ type tfApplyJSONLine struct {
 // streamed JSON output.
 func runTerraformApplyJSON(t *testing.T, binDir, apiURL, resourceHCL string) []tfApplyJSONLine {
 	t.Helper()
-
-	workDir := t.TempDir()
-
-	tfConfig := fmt.Sprintf(`
-provider_installation {
-  dev_overrides {
-    "terraform-providers/anyscale" = %[1]q
-  }
-  direct {}
-}
-`, binDir)
-	cliConfigPath := filepath.Join(workDir, "dev.tfrc")
-	if err := os.WriteFile(cliConfigPath, []byte(tfConfig), 0o600); err != nil {
-		t.Fatalf("failed to write scratch CLI config: %v", err)
-	}
-
-	mainTF := fmt.Sprintf(`
-terraform {
-  required_providers {
-    anyscale = {
-      source = "terraform-providers/anyscale"
-    }
-  }
-}
-
+	workDir, cliConfigPath := writeCLIWorkspace(t, binDir, fmt.Sprintf(`
 provider "anyscale" {
   api_url = %[1]q
   token   = "warning-check-fake-token"
 }
 
 %[2]s
-`, apiURL, resourceHCL)
-	if err := os.WriteFile(filepath.Join(workDir, "main.tf"), []byte(mainTF), 0o600); err != nil {
-		t.Fatalf("failed to write scratch main.tf: %v", err)
-	}
+`, apiURL, resourceHCL))
 
-	cmd := exec.Command("terraform", "apply", "-auto-approve", "-json")
-	cmd.Dir = workDir
-	cmd.Env = append(os.Environ(), "TF_CLI_CONFIG_FILE="+cliConfigPath)
-
-	out, _ := cmd.CombinedOutput() // apply may exit non-zero; we only care about the diagnostic lines either way
-
-	var lines []tfApplyJSONLine
-	for _, rawLine := range strings.Split(string(out), "\n") {
-		rawLine = strings.TrimSpace(rawLine)
-		if rawLine == "" {
-			continue
-		}
-		var line tfApplyJSONLine
-		if err := json.Unmarshal([]byte(rawLine), &line); err != nil {
-			continue // dev_overrides banner and similar lines aren't JSON; skip rather than fail
-		}
-		lines = append(lines, line)
-	}
+	out, _ := runTerraformCLI(workDir, cliConfigPath, "apply", "-auto-approve", "-json") // apply may exit non-zero; we only care about the diagnostic lines either way
+	lines := parseTFJSONLines(out)
 	if lines == nil {
 		t.Fatalf("no parseable JSON lines from `terraform apply -json`; raw output:\n%s", out)
 	}
