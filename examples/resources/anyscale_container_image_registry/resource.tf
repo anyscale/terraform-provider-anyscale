@@ -1,8 +1,8 @@
 # Register a public image from Docker Hub
 resource "anyscale_container_image_registry" "public" {
   name        = "public-ray-image"
-  image_uri   = "docker.io/anyscale/ray:2.9.0-py310"
-  ray_version = "2.9.0"
+  image_uri   = "docker.io/anyscale/ray:2.59.0-py313"
+  ray_version = "2.59.0"
 }
 
 # Register a private image from Amazon ECR. The registry_login_secret
@@ -15,7 +15,7 @@ resource "anyscale_container_image_registry" "private_ecr" {
   registry_login_secret = "ecr-pull-secret"
 
   # Set to the Ray version the image contains.
-  ray_version = "2.9.0"
+  ray_version = "2.59.0"
 }
 
 # Outputs

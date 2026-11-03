@@ -17,7 +17,7 @@ resource "anyscale_service" "example" {
 
   # An Anyscale base image or a registry URI, resolved to a build at
   # apply time. Use build_id instead for an image Terraform manages.
-  image_uri = "anyscale/ray:2.56.1-slim-py312-cu129"
+  image_uri = "anyscale/ray:2.59.0-slim-py313-cu129"
 
   # anyscale_compute_config's config_id output, not its id.
   compute_config_id = "cpt_abc123"

@@ -100,7 +100,7 @@ variable "worker_instance_type" {
 variable "registry_image_uri" {
   description = "Publicly pullable image URI to register with anyscale_container_image_registry (default requires no credentials)."
   type        = string
-  default     = "docker.io/anyscale/ray:2.9.0-py310"
+  default     = "docker.io/anyscale/ray:2.59.0-py313"
 }
 
 # ---------------------------------------------------------------------------------------------------------------------

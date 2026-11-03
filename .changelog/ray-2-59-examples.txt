@@ -1,0 +1,3 @@
+```release-note:changed
+provider: Documentation examples that build or register container images, and the anyscale_service example, now use Ray 2.59.0 with Python 3.13.
+```
