@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 // writeJSONResult and readJSONBody are small local helpers for this file's
@@ -173,6 +175,86 @@ resource "anyscale_cloud_iam_mapping" "test" {
 				Config:             config,
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: false,
+			},
+		},
+	})
+}
+
+// TestAccCloudIAMMappingResource_EmptySelectorConverges proves a rule with
+// selector = "" (the API accepts it; it parses to match-everything) applies
+// and then plans empty. The wire form was confirmed against the real API: the
+// provider omits an empty selector from the PUT, and GET returns the rule with
+// no selector key at all. The mock stores the PUT body verbatim, and the
+// first step checks the stored rule really lacks the key, so the refresh that
+// the second step plans against reads that same shape. An empty plan
+// therefore means Read maps the absent key back to "", matching the config.
+func TestAccCloudIAMMappingResource_EmptySelectorConverges(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const cloudID = "cld_iammap_emptysel"
+	const cloudResourceID = "cldrsrc_iammap_emptysel"
+
+	server := newCloudIAMMappingMockServer(t, cloudID, cloudResourceID)
+	defer server.Close()
+
+	config := testAccProviderBlock(server.URL) + fmt.Sprintf(`
+resource "anyscale_cloud_iam_mapping" "test" {
+  cloud_id          = %[1]q
+  cloud_resource_id = %[2]q
+
+  rules = [
+    {
+      selector = ""
+      value    = "role-catch-all"
+    },
+  ]
+  fallback_rule = "CLOUD_DEFAULT"
+}
+`, cloudID, cloudResourceID)
+
+	storedRuleHasNoSelectorKey := func(_ *terraform.State) error {
+		resp, err := http.Get(fmt.Sprintf("%s/api/v2/clouds/%s/deployment/%s/config", server.URL, cloudID, cloudResourceID))
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		var got struct {
+			Result struct {
+				Spec struct {
+					DataplaneIAMMapping struct {
+						Rules []map[string]any `json:"rules"`
+					} `json:"dataplane_iam_mapping"`
+				} `json:"spec"`
+			} `json:"result"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+			return err
+		}
+		rules := got.Result.Spec.DataplaneIAMMapping.Rules
+		if len(rules) != 1 {
+			return fmt.Errorf("want 1 stored rule, got %v", rules)
+		}
+		if sel, present := rules[0]["selector"]; present {
+			return fmt.Errorf("want the stored rule to carry no selector key (the confirmed wire shape), got selector=%q", sel)
+		}
+		return nil
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_cloud_iam_mapping.test", "rules.0.selector", ""),
+					storedRuleHasNoSelectorKey,
+				),
+			},
+			{
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
 			},
 		},
 	})
