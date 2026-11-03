@@ -1497,6 +1497,12 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	}
 	if err != nil {
+		if cutover {
+			if failed := confirmCutoverFailure(ctx, r.client, service.ID, finalService); failed != nil {
+				r.rollBackFailedCanary(ctx, &plan, &state, failed.CanaryVersion.ID, failed, timeout, resp)
+				return
+			}
+		}
 		// The rollout continues server-side; the pending tracking lets Read settle it later.
 		AddAPIError(&resp.Diagnostics, "wait for service rollout", err)
 		return

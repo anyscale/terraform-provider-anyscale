@@ -280,6 +280,12 @@ func (r *ServiceResource) shiftHeldCanary(ctx context.Context, plan, state *Serv
 		resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 	}
 	if err != nil {
+		if cutover {
+			if failed := confirmCutoverFailure(ctx, r.client, serviceID, final); failed != nil {
+				r.rollBackFailedCanary(ctx, plan, state, failed.CanaryVersion.ID, failed, timeout, resp)
+				return
+			}
+		}
 		AddAPIError(&resp.Diagnostics, "wait for service rollout", err)
 		return
 	}
@@ -330,6 +336,34 @@ func serviceCutoverObserver(next func(*ServiceResult) bool, cutover bool) func(*
 			fullSince = time.Now()
 		}
 		return time.Since(fullSince) > serviceCutoverGrace
+	}
+}
+
+// confirmCutoverFailure is for a 100 cutover wait that ended on a service-level error while the
+// canary's version was in an error state: that error can arrive a poll before the canary's own
+// checklist row confirms the failure. It polls up to two more times and returns the service once
+// serviceCanaryFailed confirms it, or nil.
+func confirmCutoverFailure(ctx context.Context, client *Client, serviceID string, final *ServiceResult) *ServiceResult {
+	if final == nil || final.CanaryVersion == nil || !serviceErrorStates[final.CanaryVersion.CurrentState] {
+		return nil
+	}
+	for polls := 0; ; polls++ {
+		if serviceCanaryFailed(final) {
+			return final
+		}
+		if polls == 2 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(defaultServiceRolloutPollInterval):
+		}
+		next, err := getServiceByID(ctx, client, serviceID)
+		if err != nil {
+			return nil
+		}
+		final = next
 	}
 }
 

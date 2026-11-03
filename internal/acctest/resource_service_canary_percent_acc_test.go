@@ -581,3 +581,36 @@ func TestAccServiceResource_CanaryPercentCutoverFailureRollsBack(t *testing.T) {
 		t.Errorf("events = %v, want the failed cutover rolled back", got)
 	}
 }
+
+// A service-level error can end the cutover wait one poll before the canary's own checklist row
+// confirms the failure. The apply keeps polling briefly and still rolls the canary back.
+func TestAccServiceResource_CanaryPercentCutoverFailureConfirmedLate(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const name = "canary-cutover-late"
+	early := heldAt(100, intPtr(100))
+	early.CanaryState, early.CurrentState = "UNHEALTHY", "UNHEALTHY"
+	confirmed := early
+	confirmed.CanaryRow = "UNHEALTHY"
+	m, server := newOutcomeMock(t, "svc_canary_cutover_late", name, func(n int, _ map[string]any) outcomeApplyResult {
+		if n == 1 {
+			return outcomeCreate()
+		}
+		return outcomeApplyResult{Response: heldAt(100, intPtr(0)), Script: []outcomeSnapshot{early, confirmed}}
+	})
+	m.rollbackScript = []outcomeSnapshot{{CurrentState: "RUNNING", Primary: outcomeV1}}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: outcomeConfig(server.URL, name, "main:app", "")},
+			{
+				Config:      outcomeConfig(server.URL, name, "main:app_v2", "  canary_percent    = 100"),
+				ExpectError: regexp.MustCompile(`Service Rollout Rolled Back`),
+			},
+		},
+	})
+	if got := m.eventLog(); fmt.Sprint(got) != fmt.Sprint([]string{"apply", "apply", "rollback"}) {
+		t.Errorf("events = %v, want the late-confirmed cutover failure rolled back", got)
+	}
+}
