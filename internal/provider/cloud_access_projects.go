@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -338,8 +337,7 @@ func sortedProjectIDs(m map[string]string) []string {
 // merging the two would fire this message on an unrelated cloud-scope failure.
 func cloudAccessProjectWrite403Reason(err error) string {
 	detail := extractAPIErrorDetail(err)
-	var statusErr *UnexpectedStatusError
-	if !errors.As(err, &statusErr) || statusErr.StatusCode != http.StatusForbidden {
+	if !isHTTPStatus(err, http.StatusForbidden) {
 		return detail
 	}
 	return fmt.Sprintf("%s (two things are known to cause this. Check first whether the token being used has "+

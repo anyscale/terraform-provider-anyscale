@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"regexp"
-	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -121,20 +120,8 @@ const (
 )
 
 func cloudIAMMappingRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-	var statusErr *UnexpectedStatusError
-	if errors.As(err, &statusErr) {
-		switch statusErr.StatusCode {
-		case http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusBadGateway,
-			http.StatusServiceUnavailable, http.StatusGatewayTimeout:
-			return true
-		default:
-			return false
-		}
-	}
-	return strings.Contains(err.Error(), "API request failed")
+	return transientWriteError(err, http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusBadGateway,
+		http.StatusServiceUnavailable, http.StatusGatewayTimeout)
 }
 
 // doCloudIAMMappingConfigRequestRetry wraps the PUT with a bounded retry

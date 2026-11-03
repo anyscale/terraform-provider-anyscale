@@ -162,12 +162,6 @@ func addRoleBindingLockoutError(diags *diag.Diagnostics, err error, outcome stri
 	diags.AddError("Change Would Leave Organization Without an Owner", detail)
 }
 
-// isForbidden reports whether err is an HTTP 403.
-func isForbidden(err error) bool {
-	var statusErr *UnexpectedStatusError
-	return errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusForbidden
-}
-
 func roleBindingPath(roleBindingID string) string {
 	return roleBindingsBasePath + "/" + url.PathEscape(roleBindingID)
 }

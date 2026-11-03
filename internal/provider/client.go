@@ -73,24 +73,19 @@ func NewClient(baseURL string) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get authentication token: %w", err)
 	}
-
-	return &Client{
-		BaseURL: strings.TrimRight(baseURL, "/"),
-		Token:   token,
-		// No blanket Timeout here: it would cap every request (including
-		// long-running ones like add_resource) regardless of context, which
-		// is exactly the bug this shape previously had. DoRequest applies
-		// defaultRequestTimeout via context instead, which callers can override.
-		HTTPClient: &http.Client{},
-	}, nil
+	return NewClientWithToken(baseURL, token), nil
 }
 
 // NewClientWithToken creates a new Anyscale API client with explicit token
 func NewClientWithToken(baseURL, token string) *Client {
 	return &Client{
 		// A trailing slash would turn every request into //api/v2/...
-		BaseURL:    strings.TrimRight(baseURL, "/"),
-		Token:      token,
+		BaseURL: strings.TrimRight(baseURL, "/"),
+		Token:   token,
+		// No blanket Timeout here: it would cap every request (including
+		// long-running ones like add_resource) regardless of context, which
+		// is exactly the bug this shape previously had. DoRequest applies
+		// defaultRequestTimeout via context instead, which callers can override.
 		HTTPClient: &http.Client{},
 	}
 }

@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 
@@ -95,8 +94,7 @@ func (r *UserGroupResource) Create(ctx context.Context, req resource.CreateReque
 	name := plan.Name.ValueString()
 	group, err := createUserGroup(ctx, r.client, name)
 	if err != nil {
-		var statusErr *UnexpectedStatusError
-		if errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusConflict {
+		if isHTTPStatus(err, http.StatusConflict) {
 			r.addDuplicateNameError(ctx, &resp.Diagnostics, name, err)
 			return
 		}

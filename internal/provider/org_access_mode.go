@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 
@@ -37,11 +36,7 @@ const orgAccessModeGuide = "See \"Organization access mode\" in the provider's R
 // isStatusWithSubstring reports whether err is an HTTP response with this
 // status whose API detail contains substring.
 func isStatusWithSubstring(err error, statusCode int, substring string) bool {
-	var statusErr *UnexpectedStatusError
-	if !errors.As(err, &statusErr) || statusErr.StatusCode != statusCode {
-		return false
-	}
-	return strings.Contains(extractAPIErrorDetail(err), substring)
+	return isHTTPStatus(err, statusCode) && strings.Contains(extractAPIErrorDetail(err), substring)
 }
 
 // isOrgConvertedConflict reports a legacy permission write refused because the

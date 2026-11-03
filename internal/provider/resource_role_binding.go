@@ -343,7 +343,7 @@ func (r *RoleBindingResource) Read(ctx context.Context, req resource.ReadRequest
 			}
 			return
 		}
-		if isForbidden(err) {
+		if isHTTPStatus(err, http.StatusForbidden) {
 			resp.Diagnostics.AddError("Role Binding Not Readable",
 				fmt.Sprintf("The Anyscale API refused to list bindings on %s %q (HTTP 403): %s "+
 					"Reading them requires managing IAM on the %s. If the %s was deleted outside Terraform, remove this binding from state with `terraform state rm`.",
@@ -403,7 +403,7 @@ func (r *RoleBindingResource) Delete(ctx context.Context, req resource.DeleteReq
 		addRoleBindingLockoutError(&resp.Diagnostics, err, roleBindingLockoutDeleteOutcome)
 		return
 	}
-	if !isForbidden(err) {
+	if !isHTTPStatus(err, http.StatusForbidden) {
 		AddAPIError(&resp.Diagnostics, "delete role binding", err)
 		return
 	}
@@ -497,7 +497,7 @@ func (r *RoleBindingResource) resolveRoleBindingNaturalKey(ctx context.Context, 
 				AddConfigError(diags, "Role Binding Principal Not Found",
 					fmt.Sprintf("The %s %q could not be found: %s", key.PrincipalType, key.PrincipalID, extractAPIErrorDetail(err)))
 			}
-		case isForbidden(err):
+		case isHTTPStatus(err, http.StatusForbidden):
 			AddConfigError(diags, "Role Bindings Not Readable",
 				fmt.Sprintf("The Anyscale API refused to list bindings on %s %q (HTTP 403): %s Reading them requires managing IAM on the %s.",
 					key.ResourceType, key.ResourceID, extractAPIErrorDetail(err), key.ResourceType))
@@ -551,7 +551,7 @@ func (r *RoleBindingResource) ImportState(ctx context.Context, req resource.Impo
 			default:
 				AddAPIError(&resp.Diagnostics, "read role binding for import", err)
 			}
-		case isForbidden(err):
+		case isHTTPStatus(err, http.StatusForbidden):
 			// A binding that does not exist answers 403 here as well.
 			AddConfigError(&resp.Diagnostics, "Role Binding Not Found",
 				fmt.Sprintf("No role binding %q could be read: it does not exist, was revoked, or you do not manage IAM on the resource it is held on. %s",
