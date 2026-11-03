@@ -300,20 +300,11 @@ func (d *CloudDataSource) readCloudIntoModel(ctx context.Context, cloudID string
 	return nil
 }
 
-// findCloudByName looks for a cloud with the given name, across every page of
-// GET /api/v2/clouds rather than just the first (DS-CLOUD-2/X-4: a valid name
-// used to resolve to "not found" once an org's cloud list exceeded one page).
-// On duplicate names, picks the most recently created match (X-2).
+// findCloudByName looks for a cloud with the given name across every page of
+// GET /api/v2/clouds. On duplicate names, picks the most recently created match
+// (X-2).
 func (d *CloudDataSource) findCloudByName(ctx context.Context, name string) (string, error) {
-	results, err := PaginatedRequest(ctx, d.client, "/api/v2/clouds", nil,
-		func(body []byte) ([]CloudResult, *string, error) {
-			var cloudsResp CloudsListResponse
-			if err := json.Unmarshal(body, &cloudsResp); err != nil {
-				return nil, nil, fmt.Errorf("failed to parse clouds response: %w", err)
-			}
-			return cloudsResp.Results, cloudsResp.Metadata.NextPagingToken, nil
-		},
-	)
+	results, err := listAllClouds(ctx, d.client, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to list clouds: %w", err)
 	}

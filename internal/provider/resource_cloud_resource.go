@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -637,7 +638,7 @@ func (r *CloudResourceResource) Configure(ctx context.Context, req resource.Conf
 // multi-resource cloud (empty cloud + separately-attached resource) pattern. Unlike
 // CloudResource, this resource has no is-empty escape hatch - Create always
 // resolves a provider and always calls buildProviderConfig unconditionally
-// (see Create below), so no hasEmbeddedResourceConfig-style gating is needed.
+// (see Create below), so no hasEmbeddedCloudConfig-style gating is needed.
 func (r *CloudResourceResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	var data CloudResourceResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
@@ -784,14 +785,14 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
-	reqBody, err := MarshalRequestBody(deployReq)
+	jsonData, err := marshalRequestJSON(deployReq)
 	if err != nil {
 		AddJSONError(&resp.Diagnostics, "marshal", "cloud resource request", err)
 		return
 	}
+	reqBody := bytes.NewReader(jsonData)
 
 	// Log sanitized request (redact sensitive fields like credentials)
-	jsonData, _ := json.Marshal(deployReq)
 	tflog.Debug(ctx, "PUT /api/v2/clouds/"+cloudID+"/add_resource", map[string]any{"request": SanitizeJSONForLog(string(jsonData))})
 
 	// add_resource registers real cloud infrastructure server-side and can
@@ -1082,15 +1083,13 @@ func (r *CloudResourceResource) confirmCloudResourceGoneAfter404(ctx context.Con
 		)
 		return
 	}
-	for _, res := range results {
-		if res.Name == resourceName {
-			diags.AddError(
-				"Cloud Resource Was Not Deleted",
-				fmt.Sprintf("Removing cloud resource %q from cloud %s returned 404 (%s), but the cloud still lists the resource, so it still exists. Contact Anyscale support with this message; to stop managing the resource without deleting it, run terraform state rm.",
-					resourceName, cloudID, extractAPIErrorDetail(deleteErr)),
-			)
-			return
-		}
+	if findCloudResourceByName(results, resourceName) != nil {
+		diags.AddError(
+			"Cloud Resource Was Not Deleted",
+			fmt.Sprintf("Removing cloud resource %q from cloud %s returned 404 (%s), but the cloud still lists the resource, so it still exists. Contact Anyscale support with this message; to stop managing the resource without deleting it, run terraform state rm.",
+				resourceName, cloudID, extractAPIErrorDetail(deleteErr)),
+		)
+		return
 	}
 	tflog.Info(ctx, "Cloud resource already deleted", map[string]any{"cloud_id": cloudID, "name": resourceName})
 }
@@ -1130,13 +1129,7 @@ func (r *CloudResourceResource) ImportState(ctx context.Context, req resource.Im
 		return
 	}
 
-	var found *CloudDeploymentResult
-	for i := range results {
-		if results[i].Name == resourceName {
-			found = &results[i]
-			break
-		}
-	}
+	found := findCloudResourceByName(results, resourceName)
 	if found == nil {
 		return // subsequent Read surfaces the not-found error
 	}
@@ -1178,14 +1171,7 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 		return fmt.Errorf("failed to read cloud resources: %w", err)
 	}
 
-	// Find the resource by name
-	var foundResource *CloudDeploymentResult
-	for _, r := range results {
-		if r.Name == resourceName {
-			foundResource = &r
-			break
-		}
-	}
+	foundResource := findCloudResourceByName(results, resourceName)
 
 	if foundResource == nil {
 		// A client-side scan miss (the list call itself succeeded), not an HTTP 404 - still
@@ -1289,9 +1275,7 @@ func expandAWSConfig(ctx context.Context, obj types.Object) (*AWSConfig, error) 
 	}
 
 	// Optional fields
-	if !awsModel.ExternalID.IsNull() {
-		awsConfig.ExternalID = awsModel.ExternalID.ValueString()
-	}
+	awsConfig.ExternalID = awsModel.ExternalID.ValueString()
 	awsConfig.ClusterInstanceProfileID = awsModel.ClusterInstanceProfileID.ValueStringPointer()
 	awsConfig.MemoryDBClusterName = awsModel.MemoryDBClusterName.ValueStringPointer()
 	// Optional+Computed and unset at Create (no prior state for UseStateForUnknown to carry
@@ -1351,12 +1335,8 @@ func expandGCPConfig(ctx context.Context, obj types.Object) (*GCPConfig, error) 
 	}
 
 	// Optional fields
-	if !gcpModel.HostProjectID.IsNull() {
-		gcpConfig.HostProjectID = gcpModel.HostProjectID.ValueString()
-	}
-	if !gcpModel.MemorystoreInstanceName.IsNull() {
-		gcpConfig.MemorystoreInstanceName = gcpModel.MemorystoreInstanceName.ValueString()
-	}
+	gcpConfig.HostProjectID = gcpModel.HostProjectID.ValueString()
+	gcpConfig.MemorystoreInstanceName = gcpModel.MemorystoreInstanceName.ValueString()
 	// Same Optional+Computed Unknown-at-Create guard as MemoryDBClusterARN/Endpoint above.
 	if !gcpModel.MemorystoreEndpoint.IsNull() && !gcpModel.MemorystoreEndpoint.IsUnknown() {
 		gcpConfig.MemorystoreEndpoint = gcpModel.MemorystoreEndpoint.ValueString()
@@ -1455,12 +1435,8 @@ func expandFileStorage(ctx context.Context, obj types.Object) (*FileStorage, err
 		storage.MountPath = storageModel.MountPath.ValueString()
 	}
 
-	if !storageModel.PersistentVolumeClaim.IsNull() {
-		storage.PersistentVolumeClaim = storageModel.PersistentVolumeClaim.ValueString()
-	}
-	if !storageModel.CSIEphemeralVolumeDriver.IsNull() {
-		storage.CSIEphemeralVolumeDriver = storageModel.CSIEphemeralVolumeDriver.ValueString()
-	}
+	storage.PersistentVolumeClaim = storageModel.PersistentVolumeClaim.ValueString()
+	storage.CSIEphemeralVolumeDriver = storageModel.CSIEphemeralVolumeDriver.ValueString()
 
 	if !storageModel.MountTargets.IsNull() && !storageModel.MountTargets.IsUnknown() {
 		var mountTargetModels []MountTargetModel

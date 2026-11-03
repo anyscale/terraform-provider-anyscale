@@ -435,7 +435,7 @@ resource "anyscale_cloud" "test" {
 // explicit cloud_provider string alone, independent of aws_config presence -
 // deliberately an AWS+K8S(EKS) shape with aws_config entirely absent (an
 // empty kubernetes_config block is enough to satisfy
-// hasEmbeddedResourceConfig so ValidateConfig does not return early on the
+// hasEmbeddedCloudConfig so ValidateConfig does not return early on the
 // "genuinely empty cloud" path), confirming the check keys off the explicit
 // cloud_provider attribute rather than aws_config presence, matching the
 // AWS+K8S(EKS) case confirmed by the backend mapping trace.
@@ -496,7 +496,7 @@ resource "anyscale_cloud" "test" {
 // testAccCloudResourceSubnetNamesK8SConfig is deliberately minimal (just
 // name + compute_stack + gcp_config.subnet_names): the K8S check keys off
 // the explicit compute_stack attribute alone, independent of cloud_provider
-// or any other gcp_config field, matching how hasEmbeddedResourceConfig
+// or any other gcp_config field, matching how hasEmbeddedCloudConfig
 // already treats gcp_config presence as enough to avoid the
 // genuinely-empty-cloud early return.
 func testAccCloudResourceSubnetNamesK8SConfig(name string) string {

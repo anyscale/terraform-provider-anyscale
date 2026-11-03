@@ -14,10 +14,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// Test hasEmbeddedResourceConfig logic
-func TestHasEmbeddedResourceConfig(t *testing.T) {
-	r := &CloudResource{}
-
+// Test hasEmbeddedCloudConfig logic
+func TestHasEmbeddedCloudConfig(t *testing.T) {
 	tests := []struct {
 		name     string
 		plan     CloudResourceModel
@@ -116,9 +114,9 @@ func TestHasEmbeddedResourceConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := r.hasEmbeddedResourceConfig(&tt.plan)
+			result := hasEmbeddedCloudConfig(&tt.plan)
 			if result != tt.expected {
-				t.Errorf("hasEmbeddedResourceConfig() = %v, expected %v", result, tt.expected)
+				t.Errorf("hasEmbeddedCloudConfig() = %v, expected %v", result, tt.expected)
 			}
 		})
 	}

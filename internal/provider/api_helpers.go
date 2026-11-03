@@ -344,9 +344,19 @@ func PickMostRecentMatch[T any](
 //	}
 //	resp, err := DoRequestAndParse[ProjectResponse](ctx, client, "POST", "/api/v2/projects", reqBody, http.StatusCreated)
 func MarshalRequestBody(v interface{}) (io.Reader, error) {
+	jsonBytes, err := marshalRequestJSON(v)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewReader(jsonBytes), nil
+}
+
+// marshalRequestJSON is MarshalRequestBody for a caller that also needs the
+// bytes, e.g. to debug-log the request it sends without marshaling twice.
+func marshalRequestJSON(v interface{}) ([]byte, error) {
 	jsonBytes, err := json.Marshal(v)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request body: %w", err)
 	}
-	return bytes.NewReader(jsonBytes), nil
+	return jsonBytes, nil
 }

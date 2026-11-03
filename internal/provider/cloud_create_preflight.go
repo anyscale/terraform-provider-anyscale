@@ -40,7 +40,12 @@ func inferRegionFromAWSConfig(ctx context.Context, awsConfig types.Object) strin
 
 // hasEmbeddedCloudConfig reports whether the cloud carries any embedded
 // resource configuration (the all-in-one pattern). kubernetes_config counts on
-// its own, since a Kubernetes cloud can be defined by it alone.
+// its own: aws_config/gcp_config are optional for K8S clouds (see
+// addCloudResource), so a K8S cloud can be defined by kubernetes_config alone.
+// Leaving it out misclassifies such a cloud as empty, so Create takes the
+// empty-cloud branch, never calls addCloudResource, and the cloud rolls up to
+// VM on read ("Provider produced inconsistent result after apply:
+// .compute_stack: was K8S, but now VM").
 func hasEmbeddedCloudConfig(plan *CloudResourceModel) bool {
 	return !plan.AWSConfig.IsNull() || !plan.GCPConfig.IsNull() || !plan.AzureConfig.IsNull() || !plan.KubernetesConfig.IsNull()
 }

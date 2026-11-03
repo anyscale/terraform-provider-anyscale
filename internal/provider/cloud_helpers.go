@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -209,6 +210,23 @@ func validateSubnetIDsSupported(computeStack string, awsConfig *AWSConfigModel) 
 	)
 }
 
+// listAllClouds returns every cloud from GET /api/v2/clouds across all pages,
+// not just the first: reading one page made a valid name resolve to "not found"
+// once an org's cloud list exceeded it. params carries any server-side filters
+// (nil for none). The error is returned unwrapped so each caller keeps its own
+// context.
+func listAllClouds(ctx context.Context, client *Client, params url.Values) ([]CloudResult, error) {
+	return PaginatedRequest(ctx, client, "/api/v2/clouds", params,
+		func(body []byte) ([]CloudResult, *string, error) {
+			var cloudsResp CloudsListResponse
+			if err := json.Unmarshal(body, &cloudsResp); err != nil {
+				return nil, nil, fmt.Errorf("failed to parse clouds response: %w", err)
+			}
+			return cloudsResp.Results, cloudsResp.Metadata.NextPagingToken, nil
+		},
+	)
+}
+
 // ResolveCloudNameToID converts a cloud name to a cloud ID by querying the Anyscale API.
 // If multiple clouds have the same name, it returns the most recently created one.
 //
@@ -228,19 +246,7 @@ func validateSubnetIDsSupported(computeStack string, awsConfig *AWSConfigModel) 
 func ResolveCloudNameToID(ctx context.Context, client *Client, cloudName string) (string, error) {
 	tflog.Debug(ctx, "Resolving cloud name to ID", map[string]any{"cloud_name": cloudName})
 
-	// Across every page of GET /api/v2/clouds, not just the first - mirrors
-	// CloudDataSource.findCloudByName (data_source_cloud.go), which already hit
-	// and fixed the identical bug: a valid name resolved to "not found" once an
-	// org's cloud list exceeded one page.
-	results, err := PaginatedRequest(ctx, client, "/api/v2/clouds", nil,
-		func(body []byte) ([]CloudResult, *string, error) {
-			var cloudsResp CloudsListResponse
-			if err := json.Unmarshal(body, &cloudsResp); err != nil {
-				return nil, nil, fmt.Errorf("failed to parse clouds response: %w", err)
-			}
-			return cloudsResp.Results, cloudsResp.Metadata.NextPagingToken, nil
-		},
-	)
+	results, err := listAllClouds(ctx, client, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to list clouds: %w", err)
 	}
