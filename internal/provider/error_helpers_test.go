@@ -138,3 +138,86 @@ func TestAddAPIError_StatusAndBackendDetail(t *testing.T) {
 		}
 	})
 }
+
+// A retried read's UnexpectedStatusError.Error() appends "(after N attempts;
+// ...)" after the JSON body, so parsing the backend detail out of err.Error()
+// fails for it. These pin that the detail is read from Body instead, that
+// AddAPIError keeps the retry advisory, and that a single attempt's text is
+// unchanged.
+func TestAPIErrorDetail_RetriedRead(t *testing.T) {
+	const apiDetail = "You do not have permission to read this cloud."
+	jsonBody := `{"error":{"detail":"` + apiDetail + `"}}`
+	const advisory = " The request failed on all 3 attempts; this is usually a transient Anyscale API problem, so re-run the command."
+
+	addAPIErrorDetail := func(err error) string {
+		var diags diag.Diagnostics
+		AddAPIError(&diags, "read cloud", err)
+		return diags[0].Detail()
+	}
+
+	t.Run("JSON detail, 3 attempts", func(t *testing.T) {
+		err := fmt.Errorf("wrapped: %w", &UnexpectedStatusError{StatusCode: 503, Body: jsonBody, Attempts: 3})
+		if got := extractAPIErrorDetail(err); got != apiDetail {
+			t.Errorf("extractAPIErrorDetail = %q, want the bare API detail %q", got, apiDetail)
+		}
+		if got, want := addAPIErrorDetail(err), "Failed to read cloud (HTTP 503): "+apiDetail+advisory; got != want {
+			t.Errorf("AddAPIError detail = %q, want %q", got, want)
+		}
+	})
+
+	// A detail with no closing punctuation gets a period before the note.
+	t.Run("JSON detail without a period, 3 attempts", func(t *testing.T) {
+		err := &UnexpectedStatusError{StatusCode: 404, Body: `{"error":{"detail":"Cloud not found"}}`, Attempts: 3}
+		if got, want := addAPIErrorDetail(err), "Failed to read cloud (HTTP 404): Cloud not found."+advisory; got != want {
+			t.Errorf("AddAPIError detail = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("non-JSON body, 3 attempts", func(t *testing.T) {
+		err := &UnexpectedStatusError{StatusCode: 502, Body: "bad gateway", Attempts: 3}
+		if got, want := addAPIErrorDetail(err), "Failed to read cloud (HTTP 502): bad gateway."+advisory; got != want {
+			t.Errorf("AddAPIError detail = %q, want %q", got, want)
+		}
+		// No detail to extract: callers get the full error text, as before.
+		if got := extractAPIErrorDetail(err); got != err.Error() {
+			t.Errorf("extractAPIErrorDetail = %q, want err.Error() %q", got, err.Error())
+		}
+	})
+
+	t.Run("empty body, 3 attempts", func(t *testing.T) {
+		err := &UnexpectedStatusError{StatusCode: 504, Body: "", Attempts: 3}
+		if got, want := addAPIErrorDetail(err), "Failed to read cloud (HTTP 504): the response had no body."+advisory; got != want {
+			t.Errorf("AddAPIError detail = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("JSON detail, 1 attempt: text unchanged", func(t *testing.T) {
+		err := &UnexpectedStatusError{StatusCode: 403, Body: jsonBody, Attempts: 1}
+		if got := extractAPIErrorDetail(err); got != apiDetail {
+			t.Errorf("extractAPIErrorDetail = %q, want %q", got, apiDetail)
+		}
+		if got, want := addAPIErrorDetail(err), "Failed to read cloud (HTTP 403): "+apiDetail; got != want {
+			t.Errorf("AddAPIError detail = %q, want %q", got, want)
+		}
+	})
+
+	// The backend detail matched by a classifier survives a retry.
+	t.Run("classifier on a retried 409", func(t *testing.T) {
+		err := fmt.Errorf("grant: %w", &UnexpectedStatusError{
+			StatusCode: 409,
+			Body:       `{"error":{"detail":"` + orgConvertedSubstring + `. Use role bindings."}}`,
+			Attempts:   3,
+		})
+		if !isOrgConvertedConflict(err) {
+			t.Error("isOrgConvertedConflict = false for a retried 409 carrying the converted-org detail")
+		}
+	})
+
+	// A non-status error still has its detail parsed from the text.
+	t.Run("non-status error with JSON in its text", func(t *testing.T) {
+		err := errors.New("request failed: " + jsonBody)
+		if got := extractAPIErrorDetail(err); got != apiDetail {
+			t.Errorf("extractAPIErrorDetail = %q, want %q", got, apiDetail)
+		}
+	})
+}
