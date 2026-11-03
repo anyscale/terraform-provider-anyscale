@@ -25,20 +25,21 @@ func TestCloudDataSources_SameCloudSameValues(t *testing.T) {
 	ctx := context.Background()
 	externalID := "org_external"
 	cloud := CloudResult{
-		ID:                      "cld_x",
-		Name:                    "mapper-cloud",
-		Provider:                "AWS",
-		ComputeStack:            "VM",
-		Region:                  "us-west-2",
-		IsK8s:                   true,
-		AvailabilityZones:       []string{"us-west-2a", "us-west-2b"},
-		IsPrivateCloud:          true,
-		AutoAddUser:             true,
-		LineageTrackingEnabled:  true,
-		ExternalID:              &externalID,
-		CreatorID:               "usr_creator",
-		CreatedAt:               "2026-11-03T00:00:00Z",
-		Status:                  "", // mapped to null by both
+		ID:                     "cld_x",
+		Name:                   "mapper-cloud",
+		Provider:               "AWS",
+		ComputeStack:           "VM",
+		Region:                 "us-west-2",
+		IsK8s:                  true,
+		AvailabilityZones:      []string{"us-west-2a", "us-west-2b"},
+		IsPrivateCloud:         true,
+		AutoAddUser:            true,
+		LineageTrackingEnabled: true,
+		ExternalID:             &externalID,
+		CreatorID:              "usr_creator",
+		CreatedAt:              "2026-11-03T00:00:00Z",
+		// Non-empty: a null here would equal an uncopied (zero, null) field.
+		Status:                  "READY",
 		State:                   "ACTIVE",
 		Version:                 "v2",
 		IsDefault:               true,
@@ -87,7 +88,7 @@ func TestCloudDataSources_SameCloudSameValues(t *testing.T) {
 		"cloud_provider":           types.StringValue("AWS"),
 		"compute_stack":            types.StringValue("VM"),
 		"region":                   types.StringValue("us-west-2"),
-		"status":                   types.StringNull(),
+		"status":                   types.StringValue("READY"),
 		"state":                    types.StringValue("ACTIVE"),
 		"created_at":               types.StringValue("2026-11-03T00:00:00Z"),
 		"creator_id":               types.StringValue("usr_creator"),
@@ -136,5 +137,19 @@ func TestCloudDataSources_SameCloudSameValues(t *testing.T) {
 		if !got.Equal(pluralValue) {
 			t.Errorf("%s: anyscale_cloud = %s, anyscale_clouds = %s", tag, got, pluralValue)
 		}
+	}
+}
+
+// An empty status or state from the API is null in state, never "".
+func TestCloudSummaryFromResult_EmptyStatusIsNull(t *testing.T) {
+	summary, err := cloudSummaryFromResult(context.Background(), CloudResult{ID: "cld_x"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !summary.Status.IsNull() {
+		t.Errorf("status = %s, want null", summary.Status)
+	}
+	if !summary.State.IsNull() {
+		t.Errorf("state = %s, want null", summary.State)
 	}
 }
