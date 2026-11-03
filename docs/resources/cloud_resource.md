@@ -17,6 +17,7 @@ Manages an Anyscale Cloud Resource deployment. This attaches infrastructure conf
 resource "anyscale_cloud_resource" "aws_vm" {
   cloud_id      = "cld_abc123"
   name          = "vm-aws-us-east-2"
+  region        = "us-east-2"
   compute_stack = "VM"
 
   aws_config {
@@ -39,7 +40,6 @@ resource "anyscale_cloud_resource" "aws_vm" {
 
   object_storage {
     bucket_name = "my-bucket"
-    region      = "us-east-2"
   }
 }
 
@@ -70,6 +70,7 @@ resource "anyscale_cloud_resource" "gcp_vm" {
 resource "anyscale_cloud_resource" "eks_with_efs" {
   cloud_id = "cld_k8s123"
   name     = "k8s-aws-us-west-2"
+  region   = "us-west-2"
   # required here: no aws_config block below to infer it from
   cloud_provider = "AWS"
   compute_stack  = "K8S"
@@ -85,7 +86,6 @@ resource "anyscale_cloud_resource" "eks_with_efs" {
 
   object_storage {
     bucket_name = "my-eks-bucket"
-    region      = "us-west-2"
   }
 
   file_storage {

@@ -27,7 +27,6 @@ resource "anyscale_cloud" "primary" {
   # Object Storage (GCS)
   object_storage {
     bucket_name = module.google_anyscale_v2.cloudstorage_bucket_name
-    region      = var.gcp_region
   }
 
   # No file_storage block - Filestore disabled

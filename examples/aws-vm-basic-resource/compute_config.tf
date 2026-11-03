@@ -2,8 +2,10 @@
 # This example demonstrates a simple compute config with head node and worker nodes
 
 resource "anyscale_compute_config" "basic" {
-  name     = "${var.cloud_name}-basic-compute"
-  cloud_id = anyscale_cloud.primary.id
+  name = "${var.cloud_name}-basic-compute"
+  # cloud_id comes from the cloud resource, not anyscale_cloud.primary, so Terraform creates this
+  # only after the cloud has a resource; the API rejects a compute config on a cloud with none.
+  cloud_id = anyscale_cloud_resource.primary.cloud_id
   # project_id is optional - omit to use organization default
 
   enable_cross_zone_scaling = false
@@ -33,7 +35,7 @@ resource "anyscale_compute_config" "basic" {
 
 resource "anyscale_compute_config" "advanced" {
   name     = "${var.cloud_name}-advanced-compute"
-  cloud_id = anyscale_cloud.primary.id
+  cloud_id = anyscale_cloud_resource.primary.cloud_id
   # project_id is optional - omit to use organization default
 
   enable_cross_zone_scaling = true
@@ -164,7 +166,7 @@ resource "anyscale_compute_config" "advanced" {
 # Simple compute config example
 resource "anyscale_compute_config" "simple" {
   name     = "tf-example-simple-config"
-  cloud_id = anyscale_cloud.primary.id
+  cloud_id = anyscale_cloud_resource.primary.cloud_id
 
   head_node = {
     instance_type = "m5.xlarge"
