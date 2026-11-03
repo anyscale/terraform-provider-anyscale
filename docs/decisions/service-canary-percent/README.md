@@ -1,7 +1,9 @@
 # Design: `anyscale_service` `canary_percent`
 
 **Status: approved 2026-11-02 (decisions 3 and 15 ruled by the user). Gate 1 closed (real API,
-2026-11-02). Gate 2 not started.**
+2026-11-02). Gate 2 mock tests in `internal/acctest/resource_service_canary_percent_acc_test.go`,
+with the mock modelling the backend's version matching. Real-infra end-to-end run passed
+2026-11-02 (below).**
 Builds on `docs/decisions/service-rollout-outcome` (version tracking, wait rules, rolled-back
 handling), `service-inputs-parity` and `service-stopped`. Product monorepo read-only.
 
@@ -127,6 +129,24 @@ Cases:
 12. `canary_percent` null: the apply body is byte-identical to today's.
 13. Validator: -1 and 101 rejected at plan.
 14. Mutation proof for each: break the behavior, confirm the test fails, revert.
+
+## Real-infra end-to-end
+
+Run 2026-11-02 against the static AWS cloud by
+`internal/acctest/resource_service_canary_percent_realinfra_acc_test.go` (all three tests PASS,
+26 min total). Each test created its own compute config, ephemeral project and service and
+destroyed them; `CheckDestroy` confirmed the services 404. Request order is from the provider's
+INFO lines in the `TF_LOG=DEBUG` log, each of which immediately precedes one request; the
+provider logs no request bodies, so "same body" is shown by the outcome (same canary id, no new
+version).
+
+| # | Scenario | Requests (in order) | Result |
+|---|---|---|---|
+| E1 | Deploy change, `canary_percent = 0` | `PUT /apply` | Old version primary, new version canary at weight 0; post-apply plan empty. |
+| E2 | `canary_percent = 25` | one `PUT /apply` (the shift); no deploy `PUT` | Same canary id as E1, weights 25; plan empty. |
+| E3 | `canary_percent` removed | one `PUT /apply` (shift, percent omitted) | Rollout completed: `canary_version` null, primary is the E1 canary's id; plan empty. |
+| E4 | Broken deploy held at 0 (decision 14) | `PUT /apply`, then `POST /rollback` | Apply failed with **Service Rollout Rolled Back**; old primary still primary and RUNNING; state kept the prior deploy fields; next plan non-empty. |
+| E5 | Deploy change at `canary_percent = 100` (decision 3) | `PUT /apply` | **Completed** in the test org: the canary was promoted (`canary_version` null, new primary). Removing `canary_percent` afterwards sent no request (decision 6). The grace-period path stays covered only by the mock test. |
 
 ## Compatibility
 
