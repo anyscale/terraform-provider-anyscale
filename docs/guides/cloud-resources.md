@@ -256,7 +256,7 @@ a service, with the cloud's control-plane role, so that role's policies must sti
 Referencing the role's ARN in the cloud only orders the role itself: Terraform may remove the role's
 policy attachments in parallel, Anyscale's `ec2:TerminateInstances` call is then denied, and the instances keep
 running and block deleting the VPC. Make `anyscale_cloud` and `anyscale_cloud_resource` `depends_on` the IAM
-module or the policy attachments, so they are destroyed last:
+module or the policy attachments, so Terraform destroys the IAM only after the cloud and everything that depends on it:
 
 ```terraform
 resource "anyscale_cloud" "this" {
