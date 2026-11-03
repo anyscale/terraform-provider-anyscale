@@ -888,10 +888,26 @@ func (r *ServiceResource) Create(ctx context.Context, req resource.CreateRequest
 	// error-on-collision stance as findCloudByName's adopt-path ruling, but stricter: ANY
 	// match errors here (not just 2+), since adopting even a single match risks reconfiguring
 	// someone else's running service, unlike a cloud recovering its own interrupted create.
-	existingMatches, err := findExistingServiceIDs(ctx, r.client, name, projectID)
+	existingMatches, err := findExistingServiceIDs(ctx, r.client, name, projectID, "")
 	if err != nil {
 		AddAPIError(&resp.Diagnostics, "check for existing service", err)
 		return
+	}
+	if len(existingMatches) == 0 {
+		// The listing hides archived services by default, and PUT /apply rejects a name held
+		// by an archived service. The list results carry no archived marker, so ask for
+		// archived services separately.
+		archivedMatches, err := findExistingServiceIDs(ctx, r.client, name, projectID, "ARCHIVED")
+		if err != nil {
+			AddAPIError(&resp.Diagnostics, "check for an archived service with the same name", err)
+			return
+		}
+		if len(archivedMatches) > 0 {
+			AddConfigError(&resp.Diagnostics, "Archived Service Has This Name",
+				fmt.Sprintf("A service named %q in project %s is archived (%s); the API rejects applying to it (\"Archived services cannot be updated\"). Use a different name.",
+					name, archivedMatches[0].ProjectID, archivedMatches[0].ID))
+			return
+		}
 	}
 	if len(existingMatches) > 0 {
 		var collisions []string
@@ -2074,11 +2090,14 @@ type existingServiceMatch struct {
 // against once it resolves a specific default project. This over-blocks rather than
 // under-checks: a false-positive block on an unrelated same-named service in another project is
 // judged safer than silently adopting a real collision, consistent with why this guard exists.
-func findExistingServiceIDs(ctx context.Context, client *Client, name, projectID string) ([]existingServiceMatch, error) {
+func findExistingServiceIDs(ctx context.Context, client *Client, name, projectID, archiveStatus string) ([]existingServiceMatch, error) {
 	params := url.Values{}
 	params.Add("name", name)
 	if projectID != "" {
 		params.Add("project_id", projectID)
+	}
+	if archiveStatus != "" {
+		params.Add("archive_status", archiveStatus)
 	}
 
 	results, err := listServices(ctx, client, params)
