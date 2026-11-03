@@ -2,6 +2,7 @@ package acctest
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -262,9 +263,9 @@ func TestRegistryCheckDestroy_KeyingOnRemovedClusterEnvironmentIDFails(t *testin
 	}
 }
 
-// TestCheckDestroy_UnverifiableResponsesFail pins that only a 404 (or an
-// archive marker) counts as destroyed. A 403, a persistent 5xx, or a
-// persistent transport error used to be logged and treated as success.
+// TestCheckDestroy_UnverifiableResponsesFail pins that a persistent 5xx or a
+// persistent transport error is not treated as destroyed. (403 has its own
+// rules; see TestCheckDestroy_403.)
 func TestCheckDestroy_UnverifiableResponsesFail(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -272,7 +273,6 @@ func TestCheckDestroy_UnverifiableResponsesFail(t *testing.T) {
 		closed  bool
 		wantErr string
 	}{
-		{name: "403", status: http.StatusForbidden, wantErr: "unexpected status 403"},
 		{name: "persistent 503", status: http.StatusServiceUnavailable, wantErr: "returned 503 until the poll deadline"},
 		{name: "persistent transport error", closed: true, wantErr: "request error until the poll deadline"},
 	}
@@ -294,6 +294,56 @@ func TestCheckDestroy_UnverifiableResponsesFail(t *testing.T) {
 			err := check(projectState("prj_unverifiable"))
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("expected an error containing %q, got: %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
+// With SpiceDB authorization the backend answers 403 for an ID it has no record
+// of. A 403 counts as destroyed, except that where the type has a list endpoint
+// the ID must also be absent from it.
+func TestCheckDestroy_403(t *testing.T) {
+	cases := []struct {
+		name         string
+		resourceType string
+		getPathFmt   string
+		listStatus   int
+		listBody     string
+		wantErr      string // "" means destroyed
+	}{
+		{"absent from the list", "anyscale_project", "/api/v2/projects/%s", 200, `{"results": [{"id": "prj_other"}], "metadata": {"next_paging_token": null}}`, ""},
+		{"still listed", "anyscale_project", "/api/v2/projects/%s", 200, `{"results": [{"id": "prj_gone"}], "metadata": {"next_paging_token": null}}`, "still listed"},
+		{"list fails", "anyscale_project", "/api/v2/projects/%s", 500, `{}`, "list check failed"},
+		{"no list endpoint", "anyscale_user_group", "/api/v2/groups/%s", 0, ``, ""},
+	}
+	skipRetryBackoff(t)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v2/projects" {
+					w.WriteHeader(tc.listStatus)
+					_, _ = fmt.Fprint(w, tc.listBody)
+					return
+				}
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = fmt.Fprint(w, `{"error": {"detail": "Permission denied"}}`)
+			}))
+			defer server.Close()
+			t.Setenv("ANYSCALE_API_URL", server.URL)
+			t.Setenv("ANYSCALE_CLI_TOKEN", "fake-token-checkdestroy-403")
+
+			state := &terraform.State{Modules: []*terraform.ModuleState{{
+				Path: []string{"root"},
+				Resources: map[string]*terraform.ResourceState{
+					tc.resourceType + ".test": {Type: tc.resourceType, Primary: &terraform.InstanceState{ID: "prj_gone", Attributes: map[string]string{}}},
+				},
+			}}}
+			err := newAPIDestroyCheckImplWithTimeout(tc.resourceType, "", tc.getPathFmt, "", 0)(state)
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("err = %v, want destroyed", err)
+			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Fatalf("err = %v, want one containing %q", err, tc.wantErr)
 			}
 		})
 	}

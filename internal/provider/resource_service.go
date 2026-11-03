@@ -1043,8 +1043,9 @@ func (r *ServiceResource) Read(ctx context.Context, req resource.ReadRequest, re
 
 	service, err := getServiceByID(ctx, r.client, serviceID)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
+		if isGoneOrForbidden(err) {
 			tflog.Warn(ctx, "Service not found, removing from state", map[string]any{"service_id": serviceID})
+			addForbiddenTreatedAsDeletedWarning(&resp.Diagnostics, "Service", serviceID, err)
 			resp.State.RemoveResource(ctx)
 			return
 		}
@@ -1597,8 +1598,9 @@ func (r *ServiceResource) Delete(ctx context.Context, req resource.DeleteRequest
 		http.StatusAccepted,
 	)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
+		if isGoneOrForbidden(err) {
 			tflog.Info(ctx, "Service already gone", map[string]any{"service_id": serviceID})
+			addForbiddenTreatedAsDeletedOnDestroyWarning(&resp.Diagnostics, "Service", serviceID, err)
 			return
 		}
 		AddAPIError(&resp.Diagnostics, "terminate service", err)
@@ -1606,6 +1608,13 @@ func (r *ServiceResource) Delete(ctx context.Context, req resource.DeleteRequest
 	}
 
 	if _, err := waitForServiceState(ctx, r.client, serviceID, serviceStateTerminated, timeout); err != nil {
+		// The backend can remove the service while it terminates; the wait's GET then answers
+		// 404, or 403 under the newer access model.
+		if isGoneOrForbidden(err) {
+			tflog.Info(ctx, "Service gone while waiting for termination", map[string]any{"service_id": serviceID})
+			addForbiddenTreatedAsDeletedOnDestroyWarning(&resp.Diagnostics, "Service", serviceID, err)
+			return
+		}
 		AddAPIError(&resp.Diagnostics, "wait for service termination", err)
 		return
 	}
@@ -1616,7 +1625,7 @@ func (r *ServiceResource) Delete(ctx context.Context, req resource.DeleteRequest
 	// call above): an already-gone service is a successful, idempotent delete, so a real
 	// 404 is treated as an accepted status and DoRequestRaw returns a nil error - err below
 	// can therefore never be a not-found condition. It can only be some other genuinely
-	// unexpected status or a transport failure, so it always belongs in AddAPIError. (A prior
+	// unexpected status or a transport failure; apart from a 403, which counts as gone, it belongs in AddAPIError. (A prior
 	// version of this code also string-matched "404" here as if it needed separate handling;
 	// that check could never fire for a real 404 for the reason above, and kept a narrow risk
 	// of misclassifying an unrelated error whose body text happened to contain "404" as a
@@ -1625,6 +1634,10 @@ func (r *ServiceResource) Delete(ctx context.Context, req resource.DeleteRequest
 		ctx, r.client, "DELETE", fmt.Sprintf("/api/v2/services-v2/%s", serviceID), nil,
 		http.StatusNoContent, http.StatusNotFound,
 	)
+	if isHTTPStatus(err, http.StatusForbidden) {
+		addForbiddenTreatedAsDeletedOnDestroyWarning(&resp.Diagnostics, "Service", serviceID, err)
+		return
+	}
 	if err != nil {
 		AddAPIError(&resp.Diagnostics, "delete service", err)
 		return
