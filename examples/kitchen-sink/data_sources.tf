@@ -94,8 +94,12 @@ data "anyscale_cloud_iam_mapping" "b" {
   cloud_id = anyscale_cloud_iam_mapping.b.cloud_id
 }
 
-# --- anyscale_role -------------------------------------------------------------------------------
-# A built-in role, looked up by its exact name. organization.tf's gated role binding grants it.
+# --- anyscale_role (gated by enable_role_binding) ------------------------------------------------
+# A built-in role, looked up by its exact name, for organization.tf's role binding. Gated with the
+# binding because the roles API, like role bindings, answers only in organizations with role
+# bindings enabled.
 data "anyscale_role" "project_viewer" {
+  count = var.enable_role_binding ? 1 : 0
+
   name = "project_viewer"
 }

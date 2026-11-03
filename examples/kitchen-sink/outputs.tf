@@ -151,8 +151,8 @@ output "iam_mapping_rules" {
 }
 
 output "project_viewer_role_id" {
-  value       = data.anyscale_role.project_viewer.id
-  description = "ID of the built-in project_viewer role."
+  value       = var.enable_role_binding ? data.anyscale_role.project_viewer[0].id : null
+  description = "ID of the built-in project_viewer role. Null unless enable_role_binding is set."
 }
 
 output "user_group_member_count" {

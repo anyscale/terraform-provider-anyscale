@@ -16,8 +16,12 @@ variable "anyscale_org_id" {
 }
 
 variable "anyscale_external_id" {
-  description = "Free-form string used as the IAM trust policy external ID for the shared cross-account role."
+  description = "Base of the IAM trust policy external IDs: Cloud A uses it with \"-a\" appended, Cloud B with \"-b\". Must start with your organization ID, which the AWS IAM module enforces (e.g. \"org_abc123xyz-kitchen-sink\")."
   type        = string
+  validation {
+    condition     = startswith(var.anyscale_external_id, var.anyscale_org_id)
+    error_message = "anyscale_external_id must start with anyscale_org_id; the AWS IAM module rejects any other value."
+  }
 }
 
 variable "customer_ingress_cidr_ranges" {
