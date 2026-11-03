@@ -94,7 +94,7 @@ implicit extra one.
 
 - `anyscale_runtime_env_package` packages `./app`, and `anyscale_service` runs it as a Ray Serve
   hello-world on the built image. Apply waits for `RUNNING`; destroy terminates the service.
-- `anyscale_system_cluster` runs until Cloud B is destroyed; destroying the resource only removes it from state.
+- `anyscale_system_cluster` keeps running after `terraform destroy`: removing the resource only drops it from state, and deleting Cloud B does not stop it.
 - `anyscale_cloud_iam_mapping` maps jobs and services to Cloud B's own node role (a no-op at runtime).
 - Data sources `anyscale_system_cluster`, `anyscale_cloud_iam_mapping` and `anyscale_role` (`project_viewer`).
 
@@ -129,8 +129,11 @@ implicit extra one.
    resources, never your AWS account, so an abandoned apply leaves a real VPC and EKS cluster
    billing. Track your own state and tear it down when you're done.
 2. **This creates two real clouds, two projects, three compute configs, two container images, and a
-   running Ray Serve service** in your Anyscale org, plus the AWS infrastructure above. Cloud B's
-   System Cluster keeps running until the cloud is destroyed.
+   running Ray Serve service** in your Anyscale org, plus the AWS infrastructure above. Deleting a
+   cloud does not stop its running clusters: Cloud B's System Cluster (and any service cluster that has
+   not finished terminating) keeps its EC2 instances, which pin the VPC's internet gateway, so
+   `terraform destroy` can hang or leak the VPC. After destroying, terminate leftover instances in the
+   VPC (or the cluster in the Anyscale console), then re-run destroy.
 3. **The real invitation email is opt-in, not automatic.** Leave `invite_email` unset (the
    default) and `anyscale_organization_invitation` applies zero instances. Set it to an address you
    own or control if you want to exercise that resource — it will receive a real invitation.
