@@ -206,6 +206,31 @@ func TestAccUserGroupMembersResource_MockLifecycle(t *testing.T) {
 	})
 }
 
+// TestAccUserGroupMembersResource_MockServiceAccountMember: a service account
+// declared by email resolves and is added like a user. The organization list
+// returns user accounts only unless asked for every account type, so a lookup
+// that does not ask reports the service account as not a member.
+func TestAccUserGroupMembersResource_MockServiceAccountMember(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	robot := userGroupMockUser{
+		UserID: "usr_rrrrrrrrrrrrrrrrrrrrrrrrrr", IdentityID: "ide_rrrrrrrrrrrrrrrrrrrrrrrrrr",
+		Email: "robot@example.com", Name: "Robot", IsServiceAccount: true,
+	}
+	m := newUserGroupMockServer(t, ugUserA, robot)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: ugMockConfig(m, "tfacc-ug-mock-sa", "alice@example.com", "robot@example.com"),
+				Check:  ugExpectMembers(m, ugUserA.UserID, robot.UserID),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+			},
+		},
+	})
+}
+
 // TestAccUserGroupResource_MockDestroyRemovesMembersFirst: destroying a group
 // that Terraform manages without a members resource still removes the members
 // someone added outside Terraform before deleting it. Per the backend source,

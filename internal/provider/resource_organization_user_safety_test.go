@@ -44,6 +44,9 @@ type orgUserFixture struct {
 	identityID string
 	userID     string
 	email      string
+	// isServiceAccount marks a service account, which the list returns only
+	// when asked for that account type (see orgCollaboratorListIncludes).
+	isServiceAccount bool
 }
 
 func newMockOrgUserServer(t *testing.T) (*httptest.Server, *mockOrgUserServer) {
@@ -139,6 +142,9 @@ func (s *mockOrgUserServer) handleCollaboratorList(w http.ResponseWriter, r *htt
 	results := make([]OrganizationCollaboratorResult, 0, len(s.members))
 	for key, m := range s.members {
 		if filter != "" && key != filter {
+			continue
+		}
+		if !orgCollaboratorListIncludes(r.URL.Query(), m.isServiceAccount) {
 			continue
 		}
 		userID := m.userID
@@ -258,6 +264,32 @@ func TestOrganizationUserCreate_AdoptsExistingMemberWithoutInviting(t *testing.T
 	}
 	if out.IdentityID.ValueString() != "ide_alice" {
 		t.Errorf("adopt must record the real identity_id, got %q", out.IdentityID.ValueString())
+	}
+}
+
+// TestOrganizationUserCreate_AdoptsExistingServiceAccount: a service account
+// that is already a member is adopted, not invited. The list returns user
+// accounts only unless asked for every account type; a lookup that does not ask
+// misses the service account and sends an invitation to its address instead.
+func TestOrganizationUserCreate_AdoptsExistingServiceAccount(t *testing.T) {
+	httpServer, mock := newMockOrgUserServer(t)
+	r := &OrganizationUserResource{client: NewClientWithToken(httpServer.URL, "test-token")}
+	mock.members["robot@example.com"] = orgUserFixture{
+		identityID: "ide_robot", userID: "usr_robot", email: "robot@example.com", isServiceAccount: true,
+	}
+
+	out, diags := runOrgUserCreate(t, r, OrganizationUserResourceModel{
+		Email:             types.StringValue("robot@example.com"),
+		ReinviteIfExpired: types.BoolValue(false),
+	})
+	if diags.HasError() {
+		t.Fatalf("adopting an existing service account must succeed, got: %v", diags)
+	}
+	if log := mock.callLogSnapshot(); orgUserLogHasInvitationPost(log) {
+		t.Fatalf("an existing service account must be adopted, never invited. Call log: %v", log)
+	}
+	if out.IdentityID.ValueString() != "ide_robot" {
+		t.Errorf("adopt must record the service account's identity_id, got %q", out.IdentityID.ValueString())
 	}
 }
 

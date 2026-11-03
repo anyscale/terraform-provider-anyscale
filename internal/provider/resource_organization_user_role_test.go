@@ -1016,6 +1016,27 @@ func TestResolveIdentityForEmail_ResolvesServiceAccount(t *testing.T) {
 	}
 }
 
+// TestOrganizationUserRoleCreate_ResolvesServiceAccountByEmail: the role of a
+// service account is managed by email like any other member's. Without asking
+// for every account type, Create reports it as not a member.
+func TestOrganizationUserRoleCreate_ResolvesServiceAccountByEmail(t *testing.T) {
+	httpServer, mock := newMockOrgUserRoleServer(t)
+	r := &OrganizationUserRoleResource{client: NewClientWithToken(httpServer.URL, "test-token")}
+	mock.seedServiceAccount("robot@example.com", "ide_robot", "usr_robot", "collaborator")
+
+	out, diags := runOrganizationUserRoleCreate(t, r, OrganizationUserRoleResourceModel{
+		Email:     types.StringValue("robot@example.com"),
+		BaseRole:  types.StringValue("collaborator"),
+		DenyRoles: types.ListNull(types.StringType),
+	})
+	if diags.HasError() {
+		t.Fatalf("a service account must resolve by email: %v", diags)
+	}
+	if out.IdentityID.ValueString() != "ide_robot" || out.UserID.ValueString() != "usr_robot" {
+		t.Errorf("got identity_id %q user_id %q, want ide_robot usr_robot", out.IdentityID.ValueString(), out.UserID.ValueString())
+	}
+}
+
 // The email filter is a substring match, so another member whose email contains the one looked
 // up must not be mistaken for it: here a service account, which a lookup that includes service
 // accounts sees.

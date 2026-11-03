@@ -3,13 +3,13 @@
 page_title: "anyscale_organization_user Data Source - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Use this data source to retrieve information about a specific user in your organization. You can look up a user by their identity ID, user ID, or email address.
+  Use this data source to retrieve information about a specific member of your organization, a user or a service account. You can look it up by identity ID, user ID, or email address.
   The role attributes (permission_level, base_role, additional_roles) are deprecated: in an organization converted to role bindings they report access from before conversion. See Legacy RBAC deprecation ../guides/rbac.md#legacy-rbac-deprecation.
 ---
 
 # anyscale_organization_user (Data Source)
 
-Use this data source to retrieve information about a specific user in your organization. You can look up a user by their identity ID, user ID, or email address.
+Use this data source to retrieve information about a specific member of your organization, a user or a service account. You can look it up by identity ID, user ID, or email address.
 
 The role attributes (`permission_level`, `base_role`, `additional_roles`) are deprecated: in an organization converted to role bindings they report access from before conversion. See [Legacy RBAC deprecation](../guides/rbac.md#legacy-rbac-deprecation).
 
