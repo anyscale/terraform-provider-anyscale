@@ -1,0 +1,3 @@
+```release-note:changed
+data-source/anyscale_cloud: An `availability_zones` conversion error now names the cloud, as `anyscale_clouds` already did. `anyscale_user` reports a clouds parse error as "failed to parse clouds response".
+```
