@@ -69,16 +69,9 @@ func (d *RoleDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 }
 
 func (d *RoleDataSource) Configure(ctx context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
-	if req.ProviderData == nil {
-		return
+	if client, ok := clientFromProviderData(req.ProviderData, "Unexpected Data Source Configure Type", &resp.Diagnostics); ok {
+		d.client = client
 	}
-	client, ok := req.ProviderData.(*Client)
-	if !ok {
-		AddConfigError(&resp.Diagnostics, "Unexpected Data Source Configure Type",
-			fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", req.ProviderData))
-		return
-	}
-	d.client = client
 }
 
 func (d *RoleDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {

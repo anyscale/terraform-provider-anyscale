@@ -298,3 +298,20 @@ func interfaceToAttrValue(value interface{}) (attr.Value, attr.Type) {
 		return types.StringValue(fmt.Sprintf("%v", value)), types.StringType
 	}
 }
+
+// clientFromProviderData returns the provider's API client for a resource,
+// data source or ephemeral resource Configure. It reports false, adding no
+// diagnostic, when providerData is nil: Configure runs before the provider
+// itself is configured, and the caller then leaves its client unset. Any other
+// type is a provider bug, reported under summary.
+func clientFromProviderData(providerData any, summary string, diags *diag.Diagnostics) (*Client, bool) {
+	if providerData == nil {
+		return nil, false
+	}
+	client, ok := providerData.(*Client)
+	if !ok {
+		diags.AddError(summary, fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", providerData))
+		return nil, false
+	}
+	return client, true
+}
