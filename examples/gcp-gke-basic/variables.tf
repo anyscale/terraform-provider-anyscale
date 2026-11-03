@@ -211,3 +211,9 @@ variable "cloud_name" {
   type        = string
   default     = "tf-gke-test"
 }
+
+variable "install_operator" {
+  description = "(Optional) Install the Anyscale Operator into the cluster with Helm, so the cloud can run workloads."
+  type        = bool
+  default     = false
+}

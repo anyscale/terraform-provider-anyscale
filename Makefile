@@ -522,10 +522,10 @@ destroy-gcp-vm-full: ## Destroy GCP VM full (must match SUFFIX used by apply)
 # ============================================================================
 
 .PHONY: test-gcp-gke-basic
-test-gcp-gke-basic: build ## Test GCP GKE basic (K8S)
+test-gcp-gke-basic: build ## Test GCP GKE basic (K8S), including the Anyscale Operator install (second apply)
 	@echo "==> Testing gcp-gke-basic scenario..."
 	@SUFFIX=$(SCENARIO_SUFFIX); \
-	  export TF_VAR_cloud_name=tfacc-gcp-gke-basic-$$SUFFIX; \
+	  export SCENARIO_SECOND_APPLY_VARS=install_operator=true TF_VAR_cloud_name=tfacc-gcp-gke-basic-$$SUFFIX; \
 	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/gcp-gke-basic $(BUILD_DIR)/gcp-gke-basic-$$SUFFIX.tfstate
 
 .PHONY: apply-gcp-gke-basic
