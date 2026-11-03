@@ -251,6 +251,20 @@ attached.
 
 ## Deleting a cloud
 
+Destroy order matters for the AWS IAM your cloud uses. Anyscale stops a cloud's clusters, and the instances behind
+a service, with the cloud's control-plane role, so that role's policies must still exist while they stop.
+Referencing the role's ARN in the cloud only orders the role itself: Terraform may remove the role's
+policy attachments in parallel, Anyscale's `ec2:TerminateInstances` call is then denied, and the instances keep
+running and block deleting the VPC. Make `anyscale_cloud` and `anyscale_cloud_resource` `depends_on` the IAM
+module or the policy attachments, so they are destroyed last:
+
+```terraform
+resource "anyscale_cloud" "this" {
+  # ...
+  depends_on = [module.anyscale_iam_roles]
+}
+```
+
 Deleting an `anyscale_cloud` resource first attempts to detach any machine pools attached to it, then
 deletes the cloud itself. If a detach fails, the delete still goes ahead and the apply reports a warning
 (naming the pool if one failed to detach, or saying the machine pools could not be listed); if the
