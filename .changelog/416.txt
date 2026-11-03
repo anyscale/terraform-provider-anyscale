@@ -1,4 +1,0 @@
-```
-release-note:fixed
-resource/anyscale_cloud: Create now stops with an error when the check for an existing cloud with the same name fails, instead of creating the cloud anyway, which could produce a duplicate.
-```

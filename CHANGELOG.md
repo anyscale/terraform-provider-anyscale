@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.0] - 2026-11-03
+
+### Added
+
+- resource/anyscale_service: `canary_percent` holds a new version at a chosen traffic share during a rollout, shifts traffic when changed, and finishes the rollout when removed.
+- resource/anyscale_cloud: Import accepts `<cloud_id>:empty` for a cloud whose configuration lives in `anyscale_cloud_resource` resources. Import then recovers no `aws_config`, `gcp_config` or `kubernetes_config`, so the plan after import is empty. The bare `<cloud_id>` form is unchanged. A split-pattern cloud previously imported with the bare ID keeps a one-time in-place update that removes the recovered blocks; applying it changes state only.
+
+### Changed
+
+- provider: Cloud attribute descriptions are shorter and no longer repeat rename history.
+- provider: `anyscale_cloud`, `anyscale_cloud_resource`, `anyscale_project` and `anyscale_service` now treat an HTTP 403 on refresh or destroy as deleted, with a warning, because the API can answer 403 instead of 404 for a deleted object. If the token actually lost access, a refresh leads to a duplicate on the next apply until access is restored, and a destroy leaves the object outside Terraform; the destroy warning says to check the Anyscale console. resource/anyscale_cloud_resource: This also applies when the 403 is for the resource's cloud. resource/anyscale_project: A destroy still retries a 403 on a just-created project first, and a 403 for running jobs or services is still an error. resource/anyscale_service: This also applies while waiting for the service to terminate. A service removed while terminating (404 or 403) no longer fails the destroy.
+- provider: The container image, registry and service examples now use Ray 2.59.0 and Python 3.13; the compute config example now uses Ray 2.59.0.
+
+### Fixed
+
+- resource/anyscale_service: a wait that times out while the service is in an error state now reports the failure reason (`error_message`, or the failing status checks) instead of only the state name.
+- provider: API failures are classified by HTTP status code rather than by matching text in the error message, so a response body that mentions another status code is no longer misread (for example a 403 reported as the cloud roles feature being disabled).
+- resource/anyscale_cloud_resource: destroy no longer drops a still-existing resource from state when the API returns a 404 that does not mean the resource is gone; it re-checks the cloud's resource listing and fails if the resource is still listed.
+- resource/anyscale_cloud: a create refused at `auto_add_user` in an organization converted to role bindings now deletes the new cloud and leaves nothing tainted, so the next apply after fixing the config is an ordinary create.
+- resource/anyscale_cloud: `auto_add_user`, `lineage_tracking_enabled` and `aggregated_logs_enabled` are now applied on an empty cloud (one with no embedded resource config); previously setting them to `true` failed the apply as an inconsistent result.
+- resource/anyscale_cloud: Example no longer sets `object_storage.region` equal to the cloud region, which made an imported cloud plan a one-time in-place update. resource/anyscale_cloud_resource: Example no longer sets `object_storage.region` equal to the cloud region, which made an imported cloud plan a one-time in-place update.
+- resource/anyscale_cloud_access: A service account declared as a member is now resolved by email instead of reported as an unresolvable member, so it is no longer listed in `ungranted_members` and no longer blocks removals. resource/anyscale_organization_user_role: A service account is now resolved by email instead of reported as not an organization member. resource/anyscale_organization_user: A service account that is already a member is now resolved by email and adopted instead of being treated as missing and invited. resource/anyscale_user_group_members: A service account declared as a member is now resolved by email instead of reported as not an organization member. data-source/anyscale_organization_user: A service account looked up by `email`, `id` or `user_id` is now found instead of reported as "User Not Found". provider: In `anyscale_cloud_access`, `anyscale_organization_user_role`, `anyscale_organization_user`, `anyscale_user_group_members` and the `anyscale_organization_user` data source, if an email matches both a user and a service account, these lookups now fail and name both, instead of silently using the user.
+- resource/anyscale_cloud: Create now stops with an error when the check for an existing cloud with the same name fails, instead of creating the cloud anyway, which could produce a duplicate.
+- resource/anyscale_system_cluster: A system cluster whose session has been archived is no longer dropped from state on refresh, so the next apply no longer starts the cluster again. data-source/anyscale_system_cluster: An archived system-cluster session is now found instead of reported as missing.
+- resource/anyscale_service: Creating a service whose name is held by an archived service in the same project (with `project_id` set) now fails before anything is applied, with an error asking for a different name, instead of an unclear API error during apply.
+
 ## [0.33.0] - 2026-11-02
 
 ### New Resources
@@ -1267,7 +1293,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.33.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.34.0...HEAD
+[0.34.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.34.0
 [0.33.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.33.0
 [0.32.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.32.0
 [0.31.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.31.2

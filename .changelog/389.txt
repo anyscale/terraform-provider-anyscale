@@ -1,4 +1,0 @@
-```
-release-note:added
-resource/anyscale_service: `canary_percent` holds a new version at a chosen traffic share during a rollout, shifts traffic when changed, and finishes the rollout when removed.
-```
