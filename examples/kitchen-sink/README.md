@@ -132,8 +132,10 @@ implicit extra one.
    running Ray Serve service** in your Anyscale org, plus the AWS infrastructure above. Deleting a
    cloud does not stop its running clusters: Cloud B's System Cluster, if you enabled it (and any service cluster that has
    not finished terminating) keeps its EC2 instances, which pin the VPC's internet gateway, so
-   `terraform destroy` can hang or leak the VPC. After destroying, terminate leftover instances in the
-   VPC (or the cluster in the Anyscale console), then re-run destroy.
+   `terraform destroy` can hang or leak the VPC. A service's load balancer
+   (ALB, target group and ACM certificate, named after the cloud ID) also survives the cloud's deletion and
+   blocks the VPC. After destroying, terminate leftover instances in the VPC, delete the ALB, then its target
+   group, then the certificate (each is in use until the one before is gone), and re-run destroy.
 3. **The real invitation email is opt-in, not automatic.** Leave `invite_email` unset (the
    default) and `anyscale_organization_invitation` applies zero instances. Set it to an address you
    own or control if you want to exercise that resource — it will receive a real invitation.
