@@ -50,9 +50,9 @@ resource "anyscale_cloud_iam_mapping" "production" {
       value    = "ci-bot-role"
     },
     {
-      # Set-based selectors match several values; comma ANDs
-      # requirements.
-      selector = "workload-type in (job,service),!user"
+      # Set-based selectors match several values: this rule
+      # catches both jobs and services.
+      selector = "workload-type in (job,service)"
       value    = "batch-role"
     },
   ]
