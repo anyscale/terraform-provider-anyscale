@@ -1,5 +1,0 @@
-```
-release-note:fixed
-resource/anyscale_system_cluster: A system cluster whose session has been archived is no longer dropped from state on refresh, so the next apply no longer starts the cluster again.
-data-source/anyscale_system_cluster: An archived system-cluster session is now found instead of reported as missing.
-```

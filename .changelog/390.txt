@@ -1,4 +1,0 @@
-```
-release-note:changed
-provider: Cloud attribute descriptions are shorter and no longer repeat rename history.
-```
