@@ -1,0 +1,3 @@
+```release-note:fixed
+provider: `anyscale_cloud`, `anyscale_cloud_resource`, `anyscale_project` and `anyscale_service`: a destroy whose delete call answers HTTP 403 now reads the object back, and fails if it still exists, instead of treating every 403 as already deleted. Credentials that can see an object but may not delete it no longer drop it from state while it keeps running.
+```
