@@ -101,7 +101,7 @@ implicit extra one.
 
 | Variable | Enables | Needs |
 | --- | --- | --- |
-| `enable_system_cluster` | `anyscale_system_cluster` (Cloud B) and its data source | Nothing extra, but destroying it only removes it from state and deleting the cloud leaves its instance running: stop or terminate it yourself first |
+| `enable_system_cluster` | `anyscale_system_cluster` (Cloud B) and its data source | Nothing extra, but destroying it only removes it from state and deleting the cloud leaves its instance running: stop or terminate it first |
 | `org_user_email` | `anyscale_organization_user` and its data source | An existing member's email (a non-member gets a real invitation) |
 | `enable_user_groups` | `anyscale_user_group`, `anyscale_user_group_members`, and the `anyscale_user_group` / `anyscale_user_groups` data sources | User groups enabled for your org (org-wide objects behind a feature flag) |
 | `user_group_member_emails` | Group membership | Each email must be an accepted org member |
@@ -129,13 +129,7 @@ implicit extra one.
    resources, never your AWS account, so an abandoned apply leaves a real VPC and EKS cluster
    billing. Track your own state and tear it down when you're done.
 2. **This creates two real clouds, two projects, three compute configs, two container images, and a
-   running Ray Serve service** in your Anyscale org, plus the AWS infrastructure above. Deleting a
-   cloud does not stop its running clusters: Cloud B's System Cluster, if you enabled it (and any service cluster that has
-   not finished terminating) keeps its EC2 instances, which pin the VPC's internet gateway, so
-   `terraform destroy` can hang or leak the VPC. A service's load balancer
-   (ALB, target group and ACM certificate, named after the cloud ID) also survives the cloud's deletion and
-   blocks the VPC. After destroying, terminate leftover instances in the VPC, delete the ALB, then its target
-   group, then the certificate (each is in use until the one before is gone), and re-run destroy.
+   running Ray Serve service** in your Anyscale org, plus the AWS infrastructure above.
 3. **The real invitation email is opt-in, not automatic.** Leave `invite_email` unset (the
    default) and `anyscale_organization_invitation` applies zero instances. Set it to an address you
    own or control if you want to exercise that resource — it will receive a real invitation.
@@ -158,6 +152,14 @@ implicit extra one.
 
 ## Known limitations this example runs into
 
+- **Destroy can leave a service's load balancer behind.** Until the provider's cloud-delete fix ships,
+  `terraform destroy` leaves the service's ALB, target group and ACM certificate (named after the cloud
+  ID) in your AWS account, and they block deleting the VPC. After destroy, check ELB and ACM for each
+  cloud's ID, delete the ALB, then its target group, then the certificate (each is in use until the one
+  before is gone), and re-run destroy. Instances are not affected: the IAM module is destroyed only
+  after the clouds, so Anyscale can still terminate them. The System Cluster is the exception: it is
+  not stopped by destroying its resource or the cloud, so stop it first (see
+  `enable_system_cluster`).
 - **A first apply may need one retry for Cloud A's project and default compute config.**
   `anyscale_project.a` and `anyscale_compute_config.cc_a_default` are both scoped to Cloud A, and
   if Terraform schedules their creation only moments after Cloud A itself, they can fail with a
