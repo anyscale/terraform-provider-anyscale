@@ -158,3 +158,18 @@ func addForbiddenTreatedAsDeletedWarning(diags *diag.Diagnostics, kind, id strin
 			kind, id),
 	)
 }
+
+// addForbiddenTreatedAsDeletedOnDestroyWarning is addForbiddenTreatedAsDeletedWarning for a
+// destroy. There the risk of a 403 that meant lost access is the opposite one: the object may
+// still exist, no longer managed by Terraform.
+func addForbiddenTreatedAsDeletedOnDestroyWarning(diags *diag.Diagnostics, kind, id string, err error) {
+	if !isHTTPStatus(err, http.StatusForbidden) {
+		return
+	}
+	diags.AddWarning(
+		kind+" Treated As Deleted",
+		fmt.Sprintf("%s %s returned HTTP 403 during destroy; it is treated as already deleted and removed from state. "+
+			"If the token lost access instead, the %s may still exist outside Terraform; check it in the Anyscale console.",
+			kind, id, strings.ToLower(kind)),
+	)
+}

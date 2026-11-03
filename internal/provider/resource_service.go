@@ -1600,7 +1600,7 @@ func (r *ServiceResource) Delete(ctx context.Context, req resource.DeleteRequest
 	if err != nil {
 		if isGoneOrForbidden(err) {
 			tflog.Info(ctx, "Service already gone", map[string]any{"service_id": serviceID})
-			addForbiddenTreatedAsDeletedWarning(&resp.Diagnostics, "Service", serviceID, err)
+			addForbiddenTreatedAsDeletedOnDestroyWarning(&resp.Diagnostics, "Service", serviceID, err)
 			return
 		}
 		AddAPIError(&resp.Diagnostics, "terminate service", err)
@@ -1608,6 +1608,13 @@ func (r *ServiceResource) Delete(ctx context.Context, req resource.DeleteRequest
 	}
 
 	if _, err := waitForServiceState(ctx, r.client, serviceID, serviceStateTerminated, timeout); err != nil {
+		// The backend can remove the service while it terminates; the wait's GET then answers
+		// 404, or 403 under the newer access model.
+		if isGoneOrForbidden(err) {
+			tflog.Info(ctx, "Service gone while waiting for termination", map[string]any{"service_id": serviceID})
+			addForbiddenTreatedAsDeletedOnDestroyWarning(&resp.Diagnostics, "Service", serviceID, err)
+			return
+		}
 		AddAPIError(&resp.Diagnostics, "wait for service termination", err)
 		return
 	}
@@ -1628,7 +1635,7 @@ func (r *ServiceResource) Delete(ctx context.Context, req resource.DeleteRequest
 		http.StatusNoContent, http.StatusNotFound,
 	)
 	if isHTTPStatus(err, http.StatusForbidden) {
-		addForbiddenTreatedAsDeletedWarning(&resp.Diagnostics, "Service", serviceID, err)
+		addForbiddenTreatedAsDeletedOnDestroyWarning(&resp.Diagnostics, "Service", serviceID, err)
 		return
 	}
 	if err != nil {

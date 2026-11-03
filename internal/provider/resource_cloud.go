@@ -1421,7 +1421,7 @@ func (r *CloudResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 		http.StatusOK, http.StatusNoContent, http.StatusNotFound)
 	if isHTTPStatus(err, http.StatusForbidden) {
 		tflog.Warn(ctx, "Cloud delete returned 403, treating as already deleted", map[string]any{"id": cloudID})
-		addForbiddenTreatedAsDeletedWarning(&resp.Diagnostics, "Cloud", cloudID, err)
+		addForbiddenTreatedAsDeletedOnDestroyWarning(&resp.Diagnostics, "Cloud", cloudID, err)
 		return
 	}
 	if err != nil {

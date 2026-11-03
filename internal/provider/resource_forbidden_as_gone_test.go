@@ -68,8 +68,9 @@ func diagsWarningSummaries(diags diag.Diagnostics) []string {
 	return out
 }
 
-// assertTreatedAsDeleted fails unless diags carry no error and exactly the one 403 warning.
-func assertTreatedAsDeleted(t *testing.T, diags diag.Diagnostics, kind, id string) {
+// assertTreatedAsDeleted fails unless diags carry no error and exactly the one 403 warning, worded
+// for a refresh (duplicate on the next apply) or, with destroy, for a destroy (may still exist).
+func assertTreatedAsDeleted(t *testing.T, diags diag.Diagnostics, kind, id string, destroy bool) {
 	t.Helper()
 	if diags.HasError() {
 		t.Fatalf("want no error for a 403 treated as gone, got: %v", diags)
@@ -78,8 +79,15 @@ func assertTreatedAsDeleted(t *testing.T, diags diag.Diagnostics, kind, id strin
 	if len(warnings) != 1 || warnings[0].Summary() != kind+" Treated As Deleted" {
 		t.Fatalf("warnings = %v, want exactly one %q", diagsWarningSummaries(diags), kind+" Treated As Deleted")
 	}
-	if detail := warnings[0].Detail(); !strings.Contains(detail, id+" returned HTTP 403") || !strings.Contains(detail, "terraform state rm") {
-		t.Errorf("warning detail = %q, want it to name %s, the 403, and terraform state rm", detail, id)
+	detail := warnings[0].Detail()
+	if destroy {
+		if !strings.Contains(detail, id+" returned HTTP 403 during destroy") || !strings.Contains(detail, "may still exist outside Terraform") {
+			t.Errorf("warning detail = %q, want it to name %s, the 403 during destroy, and that it may still exist", detail, id)
+		}
+		return
+	}
+	if !strings.Contains(detail, id+" returned HTTP 403;") || !strings.Contains(detail, "the next apply would create a duplicate") {
+		t.Errorf("warning detail = %q, want it to name %s, the 403, and the duplicate on the next apply", detail, id)
 	}
 }
 
@@ -160,7 +168,7 @@ func TestForbiddenTreatedAsGone_Read(t *testing.T) {
 
 			resp := runForbiddenRead(t, tt.resource(NewClientWithToken(server.URL, "test-token")), tt.attrs)
 
-			assertTreatedAsDeleted(t, resp.Diagnostics, tt.kind, tt.id)
+			assertTreatedAsDeleted(t, resp.Diagnostics, tt.kind, tt.id, false)
 			if !resp.State.Raw.IsNull() {
 				t.Errorf("state was not removed after a 403 read")
 			}
@@ -223,7 +231,7 @@ func TestForbiddenTreatedAsGone_Delete(t *testing.T) {
 
 			diags := runForbiddenDelete(t, tt.resource(NewClientWithToken(server.URL, "test-token")), tt.attrs)
 
-			assertTreatedAsDeleted(t, diags, tt.kind, tt.id)
+			assertTreatedAsDeleted(t, diags, tt.kind, tt.id, true)
 			if got := hits.Load(); got != 1 {
 				t.Errorf("403 endpoint requests = %d, want 1", got)
 			}
@@ -255,9 +263,55 @@ func TestForbiddenTreatedAsGone_ServiceFinalDelete(t *testing.T) {
 
 	diags := runForbiddenDelete(t, &ServiceResource{client: NewClientWithToken(server.URL, "test-token")}, map[string]any{"id": "svc_gone"})
 
-	assertTreatedAsDeleted(t, diags, "Service", "svc_gone")
+	assertTreatedAsDeleted(t, diags, "Service", "svc_gone", true)
 	if got := hits.Load(); got != 1 {
 		t.Errorf("DELETE requests = %d, want 1", got)
+	}
+}
+
+// The backend can remove a service while it terminates. The termination wait's GET then answers
+// 404, or 403 under the newer access model; either way the destroy is done and the final DELETE
+// is never sent. Only the 403 warns.
+func TestForbiddenTreatedAsGone_ServiceGoneDuringTerminationWait(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		status int
+		warns  bool
+	}{
+		{"403", http.StatusForbidden, true},
+		{"404", http.StatusNotFound, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var deletes atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v2/services-v2/svc_gone/terminate":
+					w.WriteHeader(http.StatusAccepted)
+					_, _ = fmt.Fprint(w, `{"result": {}}`)
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v2/services-v2/svc_gone":
+					w.WriteHeader(tt.status)
+					_, _ = fmt.Fprint(w, `{"error": {"detail": "Permission denied"}}`)
+				case r.Method == http.MethodDelete:
+					deletes.Add(1)
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusTeapot)
+				}
+			}))
+			t.Cleanup(server.Close)
+
+			diags := runForbiddenDelete(t, &ServiceResource{client: NewClientWithToken(server.URL, "test-token")}, map[string]any{"id": "svc_gone"})
+
+			if tt.warns {
+				assertTreatedAsDeleted(t, diags, "Service", "svc_gone", true)
+			} else if diags.HasError() || len(diags.Warnings()) != 0 {
+				t.Errorf("a 404 during the wait: diags = %v, want none", diags)
+			}
+			if got := deletes.Load(); got != 0 {
+				t.Errorf("DELETE requests = %d, want 0 once the service is gone", got)
+			}
+		})
 	}
 }
 
@@ -324,7 +378,20 @@ func TestAddForbiddenTreatedAsDeletedWarning_OnlyFor403(t *testing.T) {
 		t.Fatalf("a 404 added %v, want nothing", diags)
 	}
 	addForbiddenTreatedAsDeletedWarning(&diags, "Cloud", "cld_x", &UnexpectedStatusError{StatusCode: http.StatusForbidden})
-	assertTreatedAsDeleted(t, diags, "Cloud", "cld_x")
+	assertTreatedAsDeleted(t, diags, "Cloud", "cld_x", false)
+}
+
+func TestAddForbiddenTreatedAsDeletedOnDestroyWarning_OnlyFor403(t *testing.T) {
+	var diags diag.Diagnostics
+	addForbiddenTreatedAsDeletedOnDestroyWarning(&diags, "Cloud", "cld_x", fmt.Errorf("%w: gone", ErrNotFound))
+	if len(diags) != 0 {
+		t.Fatalf("a 404 added %v, want nothing", diags)
+	}
+	addForbiddenTreatedAsDeletedOnDestroyWarning(&diags, "Cloud Resource", "cld_x:r", &UnexpectedStatusError{StatusCode: http.StatusForbidden})
+	assertTreatedAsDeleted(t, diags, "Cloud Resource", "cld_x:r", true)
+	if detail := diags.Warnings()[0].Detail(); !strings.Contains(detail, "the cloud resource may still exist") {
+		t.Errorf("warning detail = %q, want the lower-cased kind", detail)
+	}
 }
 
 // readCloudState's hand-rolled status check must surface a 403 as a typed status so Read can
