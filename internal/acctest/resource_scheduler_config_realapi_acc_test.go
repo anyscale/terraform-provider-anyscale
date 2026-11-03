@@ -22,9 +22,7 @@ import (
 // immutable version, and this resource's destroy only drops state. So the test
 // snapshots the active document first and, in t.Cleanup, applies it again as a
 // new version. An organization that never had a config (GET answers 404)
-// cannot return to that state; cleanup applies an empty document instead,
-// which schedules the same way (no scheduling rules means no admission
-// filtering), and logs that the 404 itself is gone for good.
+// cannot return to that state, so the test refuses to run there.
 //
 // The documents applied here declare no scheduling_rules, so while the test
 // runs no workload is rejected for matching no rule. They do replace whatever
@@ -48,20 +46,14 @@ func TestAccSchedulerConfigResource_RealAPI(t *testing.T) {
 		}
 		t.Fatalf("snapshot the scheduler config: %s", err)
 	}
-	if hadConfig {
-		t.Logf("SNAPSHOT: active scheduler config is version %d", prior.Version)
-	} else {
-		t.Logf("SNAPSHOT: organization has never had a scheduler config")
+	if !hadConfig {
+		t.Skipf("SKIP(org-mutation): organization %q has never had a scheduler config; the API has no delete, "+
+			"so applying one could not be undone. Run against an organization that already has one.", org.Name)
 	}
+	t.Logf("SNAPSHOT: active scheduler config is version %d", prior.Version)
 
 	t.Cleanup(func() {
 		restore := prior.Config
-		if !hadConfig {
-			restore = json.RawMessage(`{}`)
-			t.Logf("RESTORE NOTE: this organization had no scheduler config before the test. The API has no " +
-				"delete, so that state cannot come back; applying an empty document, which admits workloads " +
-				"the same way. GET /api/v2/scheduler/config now answers 200 with an empty document, not 404.")
-		}
 		version, err := applyLiveSchedulerDocument(restore)
 		if err != nil {
 			t.Errorf("RESTORE FAILED: could not re-apply the organization's previous scheduler config: %s. "+
