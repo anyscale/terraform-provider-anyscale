@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -208,51 +209,14 @@ func testAccComputeConfigImportStateIdFunc(resourceName string) resource.ImportS
 }
 
 // testAccCheckComputeConfigExistsInAPI verifies the compute config exists in the API
+// computeConfigExistsCheck is how testAccCheckComputeConfigExistsInAPI finds the resource.
+var computeConfigExistsCheck = apiExistsCheck{
+	noun: "compute config", id: computeConfigLookupID, getPathFmt: "/api/v2/compute_templates/%s",
+	accepted: []int{http.StatusOK},
+}
+
 func testAccCheckComputeConfigExistsInAPI(resourceName string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		rs, ok := s.RootModule().Resources[resourceName]
-		if !ok {
-			return fmt.Errorf("not found: %s", resourceName)
-		}
-
-		// Use config_id for API lookup (version-specific ID)
-		configID := rs.Primary.Attributes["config_id"]
-		if configID == "" {
-			// Fallback to primary ID for backwards compatibility
-			configID = rs.Primary.ID
-		}
-
-		if configID == "" {
-			return fmt.Errorf("no Compute Config ID is set")
-		}
-
-		// Get the API client
-		client, err := GetTestClient()
-		if err != nil {
-			return fmt.Errorf("failed to get test client: %w", err)
-		}
-
-		// Make API call to verify compute config exists
-		resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/compute_templates/%s", configID), nil)
-		if err != nil {
-			return fmt.Errorf("API request failed: %w", err)
-		}
-		defer func() {
-			if closeErr := resp.Body.Close(); closeErr != nil {
-				log.Printf("[WARN] Failed to close response body: %v", closeErr)
-			}
-		}()
-
-		if resp.StatusCode == 404 {
-			return fmt.Errorf("compute config %s not found in API", configID)
-		}
-
-		if resp.StatusCode != 200 {
-			return fmt.Errorf("API returned status %d for compute config %s", resp.StatusCode, configID)
-		}
-
-		return nil
-	}
+	return NewAPIExistsCheck(resourceName, computeConfigExistsCheck)
 }
 
 // Configuration templates for tests
