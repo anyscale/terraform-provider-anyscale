@@ -22,7 +22,8 @@ one set of infrastructure; nothing here provisions a second VPC, bucket, or clus
 IAM roles are the one exception: Cloud A's VM leg and Cloud B each get their own IAM role module
 call rather than sharing one. Not a missed optimization — the backend enforces a real unique index
 on a cloud's `external_id`, scoped per org, so two clouds can't present the identical value. Both role sets
-derive their `external_id` from the same `var.anyscale_external_id` you set once, suffixed `-a`
+derive their `external_id` from the same `var.anyscale_external_id` you set once (it must start with your
+Organization ID, e.g. `org_abc123xyz-kitchen-sink`; the AWS IAM module rejects anything else at plan time), suffixed `-a`
 and `-b` internally, so you still only supply one value. These are cheap, fast IAM resources
 (seconds, not the VPC/EKS/S3 layer's minutes), so splitting them doesn't undercut "one shared VPC."
 Cloud A's EKS leg is unaffected either way — `kubernetes_config` has no `external_id` field at all;

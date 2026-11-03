@@ -14,9 +14,10 @@
 # https://console.anyscale.com/ under Organization Settings.
 anyscale_org_id = "org_abc123xyz"
 
-# Free-form string used as the IAM trust policy external ID -- this example derives two distinct
-# values from it internally (one per Anyscale cloud), so you only need to set it once here.
-anyscale_external_id = "my-external-id-12345"
+# IAM trust policy external ID. It MUST start with your Organization ID (the AWS IAM module
+# rejects anything else at plan time). This example derives two distinct values from it
+# internally (one per Anyscale cloud), so you only need to set it once here.
+anyscale_external_id = "org_abc123xyz-kitchen-sink"
 
 # Comma-delimited IPv4 CIDR ranges allowed to reach the VM legs (opens 443/https and 22/ssh).
 # Replace with your own IP(s)/range(s) -- avoid "0.0.0.0/0" outside of throwaway testing.
