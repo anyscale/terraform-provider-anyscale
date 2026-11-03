@@ -1481,13 +1481,13 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 	}
 
 	if hold {
-		r.waitForHeldCanary(ctx, &plan, service.ID, newVersionID, holdPercent, timeout, resp)
+		r.waitForHeldCanary(ctx, &plan, &state, service.ID, newVersionID, holdPercent, timeout, resp)
 		return
 	}
 
 	observer := newServiceRolloutObserver(newVersionID)
 	observer.observe(&service)
-	finalService, err := waitForServiceRollout(ctx, r.client, service.ID, timeout, observer.observeUntilRolledBack)
+	finalService, err := waitForServiceRollout(ctx, r.client, service.ID, timeout, serviceCutoverObserver(observer.observeUntilRolledBack))
 	if finalService != nil {
 		diags := populateServiceResourceModelComputed(ctx, &plan, finalService)
 		resp.Diagnostics.Append(diags...)

@@ -5,10 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -115,6 +118,8 @@ func waitForServiceHoldWithTiming(ctx context.Context, client *Client, serviceID
 				canaryID, service.CurrentState)
 		case serviceHoldSettled(service, percent):
 			return service, nil
+		case serviceErrorStates[service.CanaryVersion.CurrentState]:
+			return service, fmt.Errorf("%w: canary %s is %s", errServiceCanaryFailed, service.CanaryVersion.ID, service.CanaryVersion.CurrentState)
 		}
 		if time.Now().After(deadline) {
 			c := service.CanaryVersion
@@ -138,8 +143,12 @@ func formatWeight(w *int64) string {
 
 // waitForHeldCanary finishes an apply that holds canaryID at percent: it waits for the share to
 // settle and records the result in state. Tracking (pending, held) was saved before the wait.
-func (r *ServiceResource) waitForHeldCanary(ctx context.Context, plan *ServiceResourceModel, serviceID, canaryID string, percent int64, timeout time.Duration, resp *resource.UpdateResponse) {
+func (r *ServiceResource) waitForHeldCanary(ctx context.Context, plan, prior *ServiceResourceModel, serviceID, canaryID string, percent int64, timeout time.Duration, resp *resource.UpdateResponse) {
 	final, err := waitForServiceHold(ctx, r.client, serviceID, canaryID, percent, timeout)
+	if errors.Is(err, errServiceCanaryFailed) {
+		r.rollBackFailedCanary(ctx, plan, prior, canaryID, final, timeout, resp)
+		return
+	}
 	if final != nil {
 		resp.Diagnostics.Append(populateServiceResourceModelComputed(ctx, plan, final)...)
 		refreshServiceTagsIntoModel(ctx, r.client, serviceID, &plan.Tags)
@@ -167,6 +176,10 @@ func (r *ServiceResource) rollBackHeldCanaryForDeploy(ctx context.Context, plan 
 	}
 	fp, err := serviceApplyFingerprint(applyBody)
 	if err != nil || fp != tracking.PreCanaryFingerprint || rolled.PrimaryVersion == nil {
+		return false
+	}
+	// The fingerprint ignores the name: a new configured name still needs the PUT.
+	if !plan.VersionName.IsNull() && !plan.VersionName.IsUnknown() && plan.VersionName.ValueString() != rolled.PrimaryVersion.Version {
 		return false
 	}
 	tflog.Info(ctx, "Planned config is the one deployed before the held canary; the rollback restored it", map[string]any{"service_id": serviceID})
@@ -219,7 +232,7 @@ func (r *ServiceResource) shiftHeldCanary(ctx context.Context, plan, state *Serv
 	}
 
 	if percent, hold := serviceHoldPercent(plan); hold {
-		r.waitForHeldCanary(ctx, plan, serviceID, heldID, percent, timeout, resp)
+		r.waitForHeldCanary(ctx, plan, state, serviceID, heldID, percent, timeout, resp)
 		return
 	}
 
@@ -233,7 +246,7 @@ func (r *ServiceResource) shiftHeldCanary(ctx context.Context, plan, state *Serv
 	}
 	observer := newServiceRolloutObserver(heldID)
 	observer.observe(&applyResp.Result)
-	final, err := waitForServiceRollout(ctx, r.client, serviceID, timeout, observer.observeUntilRolledBack)
+	final, err := waitForServiceRollout(ctx, r.client, serviceID, timeout, serviceCutoverObserver(observer.observeUntilRolledBack))
 	if final != nil {
 		resp.Diagnostics.Append(populateServiceResourceModelComputed(ctx, plan, final)...)
 		refreshServiceTagsIntoModel(ctx, r.client, serviceID, &plan.Tags)
@@ -241,6 +254,10 @@ func (r *ServiceResource) shiftHeldCanary(ctx context.Context, plan, state *Serv
 	}
 	if err != nil {
 		AddAPIError(&resp.Diagnostics, "wait for service rollout", err)
+		return
+	}
+	if final.CanaryVersion != nil {
+		addServiceCutoverNotCompletedError(&resp.Diagnostics, serviceID, final)
 		return
 	}
 	if final.PrimaryVersion == nil {
@@ -252,4 +269,79 @@ func (r *ServiceResource) shiftHeldCanary(ctx context.Context, plan, state *Serv
 		resp.Diagnostics.Append(resp.State.Set(ctx, &rolledBack)...)
 		resp.Diagnostics.AddError("Service Rollout Rolled Back", serviceRolledBackDetail(serviceID, observer, final))
 	}
+}
+
+// errServiceCanaryFailed marks a held canary that entered an error state. Anyscale never rolls a
+// held canary back on its own (a manual rollout yields control to the user), so the provider does.
+var errServiceCanaryFailed = errors.New("the held canary version failed")
+
+// serviceCutoverGrace is how long a canary may stay present after it serves 100% of traffic
+// before the cutover is reported as not completing. Measured on the test cloud: completion follows
+// about 1.5 minutes after the cutover. A var so tests can shorten it.
+var serviceCutoverGrace = 5 * time.Minute
+
+// serviceCutoverObserver ends a rollout wait (successfully, from the poller's view) once the
+// canary has served 100% for longer than serviceCutoverGrace: where Anyscale does not complete
+// manual rollouts, it never will. The caller then reports the canary still present.
+func serviceCutoverObserver(next func(*ServiceResult) bool) func(*ServiceResult) bool {
+	var fullSince time.Time
+	return func(s *ServiceResult) bool {
+		if next != nil && next(s) {
+			return true
+		}
+		c := s.CanaryVersion
+		if c == nil || c.CurrentWeight == nil || *c.CurrentWeight != serviceCanaryCutover {
+			fullSince = time.Time{}
+			return false
+		}
+		if fullSince.IsZero() {
+			fullSince = time.Now()
+		}
+		return time.Since(fullSince) > serviceCutoverGrace
+	}
+}
+
+// addServiceCutoverNotCompletedError reports a canary still present after the 100 cutover's grace.
+func addServiceCutoverNotCompletedError(diags *diag.Diagnostics, serviceID string, final *ServiceResult) {
+	diags.AddAttributeError(path.Root("canary_percent"), "Canary Rollout Not Completed",
+		fmt.Sprintf("Service %s's canary version %s serves 100%% of traffic, but Anyscale has not completed the rollout after %s; "+
+			"it does not complete manual rollouts for this cloud. Remove canary_percent from the configuration and apply again "+
+			"to finish the rollout.", serviceID, final.CanaryVersion.ID, serviceCutoverGrace))
+}
+
+// rollBackFailedCanary handles a held canary that failed during the apply holding it: it rolls the
+// canary back, waits for the primary to keep all traffic, and returns state with the prior deploy
+// fields restored and tracking that lets Read refresh ray_serve_config from the live primary, so
+// the next plan proposes the change again. The returned error describes the outcome.
+func (r *ServiceResource) rollBackFailedCanary(ctx context.Context, plan, prior *ServiceResourceModel, canaryID string,
+	failed *ServiceResult, timeout time.Duration, resp *resource.UpdateResponse) {
+	serviceID := plan.ID.ValueString()
+	detail := serviceFailureDetail(failed)
+	if err := rollbackService(ctx, r.client, serviceID); err != nil {
+		AddAPIError(&resp.Diagnostics, "roll back the failed canary", err)
+		return
+	}
+	final, err := waitForServiceRollout(ctx, r.client, serviceID, timeout, nil)
+	restored := withPriorServiceDeployFields(*plan, *prior)
+	restored.CanaryPercent = prior.CanaryPercent
+	if final != nil {
+		resp.Diagnostics.Append(populateServiceResourceModelComputed(ctx, &restored, final)...)
+		if final.PrimaryVersion != nil {
+			resp.Diagnostics.Append(setServiceVersionTracking(ctx, resp.Private, &serviceVersionTracking{
+				VersionID: final.PrimaryVersion.ID, Pending: true, PendingVersionID: canaryID,
+			})...)
+		}
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &restored)...)
+	if err != nil {
+		AddAPIError(&resp.Diagnostics, "wait for the failed canary's rollback", err)
+		return
+	}
+	msg := fmt.Sprintf("The held canary version %s of service %s failed (%s), and Anyscale does not roll back a held canary, "+
+		"so Terraform rolled it back. The previous version keeps all traffic. Fix the configuration and apply again.",
+		canaryID, serviceID, failed.CanaryVersion.CurrentState)
+	if detail != "" {
+		msg += " Failure: " + detail
+	}
+	resp.Diagnostics.AddError("Service Rollout Rolled Back", msg)
 }

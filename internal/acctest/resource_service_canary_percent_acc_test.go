@@ -367,3 +367,112 @@ func TestAccServiceResource_CanaryPercentDeployWhileHeldRollsBack(t *testing.T) 
 		},
 	})
 }
+
+// A held canary that fails is never rolled back by Anyscale. The apply holding it rolls it back
+// itself, fails with Service Rollout Rolled Back, and the next plan proposes the change again.
+func TestAccServiceResource_CanaryPercentFailedHoldRollsBack(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const name = "canary-failed"
+	failed := heldAt(10, intPtr(0))
+	failed.CanaryState, failed.CurrentState = "UNHEALTHY", "UNHEALTHY"
+	m, server := newOutcomeMock(t, "svc_canary_failed", name, func(n int, _ map[string]any) outcomeApplyResult {
+		if n == 1 {
+			return outcomeCreate()
+		}
+		return outcomeApplyResult{Response: heldAt(10, nil), Script: []outcomeSnapshot{failed}}
+	})
+	m.rollbackScript = []outcomeSnapshot{{CurrentState: "RUNNING", Primary: outcomeV1}}
+	held := outcomeConfig(server.URL, name, "main:app_v2", "  canary_percent    = 10")
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: outcomeConfig(server.URL, name, "main:app", "")},
+			{Config: held, ExpectError: regexp.MustCompile(`Service Rollout Rolled Back`)},
+			{
+				PreConfig: func() {
+					if got := m.eventLog(); fmt.Sprint(got) != fmt.Sprint([]string{"apply", "apply", "rollback"}) {
+						t.Errorf("events = %v, want the failed hold rolled back", got)
+					}
+				},
+				Config:             held,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+		},
+	})
+}
+
+// Deploying back to the pre-canary config with a new version_name is not a revert: the
+// rollback restores the old version under its old name, so the new name needs the PUT.
+func TestAccServiceResource_CanaryPercentRevertWithNewNameDeploys(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const name = "canary-revert-name"
+	renamed := outcomeVersion{ID: "svcver_v4", Name: "v1-again", ImportPath: "main:app"}
+	m, server := newOutcomeMock(t, "svc_canary_revert_name", name, func(n int, _ map[string]any) outcomeApplyResult {
+		switch n {
+		case 1:
+			return outcomeCreate()
+		case 2:
+			return outcomeApplyResult{Response: heldAt(10, intPtr(10)), Script: []outcomeSnapshot{heldAt(10, intPtr(10))}}
+		default:
+			return outcomeRollout(outcomeV1, renamed)
+		}
+	})
+	m.rollbackScript = []outcomeSnapshot{{CurrentState: "RUNNING", Primary: outcomeV1}}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: outcomeConfig(server.URL, name, "main:app", "")},
+			{Config: outcomeConfig(server.URL, name, "main:app_v2", "  canary_percent    = 10")},
+			{
+				Config: outcomeConfig(server.URL, name, "main:app", "  version_name      = \"v1-again\""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					expectOutcomeApplyCount(m, 3),
+					resource.TestCheckResourceAttr("anyscale_service.test", "version_name", "v1-again"),
+				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+			},
+		},
+	})
+}
+
+// canary_percent = 100 cuts all traffic over at once; where Anyscale completes the rollout the
+// apply waits for it and ends on the new version.
+func TestAccServiceResource_CanaryPercentCutoverCompletes(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const name = "canary-cutover"
+	m, server := newOutcomeMock(t, "svc_canary_cutover", name, func(n int, _ map[string]any) outcomeApplyResult {
+		switch n {
+		case 1:
+			return outcomeCreate()
+		case 2:
+			return outcomeApplyResult{Response: heldAt(10, intPtr(10)), Script: []outcomeSnapshot{heldAt(10, intPtr(10))}}
+		default:
+			return outcomeApplyResult{Response: heldAt(100, intPtr(10)), Script: []outcomeSnapshot{
+				heldAt(100, intPtr(100)), {CurrentState: "RUNNING", Primary: outcomeV2},
+			}}
+		}
+	})
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: outcomeConfig(server.URL, name, "main:app", "")},
+			{Config: outcomeConfig(server.URL, name, "main:app_v2", "  canary_percent    = 10")},
+			{
+				Config: outcomeConfig(server.URL, name, "main:app_v2", "  canary_percent    = 100"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					canaryApplyBodyCheck(m, 2, float64(100), "main:app_v2", false),
+					resource.TestCheckResourceAttr("anyscale_service.test", "primary_version.id", "svcver_v2"),
+				),
+			},
+		},
+	})
+}
