@@ -88,24 +88,50 @@ func tearDownCloudLoadBalancers(ctx context.Context, client *Client, cloudID str
 		return false, fmt.Errorf("failed to start the load balancer teardown: %w", err)
 	}
 
+	// get_lb_resource is a POST, so the client does not retry it. By now the
+	// cloud is DELETING, so a single 5xx or dropped connection must not fail
+	// the destroy: those keep polling until the deadline. Any other error
+	// fails at once.
 	path := fmt.Sprintf("/api/v2/clouds/%s/get_lb_resource", cloudID)
+	var lastErr error
 	for {
 		lb, err := DoRequestAndParse[cloudLBResourceResponse](ctx, client, "POST", path, nil, http.StatusOK)
-		if err != nil {
-			if ctx.Err() != nil {
-				return true, errCloudLBTeardownTimeout
-			}
-			return true, fmt.Errorf("failed to check the load balancer teardown: %w", err)
-		}
-		if lb.Result.IsTerminated {
+		switch {
+		case err == nil && lb.Result.IsTerminated:
 			return true, nil
+		case err != nil && ctx.Err() != nil:
+			return true, lbTeardownTimeout(lastErr)
+		case err != nil && !transientLBCheckError(err):
+			return true, fmt.Errorf("failed to check the load balancer teardown: %w", err)
+		case err != nil:
+			tflog.Warn(ctx, "Load balancer teardown check failed; retrying", map[string]any{"cloud_id": cloudID, "error": err.Error()})
+			lastErr = err
 		}
 		select {
 		case <-ctx.Done():
-			return true, errCloudLBTeardownTimeout
+			return true, lbTeardownTimeout(lastErr)
 		case <-time.After(cloudLBPollInterval):
 		}
 	}
+}
+
+// transientLBCheckError reports a get_lb_resource failure worth polling
+// through: a 5xx, a 429, or no response at all.
+func transientLBCheckError(err error) bool {
+	var statusErr *UnexpectedStatusError
+	if errors.As(err, &statusErr) {
+		return statusErr.StatusCode >= 500 || statusErr.StatusCode == http.StatusTooManyRequests
+	}
+	return strings.Contains(err.Error(), "API request failed")
+}
+
+// lbTeardownTimeout is errCloudLBTeardownTimeout, with the last failed check
+// when there was one.
+func lbTeardownTimeout(lastErr error) error {
+	if lastErr == nil {
+		return errCloudLBTeardownTimeout
+	}
+	return fmt.Errorf("%w; the last check failed: %s", errCloudLBTeardownTimeout, extractAPIErrorDetail(lastErr))
 }
 
 // addCloudDeleteError reports a failed cloud DELETE. After the load balancer

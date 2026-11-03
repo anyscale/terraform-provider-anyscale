@@ -18,17 +18,18 @@ import (
 // cloudDeleteMock serves the requests anyscale_cloud's Delete makes and
 // records them in order as "METHOD path".
 type cloudDeleteMock struct {
-	mu        sync.Mutex
-	calls     []string
-	resources string // JSON array for GET .../resources
-	lbPending int    // get_lb_resource answers is_terminated=false this many times
-	lbNever   bool   // get_lb_resource never answers true
-	delStatus int    // DELETE status; 0 = 204
-	delBody   string
-	delHang   bool // DELETE never answers before the client gives up
-	getStatus int  // GET of the cloud itself; 0 = 404
-	putStatus int  // PUT state status; 0 = 204
-	lbStatus  int  // get_lb_resource status; 0 = 200
+	mu         sync.Mutex
+	calls      []string
+	resources  string // JSON array for GET .../resources
+	lbPending  int    // get_lb_resource answers is_terminated=false this many times
+	lbNever    bool   // get_lb_resource never answers true
+	delStatus  int    // DELETE status; 0 = 204
+	delBody    string
+	delHang    bool // DELETE never answers before the client gives up
+	getStatus  int  // GET of the cloud itself; 0 = 404
+	putStatus  int  // PUT state status; 0 = 204
+	lbStatus   int  // get_lb_resource status; 0 = 200
+	lbFailOnce int  // the first get_lb_resource call answers this status
 }
 
 func (m *cloudDeleteMock) server(t *testing.T) *httptest.Server {
@@ -54,6 +55,14 @@ func (m *cloudDeleteMock) server(t *testing.T) *httptest.Server {
 			}
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodPost && r.URL.Path == cloud+"/get_lb_resource":
+			if m.lbFailOnce != 0 {
+				m.mu.Lock()
+				status := m.lbFailOnce
+				m.lbFailOnce = 0
+				m.mu.Unlock()
+				w.WriteHeader(status)
+				return
+			}
 			if m.lbStatus != 0 {
 				w.WriteHeader(m.lbStatus)
 				_, _ = fmt.Fprint(w, `{"error": {"detail": "lb lookup failed"}}`)
@@ -262,20 +271,45 @@ func TestCloudResourceDelete_GoneAtTeardownProceedsToDelete(t *testing.T) {
 	}
 }
 
-// A failed get_lb_resource check is not "torn down": the cloud is not deleted,
-// since deleting it with its load balancer still up is the leak this prevents.
+// A get_lb_resource check that fails with a 4xx is not "torn down": the cloud
+// is not deleted, since deleting it with its load balancer still up is the
+// leak this prevents.
 func TestCloudResourceDelete_FailedLoadBalancerCheckSkipsDelete(t *testing.T) {
-	m := &cloudDeleteMock{resources: awsVMResource, lbStatus: http.StatusInternalServerError}
-	diags := runCloudDelete(t, m, "")
-	if !diagsContainSummary(diags, "Cloud Load Balancer Teardown Failed") {
-		t.Fatalf("want a teardown error, got: %v", diags)
+	for name, tc := range map[string]struct {
+		status  int
+		timeout string
+		want    string
+	}{
+		"4xx fails at once":            {http.StatusBadRequest, "2s", "failed to check the load balancer teardown"},
+		"persistent 5xx until timeout": {http.StatusInternalServerError, "300ms", "the last check failed: lb lookup failed"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := &cloudDeleteMock{resources: awsVMResource, lbStatus: tc.status}
+			diags := runCloudDelete(t, m, tc.timeout)
+			if !diagsContainSummary(diags, "Cloud Load Balancer Teardown Failed") {
+				t.Fatalf("want a teardown error, got: %v", diags)
+			}
+			if d := diags[0].Detail(); !strings.Contains(d, tc.want) {
+				t.Errorf("detail %q should contain %q", d, tc.want)
+			}
+			for _, c := range m.teardownCalls() {
+				if strings.HasPrefix(c, "DELETE ") {
+					t.Fatalf("the cloud was deleted although the teardown check failed: %v", m.teardownCalls())
+				}
+			}
+		})
 	}
-	if d := diags[0].Detail(); !strings.Contains(d, "failed to check the load balancer teardown") || !strings.Contains(d, "lb lookup failed") {
-		t.Errorf("detail %q should say the check failed and carry the API's detail", d)
+}
+
+// One transient failure mid-poll does not fail the destroy: the cloud is
+// already DELETING, and the next check succeeds.
+func TestCloudResourceDelete_TransientLoadBalancerCheckErrorIsRetried(t *testing.T) {
+	m := &cloudDeleteMock{resources: awsVMResource, lbPending: 1, lbFailOnce: http.StatusServiceUnavailable}
+	if diags := runCloudDelete(t, m, ""); diags.HasError() {
+		t.Fatalf("a single 503 must not fail the destroy, got: %v", diags)
 	}
-	for _, c := range m.teardownCalls() {
-		if strings.HasPrefix(c, "DELETE ") {
-			t.Fatalf("the cloud was deleted although the teardown check failed: %v", m.teardownCalls())
-		}
+	calls := m.teardownCalls()
+	if last := calls[len(calls)-1]; last != "DELETE /api/v2/clouds/cld_del" {
+		t.Errorf("last call = %q, want the DELETE; calls: %v", last, calls)
 	}
 }
