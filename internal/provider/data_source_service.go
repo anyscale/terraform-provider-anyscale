@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -263,15 +262,7 @@ func (d *ServiceDataSource) findServiceByName(ctx context.Context, name, project
 		params.Add("cloud_id", cloudID)
 	}
 
-	results, err := PaginatedRequest(ctx, d.client, "/api/v2/services-v2", params,
-		func(body []byte) ([]ServiceResult, *string, error) {
-			var servicesResp ServicesListResponse
-			if err := json.Unmarshal(body, &servicesResp); err != nil {
-				return nil, nil, err
-			}
-			return servicesResp.Results, servicesResp.Metadata.NextPagingToken, nil
-		},
-	)
+	results, err := listServices(ctx, d.client, params)
 	if err != nil {
 		return "", fmt.Errorf("failed to list services: %w", err)
 	}

@@ -328,40 +328,16 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 
 // getTemplateLatestBuild returns the latest build of cluster environment templateID:
 // GET the template, then GET its latest_build. It returns (nil, nil) when the template
-// has no build. Read resolves the build the same way, through getBuild.
+// has no build. Read resolves the build the same way, through fetchBuild.
 func (r *ContainerImageRegistryResource) getTemplateLatestBuild(ctx context.Context, templateID string) (*BuildResult, error) {
-	templateResp, err := DoRequestAndParse[ApplicationTemplateResponse](
-		ctx,
-		r.client,
-		"GET",
-		fmt.Sprintf("/api/v2/application_templates/%s", templateID),
-		nil,
-		http.StatusOK,
-	)
+	template, err := fetchApplicationTemplate(ctx, r.client, templateID)
 	if err != nil {
 		return nil, err
 	}
-	if templateResp.Result.LatestBuild == nil {
+	if template.LatestBuild == nil {
 		return nil, nil
 	}
-	return r.getBuild(ctx, templateResp.Result.LatestBuild.ID)
-}
-
-// getBuild fetches one build. The Anyscale API returns 201 for GET build endpoints.
-func (r *ContainerImageRegistryResource) getBuild(ctx context.Context, buildID string) (*BuildResult, error) {
-	buildResp, err := DoRequestAndParse[BuildResponse](
-		ctx,
-		r.client,
-		"GET",
-		fmt.Sprintf("/api/v2/builds/%s", buildID),
-		nil,
-		http.StatusOK,
-		http.StatusCreated,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return &buildResp.Result, nil
+	return fetchBuild(ctx, r.client, template.LatestBuild.ID)
 }
 
 // addBuildNotFoundYetWarning reports a registered image whose build Create could not
@@ -459,11 +435,7 @@ func applyRegistryBuild(plan *ContainerImageRegistryResourceModel, result *Build
 	// echoes back (see ResolvedRayVersion's doc comment): overwriting it would leave config
 	// permanently mismatched against state, and every apply would register another build.
 	if plan.RayVersion.IsUnknown() {
-		if resolvedRayVersion := result.ResolvedRayVersion(); resolvedRayVersion != nil {
-			plan.RayVersion = types.StringValue(*resolvedRayVersion)
-		} else {
-			plan.RayVersion = types.StringNull()
-		}
+		plan.RayVersion = types.StringPointerValue(result.ResolvedRayVersion())
 	}
 
 	// Set name_version
@@ -532,14 +504,7 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 	tflog.Debug(ctx, "Reading container image registry", map[string]any{"cluster_environment_id": clusterEnvID})
 
 	// Get application template details (decorated: carries latest_build for free)
-	templateResp, err := DoRequestAndParse[ApplicationTemplateResponse](
-		ctx,
-		r.client,
-		"GET",
-		fmt.Sprintf("/api/v2/application_templates/%s", clusterEnvID),
-		nil,
-		http.StatusOK,
-	)
+	templateResult, err := fetchApplicationTemplate(ctx, r.client, clusterEnvID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			tflog.Warn(ctx, "Cluster environment not found, removing from state", map[string]any{"cluster_environment_id": clusterEnvID})
@@ -550,7 +515,7 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 		AddAPIError(&resp.Diagnostics, "read container image registry", err)
 		return
 	}
-	template := templateResp.Result
+	template := *templateResult
 
 	if template.IsArchived() {
 		tflog.Warn(ctx, "Cluster environment is archived, removing from state", map[string]any{"cluster_environment_id": clusterEnvID})
@@ -572,7 +537,7 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 	}
 
 	// Get build details
-	result, err := r.getBuild(ctx, template.LatestBuild.ID)
+	result, err := fetchBuild(ctx, r.client, template.LatestBuild.ID)
 	if err != nil {
 		// The template itself is confirmed live above; a failure fetching its latest
 		// build is soft-warned rather than treated as resource deletion, matching
@@ -607,11 +572,7 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 	// preserved untouched; see applyRegistryBuild for why the API's echoed value cannot
 	// safely overwrite it.
 	if state.RayVersion.IsNull() {
-		if resolvedRayVersion := result.ResolvedRayVersion(); resolvedRayVersion != nil {
-			state.RayVersion = types.StringValue(*resolvedRayVersion)
-		} else {
-			state.RayVersion = types.StringNull()
-		}
+		state.RayVersion = types.StringPointerValue(result.ResolvedRayVersion())
 	}
 
 	// name is Optional+Computed and RequiresReplace (immutable): only fill it when state does

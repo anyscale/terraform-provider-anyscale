@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 
@@ -214,15 +213,7 @@ func (d *ServicesDataSource) Read(ctx context.Context, req datasource.ReadReques
 func (d *ServicesDataSource) fetchServices(ctx context.Context, params url.Values) ([]ServiceSummaryModel, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
-	results, err := PaginatedRequest(ctx, d.client, "/api/v2/services-v2", params,
-		func(body []byte) ([]ServiceResult, *string, error) {
-			var servicesResp ServicesListResponse
-			if err := json.Unmarshal(body, &servicesResp); err != nil {
-				return nil, nil, err
-			}
-			return servicesResp.Results, servicesResp.Metadata.NextPagingToken, nil
-		},
-	)
+	results, err := listServices(ctx, d.client, params)
 	if err != nil {
 		diags.AddError("list services", err.Error())
 		return nil, diags
@@ -265,15 +256,9 @@ func serviceResultToSummaryModel(ctx context.Context, s ServiceResult) (ServiceS
 	diags.Append(obsDiags...)
 	model.ServiceObservabilityURLs = obsURLsObj
 
-	if s.PrimaryVersion != nil {
-		primaryVersion, vDiags := serviceVersionResultToModel(ctx, *s.PrimaryVersion)
-		diags.Append(vDiags...)
-		primaryObj, pObjDiags := types.ObjectValueFrom(ctx, serviceVersionAttrTypes, primaryVersion)
-		diags.Append(pObjDiags...)
-		model.PrimaryVersion = primaryObj
-	} else {
-		model.PrimaryVersion = types.ObjectNull(serviceVersionAttrTypes)
-	}
+	primaryObj, primaryObjDiags := serviceVersionObject(ctx, s.PrimaryVersion)
+	diags.Append(primaryObjDiags...)
+	model.PrimaryVersion = primaryObj
 
 	if s.CanaryVersion != nil {
 		canaryVersion, cDiags := serviceVersionResultToModel(ctx, *s.CanaryVersion)

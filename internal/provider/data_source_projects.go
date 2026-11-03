@@ -194,16 +194,7 @@ func (d *ProjectsDataSource) Read(ctx context.Context, req datasource.ReadReques
 
 // fetchProjects fetches projects with the given query parameters, handling pagination automatically.
 func (d *ProjectsDataSource) fetchProjects(ctx context.Context, params url.Values) ([]ProjectSummaryModel, error) {
-	// Use PaginatedRequest helper to handle pagination
-	results, err := PaginatedRequest(ctx, d.client, "/api/v2/projects", params,
-		func(body []byte) ([]ProjectResult, *string, error) {
-			var projectsResp ProjectsListResponse
-			if err := json.Unmarshal(body, &projectsResp); err != nil {
-				return nil, nil, err
-			}
-			return projectsResp.Results, projectsResp.Metadata.NextPagingToken, nil
-		},
-	)
+	results, err := listProjects(ctx, d.client, params)
 	if err != nil {
 		return nil, err
 	}
@@ -230,4 +221,20 @@ func (d *ProjectsDataSource) fetchProjects(ctx context.Context, params url.Value
 	}
 
 	return allProjects, nil
+}
+
+// listProjects returns every project from GET /api/v2/projects
+// across all pages. params carries the caller's filters and page size
+// unchanged. The error is returned unwrapped so each caller keeps its own
+// context.
+func listProjects(ctx context.Context, client *Client, params url.Values) ([]ProjectResult, error) {
+	return PaginatedRequest(ctx, client, "/api/v2/projects", params,
+		func(body []byte) ([]ProjectResult, *string, error) {
+			var listResp ProjectsListResponse
+			if err := json.Unmarshal(body, &listResp); err != nil {
+				return nil, nil, err
+			}
+			return listResp.Results, listResp.Metadata.NextPagingToken, nil
+		},
+	)
 }

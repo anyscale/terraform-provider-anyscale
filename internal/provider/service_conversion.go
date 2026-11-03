@@ -64,15 +64,9 @@ func populateServiceDataSourceModel(ctx context.Context, m *ServiceDataSourceMod
 	diags.Append(obsDiags...)
 	m.ServiceObservabilityURLs = obsURLsObj
 
-	if s.PrimaryVersion != nil {
-		primaryVersion, vDiags := serviceVersionResultToModel(ctx, *s.PrimaryVersion)
-		diags.Append(vDiags...)
-		primaryObj, pObjDiags := types.ObjectValueFrom(ctx, serviceVersionAttrTypes, primaryVersion)
-		diags.Append(pObjDiags...)
-		m.PrimaryVersion = primaryObj
-	} else {
-		m.PrimaryVersion = types.ObjectNull(serviceVersionAttrTypes)
-	}
+	primaryObj, primaryObjDiags := serviceVersionObject(ctx, s.PrimaryVersion)
+	diags.Append(primaryObjDiags...)
+	m.PrimaryVersion = primaryObj
 
 	if s.CanaryVersion != nil {
 		canaryVersion, cDiags := serviceVersionResultToModel(ctx, *s.CanaryVersion)
@@ -193,4 +187,18 @@ func versionChecklistsToModel(groups []VersionChecklistResult) []VersionChecklis
 		})
 	}
 	return result
+}
+
+// serviceVersionObject converts an API service version to its Terraform object,
+// or a null object when the API sent none.
+func serviceVersionObject(ctx context.Context, v *ServiceVersionResult) (types.Object, diag.Diagnostics) {
+	if v == nil {
+		return types.ObjectNull(serviceVersionAttrTypes), nil
+	}
+	var diags diag.Diagnostics
+	model, d := serviceVersionResultToModel(ctx, *v)
+	diags.Append(d...)
+	obj, d := types.ObjectValueFrom(ctx, serviceVersionAttrTypes, model)
+	diags.Append(d...)
+	return obj, diags
 }

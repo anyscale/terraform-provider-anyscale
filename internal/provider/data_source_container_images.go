@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -217,15 +216,7 @@ func (d *ContainerImagesDataSource) Read(ctx context.Context, req datasource.Rea
 // Each result's latest build summary (id/revision/status) is embedded directly on the decorated
 // application template, so no per-item build lookup is required.
 func (d *ContainerImagesDataSource) fetchContainerImages(ctx context.Context, params url.Values) ([]ContainerImageSummaryModel, error) {
-	results, err := PaginatedRequest(ctx, d.client, "/api/v2/application_templates/", params,
-		func(body []byte) ([]ApplicationTemplateResult, *string, error) {
-			var listResp ApplicationTemplatesListResponse
-			if err := json.Unmarshal(body, &listResp); err != nil {
-				return nil, nil, err
-			}
-			return listResp.Results, listResp.Metadata.NextPagingToken, nil
-		},
-	)
+	results, err := listApplicationTemplates(ctx, d.client, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list application templates: %w", err)
 	}
