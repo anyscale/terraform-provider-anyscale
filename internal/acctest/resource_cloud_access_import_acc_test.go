@@ -121,6 +121,9 @@ const (
 	// Registered UNREVOKABLE in newMockCloudAccessServer, which is load-bearing
 	// rather than decoration - see the header.
 	cloudAccessMockImplicitMember = "cloud-owner@example.com"
+	// cloudAccessMockServiceAccount is an organization service account, in the email shape the
+	// backend gives service accounts.
+	cloudAccessMockServiceAccount = "deploy-bot@org-mock.serviceaccount.com"
 
 	// What the mock reports when that member's revoke is attempted.
 	//
@@ -145,6 +148,9 @@ type mockCloudAccessServer struct {
 	// call) resolves against organization membership, not cloud membership,
 	// since a cloud role can only be granted to someone already in the org.
 	orgMembers map[string]struct{ identityID, userID string }
+	// serviceAccounts marks the orgMembers that are service accounts. The organization
+	// collaborators list returns them only when asked for service accounts.
+	serviceAccounts map[string]bool
 	// callerUserID/callerEmail back /api/v2/userinfo, which
 	// fetchCloudAccessCallerIdentity requires unconditionally before any
 	// reconcile - without it every apply fails at "Could Not Identify The
@@ -230,7 +236,9 @@ func newMockCloudAccessServer(t *testing.T) *httptest.Server {
 			// The cloud owner is an org member too, so a test can declare it at its
 			// real role and assert an empty plan.
 			cloudAccessMockImplicitMember: {identityID: "ide_mock_cloud_owner", userID: "usr_mock_cloud_owner"},
+			cloudAccessMockServiceAccount: {identityID: "ide_mock_sa", userID: "usr_mock_sa"},
 		},
+		serviceAccounts: map[string]bool{cloudAccessMockServiceAccount: true},
 		// Deliberately a distinct identity from every declared/implicit member
 		// above, so the caller-exclusion logic never overlaps with what this
 		// test is asserting about alice/bob/the implicit member.
@@ -317,7 +325,26 @@ func (s *mockCloudAccessServer) handleUserinfo(w http.ResponseWriter) {
 // Real shape: OrganizationCollaboratorsListResponse, matching
 // listAllOrganizationCollaborators' pagination contract (results + metadata).
 func (s *mockCloudAccessServer) handleOrgCollaborators(w http.ResponseWriter, r *http.Request) {
-	emailFilter := strings.ToLower(r.URL.Query().Get("email"))
+	// Filtered as the backend does (confirmed live 2026-11-03): with no type parameter only
+	// user accounts; is_service_account=true only service accounts; collaborator_type, when
+	// set, takes priority. Email is a case-insensitive substring match.
+	q := r.URL.Query()
+	emailFilter := strings.ToLower(q.Get("email"))
+	wantUsers, wantServiceAccounts := true, false
+	switch q.Get("collaborator_type") {
+	case "all_accounts":
+		wantServiceAccounts = true
+	case "only_service_accounts":
+		wantUsers, wantServiceAccounts = false, true
+	case "only_user_accounts":
+	case "":
+		if q.Get("is_service_account") == "true" {
+			wantUsers, wantServiceAccounts = false, true
+		}
+	default:
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		return
+	}
 	type result struct {
 		ID              string   `json:"id"`
 		UserID          *string  `json:"user_id"`
@@ -328,7 +355,10 @@ func (s *mockCloudAccessServer) handleOrgCollaborators(w http.ResponseWriter, r 
 	}
 	var results []result
 	for email, ids := range s.orgMembers {
-		if emailFilter != "" && strings.ToLower(email) != emailFilter {
+		if emailFilter != "" && !strings.Contains(strings.ToLower(email), emailFilter) {
+			continue
+		}
+		if sa := s.serviceAccounts[email]; (sa && !wantServiceAccounts) || (!sa && !wantUsers) {
 			continue
 		}
 		userID := ids.userID

@@ -153,6 +153,77 @@ resource "anyscale_cloud_access" "test" {
 	})
 }
 
+// A service account declared with a cloud role and a project role is granted both, plans
+// empty, and loses the project role when it is dropped from config. The organization lookup
+// sees service accounts only when it asks for them; before that fix the account was never
+// resolved and landed in ungranted_members. Verified against the real API on 2026-11-03.
+func TestAccCloudAccessResource_ServiceAccountProjectRole_MockServer(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const projectID = "prj_cloudaccess_sa_mock"
+	sa := cloudAccessMockServiceAccount
+
+	server := newMockCloudAccessServer(t)
+	handler, calls := recordProjectRoleCalls(t, server.Config.Handler)
+	server.Config.Handler = handler
+
+	config := func(projects string) string {
+		return testAccProviderBlock(server.URL) + fmt.Sprintf(`
+resource "anyscale_cloud_access" "test" {
+  cloud_id = %[1]q
+
+  member = {
+    %[2]q = {
+      base_role = "owner"
+    }
+    %[3]q = {
+      base_role = "writer"
+%[4]s
+    }
+  }
+}
+`, cloudAccessMockCloudID, cloudAccessMockImplicitMember, sa, projects)
+	}
+	withProject := fmt.Sprintf("      projects = {\n        %q = \"write\"\n      }", projectID)
+	wantGrant := fmt.Sprintf("%s:%s=write", projectID, sa)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config(withProject),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_cloud_access.test", "ungranted_members.#", "0"),
+					func(*terraform.State) error {
+						grants, _ := calls.snapshot()
+						if len(grants) != 1 || grants[0] != wantGrant {
+							return fmt.Errorf("project grants sent = %v, want exactly [%s]", grants, wantGrant)
+						}
+						return nil
+					},
+				),
+			},
+			{
+				Config: config(""),
+				Check: func(*terraform.State) error {
+					_, deletes := calls.snapshot()
+					if len(deletes) != 1 || !strings.HasPrefix(deletes[0], projectID+":") {
+						return fmt.Errorf("project revokes sent = %v, want one for %s", deletes, projectID)
+					}
+					held, err := mockProjectCollaboratorEmails(server.URL, projectID)
+					if err != nil {
+						return err
+					}
+					if held[sa] {
+						return fmt.Errorf("backend still holds %s on %s after the role was dropped", sa, projectID)
+					}
+					return nil
+				},
+			},
+		},
+	})
+}
+
 // mockProjectCollaboratorEmails reads a project's collaborators through the
 // mock's own GET route, the one the provider's Read uses.
 func mockProjectCollaboratorEmails(serverURL, projectID string) (map[string]bool, error) {
