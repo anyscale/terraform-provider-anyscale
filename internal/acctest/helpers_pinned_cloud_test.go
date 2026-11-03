@@ -224,3 +224,24 @@ func TestConfiguredCloudByID(t *testing.T) {
 		})
 	}
 }
+
+// pinnedWorkloadCloud is pinnedCloud for tests that deploy a workload (a cluster or service) on
+// any platform. It returns the cloud and a CPU-only instance type to run the head node on: the
+// provider's small SKU on a VM cloud, the cloud's smallest registered CPU instance type on a
+// Kubernetes one. The test skips when the cloud offers none.
+func pinnedWorkloadCloud(t *testing.T) (CloudInfo, string) {
+	t.Helper()
+	cloud := pinnedCloud(t)
+	if cloud.IsK8s() {
+		instanceType := ResolveK8sInstanceType(t, cloud.ID)
+		if instanceType == "" {
+			t.Skipf("SKIP(platform): %s cloud %s has no registered CPU instance types", cloud.Platform(), cloud.Name)
+		}
+		return cloud, instanceType
+	}
+	instanceTypes := cloud.InstanceTypes()
+	if !instanceTypes.IsValid() {
+		t.Skip("No valid instance types on the resolved cloud")
+	}
+	return cloud, instanceTypes.Small
+}
