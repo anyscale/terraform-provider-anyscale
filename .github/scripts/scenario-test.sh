@@ -154,11 +154,13 @@ expect_empty_plan "plan after apply" "$state"
 
 # Every managed anyscale_cloud and anyscale_cloud_resource, at any module depth, as
 # "<type>\t<address>\t<id>", clouds first so each cloud resource imports after its cloud.
+# Walks modules only (child_modules), never resource values, which can hold keys named
+# "resources" themselves.
 anyscale_resources=$(terraform show -json "$state" | jq -r '
-  [.values.root_module | .. | objects | select(has("resources")) | .resources[]
+  [.values.root_module | recurse(.child_modules[]?) | .resources[]?
    | select(.mode == "managed" and (.type == "anyscale_cloud" or .type == "anyscale_cloud_resource"))]
   | sort_by(.type)
-  | .[] | "\(.type)\t\(.address)\t\(.values.id)"')
+  | .[] | "\(.type)\t\(.address)\t\(.values.id)"') || fail "could not list anyscale resources in state"
 if [ "${SCENARIO_NO_CLOUD:-0}" = "1" ]; then
   [ -z "$anyscale_resources" ] || fail "SCENARIO_NO_CLOUD=1, but the state holds a cloud: $anyscale_resources"
   step "destroy (no cloud in this scenario: import round-trip and cloud check skipped)"
