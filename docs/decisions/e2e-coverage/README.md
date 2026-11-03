@@ -122,6 +122,7 @@ per-platform matrix.
 2. AKS real-infra runs (user approval).
 3. Dedicated IAM-mapping clouds per platform, or skip IAM mapping outside AWS-VM.
 4. Whether `enable_task_dashboard_k8s` is on for the K8S fixtures.
+5. A dedicated system-cluster cloud per platform (`ANYSCALE_TEST_SYSTEM_CLUSTER_CLOUD_ID`), or AWS-VM only.
 
 ## Gaps (target matrix vs the 2026-11-02 inventory)
 
@@ -143,7 +144,7 @@ surfaces, P3 waits on a decision.
 | G4 | No EKS split-pattern scenario; other examples unrun (`aws-vm-basic-resource`, `kitchen-sink`, `container-image-compute-config`) | P2 | EKS empty cloud + `anyscale_cloud_resource`; `test-*` targets for the unrun examples on the G1 script. |
 | G5 | Workload tests run only on AWS-VM | P1 | One platform inputs table (instance types, K8S via `ResolveK8sInstanceType`; region; base image; `advanced_instance_config` sample). Move onto `pinnedCloud` + the table: service golden path, stop/restart, the three canary e2e tests, `RuntimeEnvPackageResource_RealInfra(Service)` (AKS asserts the documented unsupported error), `CloudDataSource_ByName`, `ProjectResource_Basic`. No behavior change on AWS-VM. |
 | G6 | `anyscale_service_credentials` has no real test | P2 | Running service; open the ephemeral resource through `echoprovider`; `auth_token` and `base_url` set; a request to `base_url` with the token is not 401/403, and without it is. AWS-VM and EKS. |
-| G7 | `anyscale_system_cluster` has only a mock test | P2 | Enable+start, describe reports running, plan empty, import, destroy. On K8S accept that or the clean 501 diagnostic (`enable_task_dashboard_k8s` off), never another error. |
+| G7 | `anyscale_system_cluster` has only a mock test | P2 | Runs only on a dedicated cloud named by `ANYSCALE_TEST_SYSTEM_CLUSTER_CLOUD_ID` (skips when unset, refuses the static fixture): create enables and starts it and Delete is state-only, so it would permanently change a shared fixture. Enable+start, describe reports running, plan empty, import, destroy; after destroy the cluster is still enabled (Delete is state-only by contract). `t.Cleanup` calls `POST /api/v2/system_workload/{cloud_id}/terminate` (what `anyscale cloud terminate-system-cluster` uses) so the cluster does not keep running. On K8S accept running or the clean 501 diagnostic (`enable_task_dashboard_k8s` off), never another error. |
 | G8 | Data sources not read back on real infra | P2 | `service`, `services`, `system_cluster`, `cloud_iam_mapping` read back what G5-G7 created, per platform. |
 | G9 | `compute_config` only on AWS-VM | P1 | `_Basic`/`_Update`/`_WithWorkers` per platform; `advanced_instance_config` round-trips with no diff; import no-op. |
 | G10 | Org resources with no real test: `organization_invitation`, `organization_user`, `organization_default_cloud`, `scheduler_config` | P2 | Invitation: create to a plus-alias, import, destroy revokes. The other three change org-wide state: snapshot before, restore in `t.Cleanup`, and gate on a new `ANYSCALE_TEST_ORG_MUTATION=1` so they never run in a shared org by accident. |
