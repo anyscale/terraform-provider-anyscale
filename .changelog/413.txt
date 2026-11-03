@@ -1,4 +1,4 @@
 ```
 release-note:added
-resource/anyscale_cloud: Import accepts `<cloud_id>:empty` for a cloud whose configuration lives in `anyscale_cloud_resource` resources. Import then recovers no `aws_config`, `gcp_config` or `kubernetes_config`, so the plan after import is empty. The bare `<cloud_id>` form is unchanged. A cloud previously imported with the bare ID keeps a one-time in-place update that removes the recovered blocks; applying it changes state only.
+resource/anyscale_cloud: Import accepts `<cloud_id>:empty` for a cloud whose configuration lives in `anyscale_cloud_resource` resources. Import then recovers no `aws_config`, `gcp_config` or `kubernetes_config`, so the plan after import is empty. The bare `<cloud_id>` form is unchanged. A split-pattern cloud previously imported with the bare ID keeps a one-time in-place update that removes the recovered blocks; applying it changes state only.
 ```

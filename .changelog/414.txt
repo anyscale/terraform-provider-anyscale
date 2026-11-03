@@ -1,6 +1,6 @@
 ```
 release-note:changed
-provider: `anyscale_cloud`, `anyscale_cloud_resource`, `anyscale_project` and `anyscale_service` now treat an HTTP 403 on refresh or destroy as deleted, with a warning, because the API can answer 403 instead of 404 for a deleted object. If the token actually lost access, a refresh leads to a duplicate on the next apply until access is restored, and a destroy leaves the object outside Terraform; the warning says to check the Anyscale console.
+provider: `anyscale_cloud`, `anyscale_cloud_resource`, `anyscale_project` and `anyscale_service` now treat an HTTP 403 on refresh or destroy as deleted, with a warning, because the API can answer 403 instead of 404 for a deleted object. If the token actually lost access, a refresh leads to a duplicate on the next apply until access is restored, and a destroy leaves the object outside Terraform; the destroy warning says to check the Anyscale console.
 resource/anyscale_cloud_resource: This also applies when the 403 is for the resource's cloud.
 resource/anyscale_project: A destroy still retries a 403 on a just-created project first, and a 403 for running jobs or services is still an error.
 resource/anyscale_service: This also applies while waiting for the service to terminate. A service removed while terminating (404 or 403) no longer fails the destroy.
