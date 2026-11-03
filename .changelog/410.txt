@@ -1,5 +1,0 @@
-```
-release-note:fixed
-resource/anyscale_cloud: Example no longer sets `object_storage.region` equal to the cloud region, which made an imported cloud plan a one-time in-place update.
-resource/anyscale_cloud_resource: Example no longer sets `object_storage.region` equal to the cloud region, which made an imported cloud plan a one-time in-place update.
-```

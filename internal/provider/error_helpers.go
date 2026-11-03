@@ -18,7 +18,9 @@ import (
 // When err carries an HTTP status (UnexpectedStatusError), the detail reads
 // "Failed to <operation> (HTTP <status>): <backend detail>": the status tells
 // a 403 from a 404 at a glance, and the backend's own message replaces the raw
-// JSON body. Any other error keeps the "Failed to <operation>: <error>" shape.
+// JSON body. A retried read (Attempts > 1) adds one sentence saying so, since
+// that failure is usually transient. Any other error keeps the
+// "Failed to <operation>: <error>" shape.
 //
 // Example usage:
 //
@@ -29,8 +31,8 @@ import (
 func AddAPIError(diags *diag.Diagnostics, operation string, err error) {
 	var statusErr *UnexpectedStatusError
 	if errors.As(err, &statusErr) {
-		detail := extractAPIErrorDetail(statusErr)
-		if detail == statusErr.Error() {
+		detail, ok := backendErrorDetail(statusErr.Body)
+		if !ok {
 			// Not the backend's {"error": {"detail": ...}} shape: show the body
 			// itself rather than repeating the status inside the message.
 			detail = strings.TrimSpace(statusErr.Body)
@@ -38,10 +40,14 @@ func AddAPIError(diags *diag.Diagnostics, operation string, err error) {
 				detail = "the response had no body"
 			}
 		}
-		diags.AddError(
-			"API Request Failed",
-			fmt.Sprintf("Failed to %s (HTTP %d): %s", operation, statusErr.StatusCode, detail),
-		)
+		msg := fmt.Sprintf("Failed to %s (HTTP %d): %s", operation, statusErr.StatusCode, detail)
+		if statusErr.Attempts > 1 {
+			if !strings.HasSuffix(msg, ".") && !strings.HasSuffix(msg, "!") && !strings.HasSuffix(msg, "?") {
+				msg += "."
+			}
+			msg += fmt.Sprintf(" The request failed on all %d attempts; this is usually a transient Anyscale API problem, so re-run the command.", statusErr.Attempts)
+		}
+		diags.AddError("API Request Failed", msg)
 		return
 	}
 	diags.AddError(
@@ -78,10 +84,11 @@ func AddConfigError(diags *diag.Diagnostics, summary string, detail string) {
 	diags.AddError(summary, detail)
 }
 
-// extractAPIErrorDetail pulls the backend's own error detail message out of an
-// error produced by DoRequestRaw/DoRequestAndParse (formatted as "unexpected
-// status %d: %s", where %s is the raw response body), so a caller can present
-// Anyscale's own error text instead of that wrapper plus a raw JSON dump.
+// extractAPIErrorDetail returns the backend's own error detail message from an
+// error produced by DoRequestRaw/DoRequestAndParse, so a caller can present
+// Anyscale's own error text instead of the "unexpected status %d: <body>"
+// wrapper plus a raw JSON dump. The result is the bare detail, with no retry
+// note, because callers embed it mid-sentence.
 //
 // The real wire shape is nested - {"error": {"detail": "...", ...}} - traced
 // against api_common.py's HTTPException handler (`ErrorResponse(error=Error(detail=exc.detail))`)
@@ -91,28 +98,47 @@ func AddConfigError(diags *diag.Diagnostics, summary string, detail string) {
 // {"detail": "..."}, which would silently under-parse to an empty Detail and
 // fall through to the raw wrapper every time.
 //
-// Falls back to the full wrapped error text if the body isn't this shape.
+// When err wraps an UnexpectedStatusError, the detail is read from its Body.
+// Parsing err.Error() instead fails for a retried read, whose Error() appends
+// "(after N attempts; ...)" after the JSON body. Any other error is parsed
+// from its text, starting at the first "{". Either way, an error that carries
+// no detail falls back to the full err.Error() text.
+//
 // Preferred over per-message string-matching: it surfaces every distinct
 // backend error for an endpoint cleanly and uniformly, including ones not
 // specifically anticipated by the caller.
 func extractAPIErrorDetail(err error) string {
 	msg := err.Error()
 
-	idx := strings.Index(msg, "{")
-	if idx == -1 {
+	var statusErr *UnexpectedStatusError
+	if errors.As(err, &statusErr) {
+		if detail, ok := backendErrorDetail(statusErr.Body); ok {
+			return detail
+		}
 		return msg
 	}
 
-	var body struct {
+	if idx := strings.Index(msg, "{"); idx != -1 {
+		if detail, ok := backendErrorDetail(msg[idx:]); ok {
+			return detail
+		}
+	}
+	return msg
+}
+
+// backendErrorDetail parses a response body of the backend's
+// {"error": {"detail": "..."}} shape. ok is false when body is not that shape
+// or the detail is empty.
+func backendErrorDetail(body string) (detail string, ok bool) {
+	var parsed struct {
 		Error struct {
 			Detail string `json:"detail"`
 		} `json:"error"`
 	}
-	if jsonErr := json.Unmarshal([]byte(msg[idx:]), &body); jsonErr != nil || body.Error.Detail == "" {
-		return msg
+	if err := json.Unmarshal([]byte(body), &parsed); err != nil || parsed.Error.Detail == "" {
+		return "", false
 	}
-
-	return body.Error.Detail
+	return parsed.Error.Detail, true
 }
 
 // WarnIfMultipleMatches logs a warning if multiple matches were found.
@@ -172,4 +198,51 @@ func addForbiddenTreatedAsDeletedOnDestroyWarning(diags *diag.Diagnostics, kind,
 			"If the token lost access instead, the %s may still exist outside Terraform; check it in the Anyscale console.",
 			kind, id, strings.ToLower(kind)),
 	)
+}
+
+// confirmGoneAfterForbiddenDelete decides a destroy whose delete call answered 403. That status
+// is ambiguous: the API answers 403 for an object that is already gone, but also for one the
+// credentials can see and are not allowed to delete. Accepting every 403 as gone would end the
+// destroy successfully while the object keeps running, unmanaged. So the object is read back:
+//
+//   - still readable: the delete was refused, so the destroy fails and state is kept;
+//   - 404: it is gone, and the destroy finishes silently;
+//   - 403: it is not visible either, so it is treated as gone with the destroy warning;
+//   - any other failure: whether it is gone is unknown, so the destroy fails and can be retried.
+//
+// readBack returns nil when the object can still be read, and otherwise the error that stopped
+// it. kind is the resource's display noun ("Cloud", "Cloud Resource").
+func confirmGoneAfterForbiddenDelete(ctx context.Context, diags *diag.Diagnostics, kind, id string, deleteErr error, readBack func() error) {
+	noun := strings.ToLower(kind)
+	err := readBack()
+	switch {
+	case err == nil:
+		tflog.Warn(ctx, "Delete returned 403 but the object can still be read", map[string]any{"kind": kind, "id": id})
+		diags.AddError(
+			kind+" Was Not Deleted",
+			fmt.Sprintf("Deleting %s %s was refused with HTTP 403 (%s), and the %s can still be read, so it still exists: "+
+				"the credentials in use can see it but are not allowed to delete it. Destroy it with an identity that may delete it, "+
+				"or run terraform state rm to stop managing it without deleting it.",
+				noun, id, extractAPIErrorDetail(deleteErr), noun),
+		)
+	case isGoneOrForbidden(err):
+		tflog.Info(ctx, "Delete returned 403 and the object can no longer be read; treating it as deleted", map[string]any{"kind": kind, "id": id})
+		addForbiddenTreatedAsDeletedOnDestroyWarning(diags, kind, id, err)
+	default:
+		diags.AddError(
+			"Could Not Confirm "+kind+" Deletion",
+			fmt.Sprintf("Deleting %s %s was refused with HTTP 403 (%s), and reading it back to tell whether it is already gone failed: %s. "+
+				"Retry the destroy.",
+				noun, id, extractAPIErrorDetail(deleteErr), extractAPIErrorDetail(err)),
+		)
+	}
+}
+
+// readBackByGET is the readBack for confirmGoneAfterForbiddenDelete when one GET of path tells
+// whether the object still exists.
+func readBackByGET(ctx context.Context, client *Client, path string) func() error {
+	return func() error {
+		_, err := DoRequestRaw(ctx, client, "GET", path, nil, http.StatusOK)
+		return err
+	}
 }

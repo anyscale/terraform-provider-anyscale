@@ -9,10 +9,14 @@
 #   2. a plan right after apply is empty (no perpetual diff);
 #   3. after every anyscale_cloud and anyscale_cloud_resource is removed from a copy of the state
 #      and imported back, the plan is still empty (import round-trip, including backend-derived
-#      fields). The real state is never edited, so destroy and cleanup always see every cloud;
+#      fields). An anyscale_cloud with no aws_config, gcp_config or kubernetes_config in state
+#      is imported as "<id>:empty", the split-pattern form. The real state is never edited, so
+#      destroy and cleanup always see every cloud;
 #   4. destroy succeeds;
-#   5. every cloud the scenario created answers GET /api/v2/clouds/<id> with 404 within
-#      SCENARIO_GONE_TIMEOUT seconds (default 120), since cloud delete does not wait.
+#   5. every cloud the scenario created is gone within SCENARIO_GONE_TIMEOUT seconds (default
+#      120), since cloud delete does not wait. Gone means GET /api/v2/clouds/<id> answers 404,
+#      or answers 403 (what a deleted cloud that had a resource returns) and the ID is absent
+#      from every page of GET /api/v2/clouds.
 #
 # If any step fails, an EXIT trap still destroys whatever the state holds. A failed cleanup
 # destroy is reported loudly; run `make sweep-dry-run` to find leaks.
@@ -130,6 +134,21 @@ cloud_http_status() {
 token=$(api_token) || exit 1
 [ -n "$token" ] || fail "empty Anyscale token"
 
+# cloud_listed <id> reports whether the cloud appears on any page of GET /api/v2/clouds.
+cloud_listed() {
+  local page="" url body
+  while :; do
+    url="$(api_base_url)/api/v2/clouds/?count=50${page:+&paging_token=$page}"
+    body=$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -sS --fail -K - "$url") ||
+      fail "listing clouds failed"
+    if jq -e --arg id "$1" 'any(.results[]; .id == $id)' <<<"$body" >/dev/null; then
+      return 0
+    fi
+    page=$(jq -r '.metadata.next_paging_token // empty' <<<"$body")
+    [ -n "$page" ] || return 1
+  done
+}
+
 cd "$example_dir"
 
 step "init"
@@ -153,14 +172,19 @@ step "plan after apply must be empty"
 expect_empty_plan "plan after apply" "$state"
 
 # Every managed anyscale_cloud and anyscale_cloud_resource, at any module depth, as
-# "<type>\t<address>\t<id>", clouds first so each cloud resource imports after its cloud.
+# "<type>\t<address>\t<import id>", clouds first so each cloud resource imports after its cloud.
 # Walks modules only (child_modules), never resource values, which can hold keys named
 # "resources" themselves.
 anyscale_resources=$(terraform show -json "$state" | jq -r '
   [.values.root_module | recurse(.child_modules[]?) | .resources[]?
    | select(.mode == "managed" and (.type == "anyscale_cloud" or .type == "anyscale_cloud_resource"))]
   | sort_by(.type)
-  | .[] | "\(.type)\t\(.address)\t\(.values.id)"') || fail "could not list anyscale resources in state"
+  | .[]
+  | (if .type == "anyscale_cloud"
+        and ([.values.aws_config, .values.gcp_config, .values.kubernetes_config]
+             | all(. == null or . == []))
+     then "\(.values.id):empty" else .values.id end) as $import_id
+  | "\(.type)\t\(.address)\t\($import_id)"') || fail "could not list anyscale resources in state"
 if [ "${SCENARIO_NO_CLOUD:-0}" = "1" ]; then
   [ -z "$anyscale_resources" ] || fail "SCENARIO_NO_CLOUD=1, but the state holds a cloud: $anyscale_resources"
   step "destroy (no cloud in this scenario: import round-trip and cloud check skipped)"
@@ -171,7 +195,7 @@ if [ "${SCENARIO_NO_CLOUD:-0}" = "1" ]; then
 fi
 [ -n "$anyscale_resources" ] || fail "state holds no anyscale_cloud or anyscale_cloud_resource"
 
-cloud_ids=$(printf '%s\n' "$anyscale_resources" | awk -F'\t' '$1 == "anyscale_cloud" { print $3 }')
+cloud_ids=$(printf '%s\n' "$anyscale_resources" | awk -F'\t' '$1 == "anyscale_cloud" { sub(/:empty$/, "", $3); print $3 }')
 
 # The round-trip edits a copy, so a failed import cannot drop a cloud from the state that
 # destroy and cleanup use.
@@ -199,14 +223,24 @@ step "clouds must be gone"
 gone_timeout=${SCENARIO_GONE_TIMEOUT:-120}
 for id in $cloud_ids; do
   waited=0
-  while code=$(cloud_http_status "$id") && [ "$code" != "404" ]; do
+  while :; do
+    code=$(cloud_http_status "$id") || fail "cloud $id: GET failed"
+    if [ "$code" = "404" ]; then
+      echo "cloud $id: gone (GET 404 after ${waited}s)"
+      break
+    fi
+    if [ "$code" = "403" ] && ! cloud_listed "$id"; then
+      echo "cloud $id: gone (GET 403, absent from every page of the cloud list, after ${waited}s)"
+      printf 'header = "Authorization: Bearer %s"\n' "$token" |
+        curl -sS -K - "$(api_base_url)/api/v2/clouds/$id" | sed 's/^/  403 body: /'
+      echo
+      break
+    fi
     [ "$waited" -lt "$gone_timeout" ] ||
-      fail "cloud $id still answers GET with HTTP $code ${gone_timeout}s after destroy, want 404"
+      fail "cloud $id still exists ${gone_timeout}s after destroy (GET answers HTTP $code)"
     sleep 10
     waited=$((waited + 10))
   done
-  [ "$code" = "404" ] || fail "cloud $id: GET failed"
-  echo "cloud $id: 404 after ${waited}s"
 done
 
 step "PASS"

@@ -179,67 +179,175 @@ func TestForbiddenTreatedAsGone_Read(t *testing.T) {
 	}
 }
 
-func TestForbiddenTreatedAsGone_Delete(t *testing.T) {
-	tests := []struct {
+// A 403 from a delete call is ambiguous: the object may be gone, or the credentials may see it but
+// not be allowed to delete it. Each Delete reads the object back to tell which. Only a read-back
+// that can no longer see it ends the destroy; a still-readable object fails it, so a refused
+// delete never drops a live object from state.
+func TestForbiddenDelete_ReadBack(t *testing.T) {
+	const listed = `{"results": [{"name": "secondary", "cloud_resource_id": "cldrsrc_x"}], "metadata": {}}`
+	const notListed = `{"results": [{"name": "main", "cloud_resource_id": "cldrsrc_main"}], "metadata": {}}`
+
+	resources := []struct {
 		name          string
 		resource      func(*Client) resource.Resource
 		attrs         map[string]any
 		method        string
 		forbiddenPath string
-		ok            map[string]string
-		kind, id      string
+		readBackPath  string
+		// existsBody is the read-back's 200 body while the object exists; goneBody, when set, is a
+		// 200 body that shows it gone (a listing without it) in place of a 404.
+		existsBody, goneBody string
+		ok                   map[string]string
+		kind, id             string
 	}{
 		{
 			name:          "anyscale_cloud",
 			resource:      func(c *Client) resource.Resource { return &CloudResource{client: c} },
-			attrs:         map[string]any{"id": "cld_gone"},
+			attrs:         map[string]any{"id": "cld_x"},
 			method:        http.MethodDelete,
-			forbiddenPath: "/api/v2/clouds/cld_gone",
+			forbiddenPath: "/api/v2/clouds/cld_x",
+			readBackPath:  "/api/v2/clouds/cld_x",
+			existsBody:    `{"result": {"id": "cld_x"}}`,
 			ok:            map[string]string{"GET /api/v2/machine_pools/": `{"result": {"machine_pools": []}}`},
-			kind:          "Cloud", id: "cld_gone",
+			kind:          "Cloud", id: "cld_x",
 		},
 		{
 			name:          "anyscale_cloud_resource",
 			resource:      func(c *Client) resource.Resource { return &CloudResourceResource{client: c} },
-			attrs:         map[string]any{"id": "cld_gone:secondary", "is_default": false},
+			attrs:         map[string]any{"id": "cld_x:secondary", "is_default": false},
 			method:        http.MethodDelete,
-			forbiddenPath: "/api/v2/clouds/cld_gone/remove_resource",
-			kind:          "Cloud Resource", id: "cld_gone:secondary",
+			forbiddenPath: "/api/v2/clouds/cld_x/remove_resource",
+			readBackPath:  "/api/v2/clouds/cld_x/resources",
+			existsBody:    listed,
+			goneBody:      notListed,
+			kind:          "Cloud Resource", id: "cld_x:secondary",
 		},
 		{
 			// Outside the delete-time retry window, so the first 403 is final.
 			name:          "anyscale_project",
 			resource:      func(c *Client) resource.Resource { return &ProjectResource{client: c} },
-			attrs:         map[string]any{"id": "prj_gone", "created_at": "2026-01-01T00:00:00Z"},
+			attrs:         map[string]any{"id": "prj_x", "created_at": "2026-01-01T00:00:00Z"},
 			method:        http.MethodDelete,
-			forbiddenPath: "/api/v2/projects/prj_gone",
-			kind:          "Project", id: "prj_gone",
+			forbiddenPath: "/api/v2/projects/prj_x",
+			readBackPath:  "/api/v2/projects/prj_x",
+			existsBody:    `{"result": {"id": "prj_x"}}`,
+			kind:          "Project", id: "prj_x",
 		},
 		{
 			name:          "anyscale_service terminate",
 			resource:      func(c *Client) resource.Resource { return &ServiceResource{client: c} },
-			attrs:         map[string]any{"id": "svc_gone"},
+			attrs:         map[string]any{"id": "svc_x"},
 			method:        http.MethodPost,
-			forbiddenPath: "/api/v2/services-v2/svc_gone/terminate",
-			kind:          "Service", id: "svc_gone",
+			forbiddenPath: "/api/v2/services-v2/svc_x/terminate",
+			readBackPath:  "/api/v2/services-v2/svc_x",
+			existsBody:    `{"result": {"id": "svc_x", "current_state": "RUNNING", "goal_state": "RUNNING"}}`,
+			kind:          "Service", id: "svc_x",
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var hits atomic.Int32
-			server := forbiddenServer(t, tt.method, tt.forbiddenPath, tt.ok, &hits)
 
-			diags := runForbiddenDelete(t, tt.resource(NewClientWithToken(server.URL, "test-token")), tt.attrs)
+	readBacks := []struct {
+		name    string
+		status  int
+		gone    bool   // a 404, or the resource's goneBody when it has one
+		outcome string // "refused", "warned", "silent", "unconfirmed"
+	}{
+		{name: "still readable", status: http.StatusOK, outcome: "refused"},
+		{name: "read-back 403", status: http.StatusForbidden, outcome: "warned"},
+		{name: "read-back 404", status: http.StatusNotFound, gone: true, outcome: "silent"},
+		{name: "read-back fails", status: http.StatusBadRequest, outcome: "unconfirmed"},
+	}
 
-			assertTreatedAsDeleted(t, diags, tt.kind, tt.id, true)
-			if got := hits.Load(); got != 1 {
-				t.Errorf("403 endpoint requests = %d, want 1", got)
+	for _, rt := range resources {
+		for _, rb := range readBacks {
+			t.Run(rt.name+"/"+rb.name, func(t *testing.T) {
+				var deletes, readBackHits atomic.Int32
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					switch {
+					case r.Method == rt.method && r.URL.Path == rt.forbiddenPath:
+						deletes.Add(1)
+						w.WriteHeader(http.StatusForbidden)
+						_, _ = fmt.Fprint(w, `{"error": {"detail": "Permission denied"}}`)
+					case r.Method == http.MethodGet && r.URL.Path == rt.readBackPath:
+						readBackHits.Add(1)
+						status, body := rb.status, `{"error": {"detail": "read-back says no"}}`
+						switch {
+						case rb.status == http.StatusOK:
+							body = rt.existsBody
+						case rb.gone && rt.goneBody != "":
+							status, body = http.StatusOK, rt.goneBody
+						}
+						w.WriteHeader(status)
+						_, _ = fmt.Fprint(w, body)
+					default:
+						if body, found := rt.ok[r.Method+" "+r.URL.Path]; found {
+							w.WriteHeader(http.StatusOK)
+							_, _ = fmt.Fprint(w, body)
+							return
+						}
+						t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+						w.WriteHeader(http.StatusTeapot)
+					}
+				}))
+				t.Cleanup(server.Close)
+
+				diags := runForbiddenDelete(t, rt.resource(NewClientWithToken(server.URL, "test-token")), rt.attrs)
+
+				if got := deletes.Load(); got != 1 {
+					t.Errorf("403 endpoint requests = %d, want 1", got)
+				}
+				if readBackHits.Load() == 0 {
+					t.Fatalf("the object was never read back after the 403")
+				}
+				assertForbiddenDeleteOutcome(t, diags, rt.kind, rt.id, rb.outcome)
+			})
+		}
+	}
+}
+
+// assertForbiddenDeleteOutcome checks how a Delete that got a 403 ended. "refused" and
+// "unconfirmed" fail the destroy, so the framework keeps the resource in state; "warned" and
+// "silent" let it finish.
+func assertForbiddenDeleteOutcome(t *testing.T, diags diag.Diagnostics, kind, id, outcome string) {
+	t.Helper()
+	noun := strings.ToLower(kind)
+	switch outcome {
+	case "refused":
+		if !diags.HasError() {
+			t.Fatalf("a refused delete of a still-readable %s ended the destroy; want an error, got %v", noun, diags)
+		}
+		errs := diags.Errors()
+		if errs[0].Summary() != kind+" Was Not Deleted" {
+			t.Errorf("summary = %q, want %q", errs[0].Summary(), kind+" Was Not Deleted")
+		}
+		for _, want := range []string{id, "HTTP 403 (Permission denied)", "still exists", "terraform state rm"} {
+			if !strings.Contains(errs[0].Detail(), want) {
+				t.Errorf("detail %q does not contain %q", errs[0].Detail(), want)
 			}
-		})
+		}
+	case "warned":
+		assertTreatedAsDeleted(t, diags, kind, id, true)
+	case "silent":
+		if len(diags) != 0 {
+			t.Errorf("a 404 read-back is a confirmed deletion; want no diagnostics, got %v", diags)
+		}
+	case "unconfirmed":
+		if !diags.HasError() {
+			t.Fatalf("a failed read-back ended the destroy; want an error, got %v", diags)
+		}
+		if got := diags.Errors()[0].Summary(); got != "Could Not Confirm "+kind+" Deletion" {
+			t.Errorf("summary = %q, want %q", got, "Could Not Confirm "+kind+" Deletion")
+		}
+		if !strings.Contains(diags.Errors()[0].Detail(), "Retry the destroy") {
+			t.Errorf("detail %q does not say to retry", diags.Errors()[0].Detail())
+		}
+	default:
+		t.Fatalf("unknown outcome %q", outcome)
 	}
 }
 
 // The service's final DELETE, after termination has landed, is a second place the 403 can arrive.
+// The terminated service can still be read, so the 403 is a refusal: the destroy fails rather
+// than dropping a service that still exists.
 func TestForbiddenTreatedAsGone_ServiceFinalDelete(t *testing.T) {
 	var hits atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -263,7 +371,7 @@ func TestForbiddenTreatedAsGone_ServiceFinalDelete(t *testing.T) {
 
 	diags := runForbiddenDelete(t, &ServiceResource{client: NewClientWithToken(server.URL, "test-token")}, map[string]any{"id": "svc_gone"})
 
-	assertTreatedAsDeleted(t, diags, "Service", "svc_gone", true)
+	assertForbiddenDeleteOutcome(t, diags, "Service", "svc_gone", "refused")
 	if got := hits.Load(); got != 1 {
 		t.Errorf("DELETE requests = %d, want 1", got)
 	}

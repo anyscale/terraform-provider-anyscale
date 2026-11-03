@@ -37,6 +37,9 @@ import (
 type cloudAccessReconcileMock struct {
 	callerUserID string
 	callerEmail  string
+	// userinfoBody, when set, is the raw 200 body of GET /api/v2/userinfo in
+	// place of the one built from callerUserID/callerEmail.
+	userinfoBody string
 
 	// members is the cloud's current collaborator list, keyed by email.
 	members map[string]cloudAccessMockMember
@@ -131,6 +134,11 @@ func (m *cloudAccessReconcileMock) handler(t *testing.T, cloudID string) http.Ha
 	emptyMeta := map[string]interface{}{"next_paging_token": nil}
 
 	mux.HandleFunc("/api/v2/userinfo", func(w http.ResponseWriter, r *http.Request) {
+		if m.userinfoBody != "" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(m.userinfoBody))
+			return
+		}
 		writeJSON(w, map[string]interface{}{"result": map[string]interface{}{
 			"id":    m.callerUserID,
 			"email": m.callerEmail,
@@ -474,11 +482,13 @@ func TestReconcileCloudAccess_NeverRevokesTheCaller(t *testing.T) {
 			callerEmail:  "someone-else@example.com",
 		},
 		{
-			// The user id can be absent or differ by identity type, so the email is
-			// checked too - and case-insensitively, since Anyscale treats email
-			// identity as case-insensitive.
+			// The member's user id can differ from the caller's by identity type, so
+			// the email is checked too - and case-insensitively, since Anyscale
+			// treats email identity as case-insensitive. The caller's own id is
+			// never empty here: userinfo requires it, and an empty one is refused
+			// (TestReconcileCloudAccess_EmptyCallerUserIDFailsClosed).
 			name:         "matched by email in a different case",
-			callerUserID: "",
+			callerUserID: "usr_other_identity_type",
 			callerEmail:  "Operator@Example.com",
 		},
 	} {
@@ -506,6 +516,52 @@ func TestReconcileCloudAccess_NeverRevokesTheCaller(t *testing.T) {
 			for _, call := range mock.calls {
 				if strings.HasPrefix(call, "DELETE") {
 					t.Errorf("a revoke was attempted at all: %v", mock.calls)
+				}
+			}
+		})
+	}
+}
+
+// TestReconcileCloudAccess_EmptyCallerUserIDFailsClosed covers a userinfo 200
+// that carries no user ID - a body that is not really a userinfo response. The
+// caller is on the cloud and undeclared, so a reconcile that accepted the empty
+// identity would revoke them: nothing matches an empty ID or email. It must
+// refuse before any write instead.
+func TestReconcileCloudAccess_EmptyCallerUserIDFailsClosed(t *testing.T) {
+	const cloudID = "cld_self"
+
+	for _, body := range []string{`{"result":{}}`, `{"result":null}`, `{}`} {
+		t.Run(body, func(t *testing.T) {
+			mock := &cloudAccessReconcileMock{
+				userinfoBody: body,
+				members: map[string]cloudAccessMockMember{
+					"operator@example.com": {IdentityID: "idn_caller", UserID: "usr_caller", BaseRoles: []string{"owner"}},
+				},
+				orgMembers: map[string]cloudAccessMockIdentity{},
+			}
+
+			_, diags := reconcileCloudAccess(context.Background(),
+				cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
+				map[string]cloudAccessDesiredMember{}, cloudAccessApplyOptions())
+
+			// The safety property first: no write of any kind, so the caller keeps access.
+			if len(mock.calls) != 0 {
+				t.Errorf("want zero write requests, got %v", mock.calls)
+			}
+			if _, ok := mock.members["operator@example.com"]; !ok {
+				t.Errorf("the reconcile revoked the calling identity's own access")
+			}
+
+			if !diags.HasError() {
+				t.Fatalf("want an error, got none")
+			}
+			if got := diags[0].Summary(); got != "Could Not Identify The Calling Identity" {
+				t.Errorf("summary = %q", got)
+			}
+			detail := diags[0].Detail()
+			for _, want := range []string{"the response carried no user ID", "No changes were made."} {
+				if !strings.Contains(detail, want) {
+					t.Errorf("detail %q does not contain %q", detail, want)
 				}
 			}
 		})

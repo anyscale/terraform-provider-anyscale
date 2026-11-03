@@ -246,7 +246,7 @@ func (d *CloudDataSource) readCloudIntoModel(ctx context.Context, cloudID string
 	// effect; the default/primary resource (if any) carries the resource ID.
 	resources, err := listCloudResources(ctx, d.client, cloudID)
 	if err != nil {
-		return fmt.Errorf("failed to list cloud resources: %w", err)
+		return err
 	}
 
 	config.IsEmptyCloud = types.BoolValue(len(resources) == 0)

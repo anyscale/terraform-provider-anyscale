@@ -157,7 +157,7 @@ func doCloudIAMMappingConfigRequestRetry(ctx context.Context, client *Client, me
 func resolvePrimaryCloudResourceID(ctx context.Context, client *Client, cloudID string) (string, error) {
 	results, err := listCloudResources(ctx, client, cloudID)
 	if err != nil {
-		return "", fmt.Errorf("failed to list cloud resources for cloud %q: %w", cloudID, err)
+		return "", fmt.Errorf("cloud %q: %w", cloudID, err)
 	}
 
 	var primaryIDs []string

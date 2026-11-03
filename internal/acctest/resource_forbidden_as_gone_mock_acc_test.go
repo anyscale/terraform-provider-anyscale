@@ -20,8 +20,10 @@ import (
 //   - Read: a refresh that gets a 403 drops the resource from state, so the next plan creates it
 //     instead of failing. A PlanOnly step with ExpectNonEmptyPlan shows it; with 403 as an error
 //     the refresh fails the step.
-//   - Delete: a destroy whose DELETE gets a 403 succeeds. The end-of-test destroy shows it; a
-//     Delete error fails the test.
+//   - Delete: a destroy whose DELETE gets a 403, for an object that then reads as 403 too,
+//     succeeds. The end-of-test destroy shows it; a Delete error fails the test. A 403 DELETE of
+//     an object that can still be read is a refusal and fails the destroy; the provider
+//     package's unit tests cover that case.
 //
 // The warning each 403 adds is asserted by the provider package's unit tests, which can read
 // diagnostics directly.
@@ -33,6 +35,16 @@ type forbiddenSwitch struct {
 	// deleteCalls counts the DELETE (or terminate) requests answered 403, so a Delete test proves
 	// the destroy reached the API rather than skipping it.
 	deleteCalls atomic.Int32
+}
+
+// forbidDelete answers a delete with 403 as the API does for an object that is already gone, and
+// from then on answers its reads with 403 too. The provider reads an object back after a 403
+// delete and only accepts it as gone when that read cannot see it either; a 403 delete of an
+// object that is still readable is a refused delete and fails the destroy.
+func (sw *forbiddenSwitch) forbidDelete(w http.ResponseWriter) {
+	sw.deleteCalls.Add(1)
+	sw.reads.Store(true)
+	writeForbidden(w)
 }
 
 func writeForbidden(w http.ResponseWriter) {
@@ -93,8 +105,7 @@ func newForbiddenCloudMock(t *testing.T, cloudID string, sw *forbiddenSwitch) *h
 				"status": "ready", "state": "ACTIVE", "compute_stack": "K8S"
 			}}`, cloudID)
 		case r.Method == http.MethodDelete && sw.deletes.Load():
-			sw.deleteCalls.Add(1)
-			writeForbidden(w)
+			sw.forbidDelete(w)
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusTeapot)
@@ -198,8 +209,7 @@ func newForbiddenCloudResourceMock(t *testing.T, cloudID string, sw *forbiddenSw
 	})
 	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/remove_resource", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete && sw.deletes.Load() {
-			sw.deleteCalls.Add(1)
-			writeForbidden(w)
+			sw.forbidDelete(w)
 			return
 		}
 		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
@@ -277,8 +287,7 @@ func newForbiddenProjectMock(t *testing.T, sw *forbiddenSwitch) *httptest.Server
 				return
 			}
 			if r.Method == http.MethodDelete && sw.deletes.Load() {
-				sw.deleteCalls.Add(1)
-				writeForbidden(w)
+				sw.forbidDelete(w)
 				return
 			}
 		}
@@ -358,8 +367,7 @@ func newForbiddenServiceMock(t *testing.T, serviceID string, sw *forbiddenSwitch
 	})
 	mux.HandleFunc("/api/v2/services-v2/"+serviceID+"/terminate", func(w http.ResponseWriter, r *http.Request) {
 		if sw.deletes.Load() {
-			sw.deleteCalls.Add(1)
-			writeForbidden(w)
+			sw.forbidDelete(w)
 			return
 		}
 		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)

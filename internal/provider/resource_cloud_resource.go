@@ -1036,8 +1036,18 @@ func (r *CloudResourceResource) Delete(ctx context.Context, req resource.DeleteR
 		return
 	}
 	if isHTTPStatus(err, http.StatusForbidden) {
-		tflog.Warn(ctx, "Cloud resource delete returned 403, treating as already deleted", map[string]any{"cloud_id": cloudID, "name": resourceName})
-		addForbiddenTreatedAsDeletedOnDestroyWarning(&resp.Diagnostics, "Cloud Resource", state.ID.ValueString(), err)
+		// Read back with the same listing the 404 path confirms against.
+		confirmGoneAfterForbiddenDelete(ctx, &resp.Diagnostics, "Cloud Resource", state.ID.ValueString(), err,
+			func() error {
+				results, listErr := listCloudResources(ctx, r.client, cloudID)
+				if listErr != nil {
+					return listErr
+				}
+				if findCloudResourceByName(results, resourceName) == nil {
+					return ErrNotFound
+				}
+				return nil
+			})
 		return
 	}
 	if err != nil {
@@ -1165,7 +1175,7 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 		if errors.Is(err, ErrNotFound) {
 			return fmt.Errorf("%w: cloud not found", ErrNotFound)
 		}
-		return fmt.Errorf("failed to read cloud resources: %w", err)
+		return err
 	}
 
 	foundResource := findCloudResourceByName(results, resourceName)
