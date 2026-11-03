@@ -118,8 +118,8 @@ The steps, each one `terraform apply`:
    Changing the inputs or `version_name` while a canary is held rolls it back or is rejected.
 4. Apply with no value to finish.
 
-To abort, revert the inputs and apply: the held canary is rolled back and nothing is
-redeployed. A canary that fails during an apply is rolled back by Terraform and the apply
+To abort, revert the inputs and apply: the held canary is rolled back, and nothing is
+redeployed if the configuration matches the one from before the canary. A canary that fails during an apply is rolled back by Terraform and the apply
 fails with "Service Rollout Rolled Back", which fails the job. A canary that fails afterwards
 is not acted on: check `canary_version.current_state` for `UNHEALTHY` in your monitoring step
 and abort as above.
@@ -180,8 +180,9 @@ How a rollout runs:
    monitoring, then run it again with `50`. Run each stage on the same commit; merging
    another change in between starts a new rollout.
 3. **Finish.** Run it with `finish`.
-4. **Abort.** Revert the change on `main`. The reverted configuration matches the one from
-   before the canary, so the push rolls the held canary back and redeploys nothing.
+4. **Abort.** Revert the change on `main`. Reverting to the configuration deployed before the
+   canary rolls the canary back and deploys nothing. If any deploy setting differs, Terraform
+   deploys the result as a new version, held at stage `0`.
 
 `./scripts/smoke-test.sh` is a placeholder for your own checks. `concurrency` stops two stages
 applying at once.
