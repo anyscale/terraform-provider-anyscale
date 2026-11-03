@@ -1524,11 +1524,20 @@ func (r *CloudResource) detachMachinePoolsFromCloud(ctx context.Context, cloudID
 // to your .tf to match, or accept the diff; either is far better than the
 // destructive replace this fix removes.
 func (r *CloudResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	cloudID := req.ID
-	tflog.Info(ctx, "Importing Anyscale Cloud", map[string]any{"id": cloudID})
+	cloudID, emptyPattern, err := parseCloudImportID(req.ID)
+	if err != nil {
+		AddConfigError(&resp.Diagnostics, "Invalid Import ID", "Import ID "+err.Error()+".")
+		return
+	}
+	tflog.Info(ctx, "Importing Anyscale Cloud", map[string]any{"id": cloudID, "empty_pattern": emptyPattern})
 
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), cloudID)...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+	if emptyPattern {
+		// The configuration's resources are separate anyscale_cloud_resource resources, which own
+		// the config blocks; recovering them here would plan their removal from this cloud.
 		return
 	}
 
@@ -1557,6 +1566,25 @@ func (r *CloudResource) ImportState(ctx context.Context, req resource.ImportStat
 	for attrName, obj := range blocks {
 		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(attrName), obj)...)
 	}
+}
+
+// cloudImportEmptySuffix marks an import ID whose configuration has no embedded config blocks:
+// the split pattern, where each cloud resource is a separate anyscale_cloud_resource.
+const cloudImportEmptySuffix = ":empty"
+
+// parseCloudImportID splits an anyscale_cloud import ID into the cloud ID and whether the
+// configuration uses the split pattern. The API cannot tell the patterns apart, so the person
+// importing says which one with the ":empty" suffix. A bare ID is returned unchanged.
+func parseCloudImportID(id string) (cloudID string, emptyPattern bool, err error) {
+	if !strings.Contains(id, ":") {
+		return id, false, nil
+	}
+	cloudID, found := strings.CutSuffix(id, cloudImportEmptySuffix)
+	if found && cloudID != "" && !strings.Contains(cloudID, ":") {
+		return cloudID, true, nil
+	}
+	return "", false, fmt.Errorf("got %q; expected %q for a cloud whose configuration embeds aws_config, gcp_config or kubernetes_config, or %q for a cloud whose resources are separate anyscale_cloud_resource resources",
+		id, "<cloud_id>", "<cloud_id>"+cloudImportEmptySuffix)
 }
 
 // ─── Helper Functions (continued) ─────────────────────────────────────────────

@@ -285,6 +285,8 @@ addition to the block(s) the compute stack requires:
 Import needs the cloud's resource listing to recover those blocks, so `terraform import
 anyscale_cloud` fails if that request fails rather than importing without them; retry the import.
 
+If the cloud's configuration lives in separate `anyscale_cloud_resource` resources and the `anyscale_cloud` itself sets none of `aws_config`, `gcp_config` or `kubernetes_config`, import it as `cloud_id:empty`. Import then recovers none of those blocks, so the plan after import is empty. Without `:empty`, the plan shows a one-time in-place update that removes the recovered blocks from state. Import each `anyscale_cloud_resource` separately.
+
 Import does not recover `credentials`. If your configuration sets it, the first plan after import shows an in-place update with a "Value Recorded Without Replacement" warning. Applying records the value in state and sends nothing; the cloud is unchanged. Use `-replace` only if you actually want to recreate the cloud with new credentials. Omitting `credentials` plans clean. A cloud created by this provider version or later still replaces when you change `credentials`.
 
 This is not purely new coverage: recovering `object_storage` through one shared code path for both
