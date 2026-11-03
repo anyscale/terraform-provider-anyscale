@@ -1,0 +1,3 @@
+```release-note:changed
+resource/anyscale_cloud: The `external_id` description now states the rule to follow (match the role's trust policy, start with your organization ID), and several attribute descriptions on `anyscale_cloud` and `anyscale_cloud_resource` are shorter.
+```
