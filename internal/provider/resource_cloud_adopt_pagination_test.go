@@ -279,9 +279,8 @@ func TestCreate_MultipleExistingCloudsProducesResourceLevelDiagnostic(t *testing
 	}
 }
 
-// TestCloudResourceCreate_AdoptLookupFailureFailsClosed: when the by-name lookup that decides
-// adopt-vs-create cannot list clouds, Create must stop with an error naming that failure and must
-// not POST a new cloud. Creating anyway would turn a transient list failure into a duplicate cloud.
+// TestCloudResourceCreate_AdoptLookupFailureFailsClosed: a failed by-name lookup stops Create
+// with an error and no POST.
 func TestCloudResourceCreate_AdoptLookupFailureFailsClosed(t *testing.T) {
 	const name = "tfacc-adopt-list-fails"
 	postCreateCalled := false
