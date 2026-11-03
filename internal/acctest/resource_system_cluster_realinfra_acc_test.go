@@ -60,7 +60,9 @@ data "anyscale_system_cluster" "test" {
   cloud_id = anyscale_system_cluster.test.cloud_id
 }
 `
-	notImplemented := regexp.MustCompile(`501`)
+	// AddAPIError renders a status error as "Failed to <operation> (HTTP 501): ...", so this
+	// matches the status itself, not any 501 in an ID or body.
+	notImplemented := regexp.MustCompile(`\(HTTP 501\)`)
 	var createRejected bool
 
 	resource.Test(t, resource.TestCase{
