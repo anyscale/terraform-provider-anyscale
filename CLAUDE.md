@@ -413,6 +413,9 @@ without asking, provided **everything is torn down within 24 hours**. Covers `ma
 scenario targets below. Real **AKS** infrastructure is **not** covered — hold Azure creation until
 told otherwise.
 
+The 24-hour teardown rule governs **local and agent-run** testing only. It does not apply to
+Buildkite e2e runs, which follow the pipeline's own cleanup.
+
 ### Test cloud selection
 
 Tests resolve a cloud at runtime with no manual setup. Optional overrides:
