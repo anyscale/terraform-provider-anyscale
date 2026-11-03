@@ -1,0 +1,4 @@
+```
+release-note:improvement
+docs: Cloud attribute descriptions are shorter and no longer repeat rename history.
+```
