@@ -30,6 +30,7 @@ type cloudDeleteMock struct {
 	putStatus  int  // PUT state status; 0 = 204
 	lbStatus   int  // get_lb_resource status; 0 = 200
 	lbFailOnce int  // the first get_lb_resource call answers this status
+	lbDropOnce bool // the first get_lb_resource call drops the connection
 }
 
 func (m *cloudDeleteMock) server(t *testing.T) *httptest.Server {
@@ -55,6 +56,16 @@ func (m *cloudDeleteMock) server(t *testing.T) *httptest.Server {
 			}
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodPost && r.URL.Path == cloud+"/get_lb_resource":
+			if m.lbDropOnce {
+				m.mu.Lock()
+				m.lbDropOnce = false
+				m.mu.Unlock()
+				conn, _, err := w.(http.Hijacker).Hijack()
+				if err == nil {
+					_ = conn.Close()
+				}
+				return
+			}
 			if m.lbFailOnce != 0 {
 				m.mu.Lock()
 				status := m.lbFailOnce
@@ -311,5 +322,13 @@ func TestCloudResourceDelete_TransientLoadBalancerCheckErrorIsRetried(t *testing
 	calls := m.teardownCalls()
 	if last := calls[len(calls)-1]; last != "DELETE /api/v2/clouds/cld_del" {
 		t.Errorf("last call = %q, want the DELETE; calls: %v", last, calls)
+	}
+}
+
+// A dropped connection mid-poll is transient too.
+func TestCloudResourceDelete_DroppedConnectionDuringCheckIsRetried(t *testing.T) {
+	m := &cloudDeleteMock{resources: awsVMResource, lbPending: 1, lbDropOnce: true}
+	if diags := runCloudDelete(t, m, ""); diags.HasError() {
+		t.Fatalf("a dropped connection must not fail the destroy, got: %v", diags)
 	}
 }

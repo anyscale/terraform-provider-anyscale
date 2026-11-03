@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -122,7 +123,9 @@ func transientLBCheckError(err error) bool {
 	if errors.As(err, &statusErr) {
 		return statusErr.StatusCode >= 500 || statusErr.StatusCode == http.StatusTooManyRequests
 	}
-	return strings.Contains(err.Error(), "API request failed")
+	// No response at all: the HTTP client's transport error.
+	var urlErr *url.Error
+	return errors.As(err, &urlErr)
 }
 
 // lbTeardownTimeout is errCloudLBTeardownTimeout, with the last failed check
