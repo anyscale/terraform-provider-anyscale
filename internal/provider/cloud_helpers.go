@@ -345,178 +345,56 @@ func buildProviderConfig(ctx context.Context, deployReq *CloudDeploymentRequest,
 	case "AWS":
 		if computeStack == "K8S" {
 			// K8S: kubernetes_config + object_storage required, aws_config optional
-			if kubernetesConfig.IsNull() {
-				return fmt.Errorf("kubernetes_config is required when cloud_provider is AWS and compute_stack is K8S")
+			if err := setK8SDeployment(ctx, deployReq, "cloud_provider is AWS and compute_stack is K8S", "AWS K8S", "s3://", kubernetesConfig, objectStorage); err != nil {
+				return err
 			}
-
-			k8sConfig, err := expandKubernetesConfig(ctx, kubernetesConfig)
-			if err != nil {
-				return fmt.Errorf("failed to expand kubernetes_config: %w", err)
-			}
-			if k8sConfig == nil || k8sConfig.AnyscaleOperatorIAMIdentity == "" {
-				return fmt.Errorf("kubernetes_config.anyscale_operator_iam_identity is required for AWS K8S clouds")
-			}
-			deployReq.KubernetesConfig = k8sConfig
-
-			if objectStorage.IsNull() {
-				return fmt.Errorf("object_storage is required when cloud_provider is AWS and compute_stack is K8S")
-			}
-
-			objStorage, err := expandObjectStorage(ctx, objectStorage)
-			if err != nil {
-				return fmt.Errorf("failed to expand object_storage: %w", err)
-			}
-			bucketName := objStorage.BucketName
-			if !strings.HasPrefix(bucketName, "s3://") {
-				bucketName = "s3://" + bucketName
-			}
-			deployReq.ObjectStorage = &ObjectStorage{
-				BucketName: bucketName,
-				Region:     objStorage.Region,
-				Endpoint:   objStorage.Endpoint,
-			}
-
-			// aws_config is optional for K8S
 			if !awsConfig.IsNull() {
-				expanded, err := expandAWSConfig(ctx, awsConfig)
-				if err != nil {
-					return fmt.Errorf("failed to expand aws_config: %w", err)
+				if err := setAWSConfig(ctx, deployReq, awsConfig); err != nil {
+					return err
 				}
-				deployReq.AWSConfig = expanded
-			}
-
-			if !fileStorage.IsNull() {
-				expanded, err := expandFileStorage(ctx, fileStorage)
-				if err != nil {
-					return fmt.Errorf("failed to expand file_storage: %w", err)
-				}
-				deployReq.FileStorage = expanded
 			}
 		} else {
-			// VM: aws_config required
+			// VM: aws_config required, object_storage optional
 			if awsConfig.IsNull() {
 				return fmt.Errorf("aws_config is required when cloud_provider is AWS and compute_stack is VM")
 			}
-
-			expanded, err := expandAWSConfig(ctx, awsConfig)
-			if err != nil {
-				return fmt.Errorf("failed to expand aws_config: %w", err)
+			if err := setAWSConfig(ctx, deployReq, awsConfig); err != nil {
+				return err
 			}
-			deployReq.AWSConfig = expanded
-
-			// object_storage and file_storage optional
 			if !objectStorage.IsNull() {
-				objStorage, err := expandObjectStorage(ctx, objectStorage)
-				if err != nil {
-					return fmt.Errorf("failed to expand object_storage: %w", err)
+				if err := setObjectStorage(ctx, deployReq, objectStorage, "s3://"); err != nil {
+					return err
 				}
-				bucketName := objStorage.BucketName
-				if !strings.HasPrefix(bucketName, "s3://") {
-					bucketName = "s3://" + bucketName
-				}
-				deployReq.ObjectStorage = &ObjectStorage{
-					BucketName: bucketName,
-					Region:     objStorage.Region,
-					Endpoint:   objStorage.Endpoint,
-				}
-			}
-
-			if !fileStorage.IsNull() {
-				expanded, err := expandFileStorage(ctx, fileStorage)
-				if err != nil {
-					return fmt.Errorf("failed to expand file_storage: %w", err)
-				}
-				deployReq.FileStorage = expanded
 			}
 		}
+		return setFileStorage(ctx, deployReq, fileStorage)
 
 	case "GCP":
 		if computeStack == "K8S" {
 			// K8S: kubernetes_config + object_storage required, gcp_config optional
-			if kubernetesConfig.IsNull() {
-				return fmt.Errorf("kubernetes_config is required when cloud_provider is GCP and compute_stack is K8S")
+			if err := setK8SDeployment(ctx, deployReq, "cloud_provider is GCP and compute_stack is K8S", "GCP K8S", "gs://", kubernetesConfig, objectStorage); err != nil {
+				return err
 			}
-
-			k8sConfig, err := expandKubernetesConfig(ctx, kubernetesConfig)
-			if err != nil {
-				return fmt.Errorf("failed to expand kubernetes_config: %w", err)
-			}
-			if k8sConfig == nil || k8sConfig.AnyscaleOperatorIAMIdentity == "" {
-				return fmt.Errorf("kubernetes_config.anyscale_operator_iam_identity is required for GCP K8S clouds")
-			}
-			deployReq.KubernetesConfig = k8sConfig
-
-			if objectStorage.IsNull() {
-				return fmt.Errorf("object_storage is required when cloud_provider is GCP and compute_stack is K8S")
-			}
-
-			objStorage, err := expandObjectStorage(ctx, objectStorage)
-			if err != nil {
-				return fmt.Errorf("failed to expand object_storage: %w", err)
-			}
-			bucketName := objStorage.BucketName
-			if !strings.HasPrefix(bucketName, "gs://") {
-				bucketName = "gs://" + bucketName
-			}
-			deployReq.ObjectStorage = &ObjectStorage{
-				BucketName: bucketName,
-				Region:     objStorage.Region,
-				Endpoint:   objStorage.Endpoint,
-			}
-
-			// gcp_config is optional for K8S
 			if !gcpConfig.IsNull() {
-				expanded, err := expandGCPConfig(ctx, gcpConfig)
-				if err != nil {
-					return fmt.Errorf("failed to expand gcp_config: %w", err)
+				if err := setGCPConfig(ctx, deployReq, gcpConfig); err != nil {
+					return err
 				}
-				deployReq.GCPConfig = expanded
-			}
-
-			if !fileStorage.IsNull() {
-				expanded, err := expandFileStorage(ctx, fileStorage)
-				if err != nil {
-					return fmt.Errorf("failed to expand file_storage: %w", err)
-				}
-				deployReq.FileStorage = expanded
 			}
 		} else {
-			// VM: gcp_config required
+			// VM: gcp_config required, object_storage optional
 			if gcpConfig.IsNull() {
 				return fmt.Errorf("gcp_config is required when cloud_provider is GCP and compute_stack is VM")
 			}
-
-			expanded, err := expandGCPConfig(ctx, gcpConfig)
-			if err != nil {
-				return fmt.Errorf("failed to expand gcp_config: %w", err)
+			if err := setGCPConfig(ctx, deployReq, gcpConfig); err != nil {
+				return err
 			}
-			deployReq.GCPConfig = expanded
-
-			// object_storage and file_storage optional
 			if !objectStorage.IsNull() {
-				objStorage, err := expandObjectStorage(ctx, objectStorage)
-				if err != nil {
-					return fmt.Errorf("failed to expand object_storage: %w", err)
+				if err := setObjectStorage(ctx, deployReq, objectStorage, "gs://"); err != nil {
+					return err
 				}
-				bucketName := objStorage.BucketName
-				if !strings.HasPrefix(bucketName, "gs://") {
-					bucketName = "gs://" + bucketName
-				}
-				deployReq.ObjectStorage = &ObjectStorage{
-					BucketName: bucketName,
-					Region:     objStorage.Region,
-					Endpoint:   objStorage.Endpoint,
-				}
-			}
-
-			if !fileStorage.IsNull() {
-				expanded, err := expandFileStorage(ctx, fileStorage)
-				if err != nil {
-					return fmt.Errorf("failed to expand file_storage: %w", err)
-				}
-				deployReq.FileStorage = expanded
 			}
 		}
+		return setFileStorage(ctx, deployReq, fileStorage)
 
 	case "AZURE":
 		// Azure is Kubernetes-only (confirmed against the backend's own
@@ -530,36 +408,13 @@ func buildProviderConfig(ctx context.Context, deployReq *CloudDeploymentRequest,
 			return fmt.Errorf("azure clouds only support compute_stack = \"K8S\" - Anyscale does not support Azure VM clouds")
 		}
 
-		if kubernetesConfig.IsNull() {
-			return fmt.Errorf("kubernetes_config is required when cloud_provider is AZURE")
-		}
-
-		k8sConfig, err := expandKubernetesConfig(ctx, kubernetesConfig)
-		if err != nil {
-			return fmt.Errorf("failed to expand kubernetes_config: %w", err)
-		}
-		if k8sConfig == nil || k8sConfig.AnyscaleOperatorIAMIdentity == "" {
-			return fmt.Errorf("kubernetes_config.anyscale_operator_iam_identity is required for AZURE K8S clouds")
-		}
-		deployReq.KubernetesConfig = k8sConfig
-
-		if objectStorage.IsNull() {
-			return fmt.Errorf("object_storage is required when cloud_provider is AZURE")
-		}
-
-		objStorage, err := expandObjectStorage(ctx, objectStorage)
-		if err != nil {
-			return fmt.Errorf("failed to expand object_storage: %w", err)
-		}
 		// Azure object storage is a full abfss://container@account.dfs.core.windows.net
 		// URI, never a bare bucket name - unlike AWS/GCP, there is no scheme
 		// to auto-prepend here. ValidateConfig's validateAzureK8SOnly already
 		// rejects a bucket_name that doesn't start with abfss:// at plan
 		// time; pass it through completely verbatim.
-		deployReq.ObjectStorage = &ObjectStorage{
-			BucketName: objStorage.BucketName,
-			Region:     objStorage.Region,
-			Endpoint:   objStorage.Endpoint,
+		if err := setK8SDeployment(ctx, deployReq, "cloud_provider is AZURE", "AZURE K8S", "", kubernetesConfig, objectStorage); err != nil {
+			return err
 		}
 
 		// azure_config is optional (tenant_id has no equivalent requirement
@@ -571,19 +426,90 @@ func buildProviderConfig(ctx context.Context, deployReq *CloudDeploymentRequest,
 			}
 			deployReq.AzureConfig = expanded
 		}
-
-		if !fileStorage.IsNull() {
-			expanded, err := expandFileStorage(ctx, fileStorage)
-			if err != nil {
-				return fmt.Errorf("failed to expand file_storage: %w", err)
-			}
-			deployReq.FileStorage = expanded
-		}
+		return setFileStorage(ctx, deployReq, fileStorage)
 
 	case "GENERIC":
 		return fmt.Errorf("%s", genericCloudNotSupportedMessage)
 	}
 
+	return nil
+}
+
+// setK8SDeployment sets the request's kubernetes_config and object_storage for a
+// Kubernetes cloud, both required. requiredWhen completes "X is required when
+// ..." and kind names the cloud kind in the operator-identity error.
+// bucketPrefix is the storage scheme prepended to a bare bucket name, or "" to
+// pass bucket_name through verbatim. kubernetes_config is checked and set before
+// object_storage, so a missing object_storage error leaves it set on deployReq.
+func setK8SDeployment(ctx context.Context, deployReq *CloudDeploymentRequest, requiredWhen, kind, bucketPrefix string, kubernetesConfig, objectStorage types.Object) error {
+	if kubernetesConfig.IsNull() {
+		return fmt.Errorf("kubernetes_config is required when %s", requiredWhen)
+	}
+	k8sConfig, err := expandKubernetesConfig(ctx, kubernetesConfig)
+	if err != nil {
+		return fmt.Errorf("failed to expand kubernetes_config: %w", err)
+	}
+	if k8sConfig == nil || k8sConfig.AnyscaleOperatorIAMIdentity == "" {
+		return fmt.Errorf("kubernetes_config.anyscale_operator_iam_identity is required for %s clouds", kind)
+	}
+	deployReq.KubernetesConfig = k8sConfig
+
+	if objectStorage.IsNull() {
+		return fmt.Errorf("object_storage is required when %s", requiredWhen)
+	}
+	return setObjectStorage(ctx, deployReq, objectStorage, bucketPrefix)
+}
+
+// setObjectStorage sets the request's object_storage, prepending bucketPrefix
+// to a bucket name that does not already start with it. Only that one scheme
+// is checked, so an AWS bucket "gs://x" becomes "s3://gs://x". An empty
+// bucketPrefix passes bucket_name through verbatim.
+func setObjectStorage(ctx context.Context, deployReq *CloudDeploymentRequest, objectStorage types.Object, bucketPrefix string) error {
+	objStorage, err := expandObjectStorage(ctx, objectStorage)
+	if err != nil {
+		return fmt.Errorf("failed to expand object_storage: %w", err)
+	}
+	bucketName := objStorage.BucketName
+	if bucketPrefix != "" && !strings.HasPrefix(bucketName, bucketPrefix) {
+		bucketName = bucketPrefix + bucketName
+	}
+	deployReq.ObjectStorage = &ObjectStorage{
+		BucketName: bucketName,
+		Region:     objStorage.Region,
+		Endpoint:   objStorage.Endpoint,
+	}
+	return nil
+}
+
+func setAWSConfig(ctx context.Context, deployReq *CloudDeploymentRequest, awsConfig types.Object) error {
+	expanded, err := expandAWSConfig(ctx, awsConfig)
+	if err != nil {
+		return fmt.Errorf("failed to expand aws_config: %w", err)
+	}
+	deployReq.AWSConfig = expanded
+	return nil
+}
+
+func setGCPConfig(ctx context.Context, deployReq *CloudDeploymentRequest, gcpConfig types.Object) error {
+	expanded, err := expandGCPConfig(ctx, gcpConfig)
+	if err != nil {
+		return fmt.Errorf("failed to expand gcp_config: %w", err)
+	}
+	deployReq.GCPConfig = expanded
+	return nil
+}
+
+// setFileStorage sets the request's optional file_storage; a null block is a
+// no-op.
+func setFileStorage(ctx context.Context, deployReq *CloudDeploymentRequest, fileStorage types.Object) error {
+	if fileStorage.IsNull() {
+		return nil
+	}
+	expanded, err := expandFileStorage(ctx, fileStorage)
+	if err != nil {
+		return fmt.Errorf("failed to expand file_storage: %w", err)
+	}
+	deployReq.FileStorage = expanded
 	return nil
 }
 
