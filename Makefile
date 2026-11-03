@@ -535,6 +535,32 @@ destroy-gcp-gke-basic: ## Destroy GCP GKE basic (must match SUFFIX used by apply
 	  -var=cloud_name=tfacc-gcp-gke-basic-$(SUFFIX)
 
 # ============================================================================
+# TERRAFORM TESTING - OTHER SCENARIOS
+# ============================================================================
+
+.PHONY: test-aws-vm-basic-resource
+test-aws-vm-basic-resource: build ## Test AWS VM split pattern (empty cloud + anyscale_cloud_resource)
+	@echo "==> Testing aws-vm-basic-resource scenario..."
+	@SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	  export TF_VAR_cloud_name=tfacc-aws-vm-basic-resource-$$SUFFIX TF_VAR_common_prefix=tfacc-avbr-$$SUFFIX-; \
+	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/aws-vm-basic-resource $(BUILD_DIR)/aws-vm-basic-resource-$$SUFFIX.tfstate
+
+.PHONY: test-kitchen-sink
+test-kitchen-sink: build ## Test kitchen-sink (two clouds incl. EKS split pattern, projects, images, compute configs)
+	@echo "==> Testing kitchen-sink scenario..."
+	@SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	  export TF_VAR_name_prefix=tfacc-ks-$$SUFFIX; \
+	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/kitchen-sink $(BUILD_DIR)/kitchen-sink-$$SUFFIX.tfstate
+
+.PHONY: test-container-image-compute-config
+test-container-image-compute-config: build ## Test container image + compute config on an existing cloud (TF_VAR_cloud_id required)
+	@echo "==> Testing container-image-compute-config scenario..."
+	@test -n "$$TF_VAR_cloud_id" || { echo "TF_VAR_cloud_id must name an existing cloud for this scenario" >&2; exit 2; }
+	@SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	  export SCENARIO_NO_CLOUD=1 TF_VAR_image_name=tfacc-cicc-$$SUFFIX TF_VAR_compute_config_name=tfacc-cicc-$$SUFFIX; \
+	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/container-image-compute-config $(BUILD_DIR)/container-image-compute-config-$$SUFFIX.tfstate
+
+# ============================================================================
 # VERSION HELPERS
 # ============================================================================
 
