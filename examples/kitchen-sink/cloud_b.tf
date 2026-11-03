@@ -22,4 +22,10 @@ resource "anyscale_cloud" "b" {
   object_storage {
     bucket_name = module.anyscale_s3.s3_bucket_id
   }
+
+  # Cloud B's roles get the shared bucket through roles_a's S3 policy (infra_aws.tf).
+  depends_on = [
+    aws_iam_role_policy_attachment.roles_b_node_s3,
+    aws_iam_role_policy_attachment.roles_b_access_s3,
+  ]
 }

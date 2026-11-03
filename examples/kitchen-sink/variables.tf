@@ -1,5 +1,5 @@
 # Kitchen Sink: variables grouped by what they configure (shared foundation, EKS, compute configs,
-# container images, org, service data-source gating) rather than one flat list -- see README.md for
+# container images, organization gates) rather than one flat list -- see README.md for
 # how these groups map to the blocks each feeds.
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -117,32 +117,30 @@ variable "invite_email" {
   default     = ""
 }
 
-# Only referenced inside organization.tf's commented-out anyscale_organization_user_role block
-# (needs a real accepted member, so it can't be live code) -- not unused, just not wired into
-# anything tflint can see until you uncomment it.
-# tflint-ignore: terraform_unused_declarations
-variable "new_member_base_role" {
-  description = "Organization base_role for the invited member, once accepted: \"collaborator\" or \"owner\"."
-  type        = string
-  default     = "collaborator"
-  validation {
-    condition     = contains(["collaborator", "owner"], var.new_member_base_role)
-    error_message = "new_member_base_role must be \"collaborator\" or \"owner\"."
-  }
-}
-
-# ---------------------------------------------------------------------------------------------------------------------
-# OPTIONAL VARIABLES -- service data sources
-# ---------------------------------------------------------------------------------------------------------------------
-
-variable "existing_service_name" {
-  description = <<-EOT
-    Name of an already-running Anyscale service to read back via the singular anyscale_service data
-    source. Left empty by default -- the singular lookup is skipped entirely until you point this
-    at a real service (e.g. one deployed with the anyscale_service resource, or any pre-existing
-    service). anyscale_services (the plural, filtered list) always runs regardless, since an empty
-    result is still a meaningful, assertable state.
-  EOT
+variable "org_user_email" {
+  description = "Email of an existing, accepted organization member to manage with anyscale_organization_user. Empty (the default) skips it. Destroy never removes the member."
   type        = string
   default     = ""
+}
+
+variable "enable_user_groups" {
+  description = "Create a user group and manage its members. User groups are a beta feature that must be enabled for your organization."
+  type        = bool
+  default     = false
+}
+
+variable "user_group_member_emails" {
+  description = "Members of the kitchen-sink user group when enable_user_groups is set. Each must be an accepted organization member. The list is authoritative."
+  type        = list(string)
+  default     = []
+}
+
+variable "enable_role_binding" {
+  description = "Grant the user group the built-in project_viewer role on Cloud B's project. Needs enable_user_groups and an organization converted to role bindings; other organizations answer 409."
+  type        = bool
+  default     = false
+  validation {
+    condition     = !var.enable_role_binding || var.enable_user_groups
+    error_message = "enable_role_binding needs enable_user_groups: the binding is granted to the kitchen-sink user group."
+  }
 }

@@ -50,7 +50,9 @@ customer_ingress_cidr_ranges = "203.0.113.0/24,198.51.100.42/32"
 
 # --- Organization: sends a REAL email if set -----------------------------------------------------
 # invite_email = "you+kitchen-sink@example.com"
-# new_member_base_role = "collaborator" # only used once you uncomment the organization_user_role block
 
-# --- Service data sources: requires an already-running service to be meaningful ------------------
-# existing_service_name = "my-service"
+# --- Organization: off by default; see README.md for what each needs -----------------------------
+# org_user_email           = "member@example.com"
+# enable_user_groups       = true
+# user_group_member_emails = ["member@example.com"]
+# enable_role_binding      = true # converted (role-binding) organizations only
