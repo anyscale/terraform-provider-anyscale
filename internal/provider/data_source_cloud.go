@@ -104,11 +104,11 @@ func (d *CloudDataSource) Schema(ctx context.Context, req datasource.SchemaReque
 	// doc comment for the naming-unification history.
 	attributes["lineage_tracking_enabled"] = schema.BoolAttribute{
 		Computed:            true,
-		MarkdownDescription: "Whether lineage tracking is enabled for this cloud. Named to match the backend's own field name (and the plural `anyscale_clouds` data source, which always used this name) - a previous provider version called this `enable_lineage_tracking` on both this data source and the `anyscale_cloud` resource; see CHANGELOG.md and the guide's [Naming differences between resources and data sources](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources) section for the migration note.",
+		MarkdownDescription: "Whether lineage tracking is enabled for this cloud. Previously named `enable_lineage_tracking`; see CHANGELOG.md and [Naming differences](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources).",
 	}
 	attributes["aggregated_logs_enabled"] = schema.BoolAttribute{
 		Computed:            true,
-		MarkdownDescription: "Whether aggregated log ingestion is enabled for this cloud. Uniform `<noun>_enabled` naming with its sibling `lineage_tracking_enabled` - a previous provider version called this `enable_log_ingestion` on this data source and the `anyscale_cloud` resource, then briefly `is_aggregated_logs_enabled` (matching the backend's own field name and the plural `anyscale_clouds` data source at the time) before settling here. See CHANGELOG.md and the guide's [Naming differences between resources and data sources](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources) section for the migration note.",
+		MarkdownDescription: "Whether aggregated log ingestion is enabled for this cloud. Previously named `enable_log_ingestion`; see CHANGELOG.md and [Naming differences](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources).",
 	}
 	// DS-CLOUD-4: parity with the plural's is_k8s. Schema-only shared text (not
 	// hoisted into cloudSharedAttributes, since the plural's own copy is
