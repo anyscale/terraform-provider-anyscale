@@ -443,6 +443,9 @@ comment gives the exact command). They skip cleanly when unset.
 
 - `ANYSCALE_TEST_REAL_INFRA=1` — gates tests that create real cloud infrastructure
   (`SkipIfNoRealInfra`).
+- `ANYSCALE_TEST_AZURE_APPROVED=1` — required by `make test-azure-aks-basic`, which otherwise
+  refuses to start. Real AKS infrastructure is not pre-authorized; set it only once the user
+  approves an Azure run.
 - `ANYSCALE_TEST_USER_EMAIL` — an existing accepted org member dedicated to testing: not an owner,
   not the token's own identity, with no clouds assigned. Used by the organization_user_role and
   cloud_access real-infra tests, which change that member's real org and cloud roles.
