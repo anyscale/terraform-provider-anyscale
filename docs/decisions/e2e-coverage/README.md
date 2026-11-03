@@ -123,6 +123,9 @@ per-platform matrix.
 3. Dedicated IAM-mapping clouds per platform, or skip IAM mapping outside AWS-VM.
 4. Whether `enable_task_dashboard_k8s` is on for the K8S fixtures.
 5. A dedicated system-cluster cloud per platform (`ANYSCALE_TEST_SYSTEM_CLUSTER_CLOUD_ID`), or AWS-VM only.
+6. Network reach from the Buildkite runners to each fixture cloud's service ingress. The
+   service-credentials test sends real requests to the running service and fails, not skips, when the
+   load balancer is unreachable; the static AWS fixture's ingress does not admit arbitrary addresses.
 
 ## Gaps (target matrix vs the 2026-11-02 inventory)
 
