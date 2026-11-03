@@ -78,8 +78,9 @@ data "anyscale_services" "in_project_b" {
   depends_on = [anyscale_service.hello]
 }
 
+# By id: a name lookup matches by substring.
 data "anyscale_service" "hello" {
-  name = anyscale_service.hello.name
+  id = anyscale_service.hello.id
 }
 
 # --- anyscale_system_cluster ---------------------------------------------------------------------

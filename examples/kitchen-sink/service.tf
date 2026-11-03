@@ -31,6 +31,11 @@ resource "anyscale_service" "hello" {
     ]
   }
 
-  # Cloud B's nodes read the package from the shared bucket through this policy.
-  depends_on = [aws_iam_role_policy_attachment.roles_b_node_s3]
+  # Cloud B's nodes read the package from the shared bucket through this policy. The IAM
+  # mapping must be in place before the service's cluster launches, or the rule it declares
+  # never applies to this service.
+  depends_on = [
+    aws_iam_role_policy_attachment.roles_b_node_s3,
+    anyscale_cloud_iam_mapping.b,
+  ]
 }

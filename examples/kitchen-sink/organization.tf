@@ -13,7 +13,8 @@ resource "anyscale_organization_invitation" "new_member" {
 
 # --- anyscale_organization_user (gated by org_user_email) ---------------------------------------
 # Manages membership only, keyed by email. Declaring an existing member adopts them with no API
-# call; destroying it removes nobody from the organization.
+# call, and destroying it removes nobody. An email that is not a member yet gets a real
+# invitation, which destroy cancels if it is still pending.
 resource "anyscale_organization_user" "member" {
   count = var.org_user_email != "" ? 1 : 0
 
