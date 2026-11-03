@@ -199,17 +199,20 @@ type SystemWorkloadClusterExistence struct {
 // without ever risking describeSystemWorkload's create-on-read side effect: GET
 // /api/v2/decorated_sessions/ is a plain list/search query that can never create anything.
 //
-// The cloud_id query parameter on this endpoint is DEAD - confirmed unused server-side (the real
-// handler marks it `# noqa: ARG001` and never references it in its body) - so this cannot filter
-// by cloud server-side. Instead it fetches every session matching the coarse name_match
-// pre-filter (paginated via the shared PaginatedRequest helper) and filters CLIENT-SIDE for the
-// exact cloud, mirroring this provider's established PickMostRecentMatch idiom of "fetch
-// candidates broadly, match precisely client-side" already used for by-name lookups elsewhere.
+// It asks for archived sessions too (archive_status=ALL): the endpoint hides them by default, and
+// a Read that missed an archived session would drop the resource from state, so the next apply
+// would run Create and start the cluster again. cloud_id is applied server-side; the client-side
+// MatchesCloud/IsSystemCluster check stays as a guard. When several sessions match, a
+// non-archived one wins over an archived one, then the most recently created.
 //
 // Returns (nil, nil) - not an error - when no matching cluster is found; that is the expected,
 // common "never started" case for both the data source and a cold resource Read/Import.
 func findSystemWorkloadCluster(ctx context.Context, client *Client, cloudID string) (*SystemWorkloadClusterExistence, error) {
-	queryParams := url.Values{"name_match": {systemWorkloadClusterNameFilter}}
+	queryParams := url.Values{
+		"name_match":     {systemWorkloadClusterNameFilter},
+		"archive_status": {"ALL"},
+		"cloud_id":       {cloudID},
+	}
 
 	candidates, err := PaginatedRequest[DecoratedSessionResult](
 		ctx, client, "/api/v2/decorated_sessions/", queryParams,
@@ -231,8 +234,10 @@ func findSystemWorkloadCluster(ctx context.Context, client *Client, cloudID stri
 		if !c.MatchesCloud(cloudID) || !c.IsSystemCluster {
 			continue
 		}
+		if matchCount == 0 || preferSystemClusterSession(c, match) {
+			match = c
+		}
 		matchCount++
-		match = c
 	}
 
 	WarnIfMultipleMatches(ctx, "system cluster session", cloudID, matchCount, match.ID)
@@ -240,6 +245,25 @@ func findSystemWorkloadCluster(ctx context.Context, client *Client, cloudID stri
 		return nil, nil
 	}
 	return &SystemWorkloadClusterExistence{ClusterID: match.ID}, nil
+}
+
+// preferSystemClusterSession reports whether candidate should replace current as the chosen
+// session: a non-archived session beats an archived one; otherwise the later created_at wins. An
+// unparseable created_at never wins a tie, so the choice stays deterministic.
+func preferSystemClusterSession(candidate, current DecoratedSessionResult) bool {
+	candidateLive, currentLive := candidate.ArchivedAt == nil, current.ArchivedAt == nil
+	if candidateLive != currentLive {
+		return candidateLive
+	}
+	candidateAt, err := time.Parse(time.RFC3339Nano, candidate.CreatedAt)
+	if err != nil {
+		return false
+	}
+	currentAt, err := time.Parse(time.RFC3339Nano, current.CreatedAt)
+	if err != nil {
+		return true
+	}
+	return candidateAt.After(currentAt)
 }
 
 // systemClusterStateRunning is the target state Create/Update wait for. Unexported but
