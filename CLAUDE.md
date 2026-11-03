@@ -453,6 +453,9 @@ comment gives the exact command). They skip cleanly when unset.
   `converted`. Tests that need one mode skip in the other; a test that hits the other mode's 409
   fails with the value to set. CI reads the repository variable of the same name. Set it to match
   the org you run against, or real-API runs fail loudly by design.
+- `ANYSCALE_TEST_ORG_MUTATION=1` — gates real-API tests that change org-wide state (default cloud,
+  scheduler config, organization_user); requires `ANYSCALE_TEST_ORG_NAME`. Each snapshots the value
+  and restores it in cleanup (`skipUnlessOrgMutation`).
 
 Same reasoning as `ANYSCALE_TEST_CLOUD_NAME`: the literal address is never committed. Use a real
 disposable plus-alias in an inbox you control (`you+tfprovidertest@yourdomain.com`). Never a
