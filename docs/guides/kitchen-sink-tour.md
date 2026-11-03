@@ -9,10 +9,11 @@ description: |-
 
 [`examples/kitchen-sink`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/kitchen-sink)
 wires a representative subset of this provider's resources and data sources into one configuration.
-It does not cover the `anyscale_service` resource (see [Services](./services.md)),
-`anyscale_scheduler_config`, `anyscale_system_cluster`,
-`anyscale_cloud_access`, `anyscale_cloud_iam_mapping`, `anyscale_organization_user_role`, or
-`anyscale_organization_default_cloud`, and `anyscale_organization_user` appears only commented out (see below).
+It covers a running `anyscale_service`, `anyscale_system_cluster` and `anyscale_cloud_iam_mapping`;
+org-wide pieces (`anyscale_organization_user`, user groups, role bindings) are off by default behind
+variables. It leaves out `anyscale_scheduler_config`, `anyscale_organization_default_cloud` and the
+legacy access model (`anyscale_cloud_access`, `anyscale_organization_user_role`) because they are
+org-wide or deprecated; see the example's README for each reason.
 It's not a getting-started example - if you haven't yet, read [Create a VM
 cloud](./create-a-vm-cloud.md) or [Create a Kubernetes cloud](./create-a-kubernetes-cloud.md)
 first. This guide is a tour of what kitchen-sink demonstrates and why, for when you're ready to see
@@ -119,19 +120,15 @@ away from a 404.
   `anyscale_container_image_registry` (registered from a public registry), the two ways to get an
   image into Anyscale. See the [Container Images guide](./container-images.md).
 - **Projects and org resources** - one project per cloud, plus
-  `anyscale_organization_user` shown (commented out, not applied - it manages an *existing*
-  org member, adopted directly or by import, never created via invitation) alongside the
-  invite/adopt lifecycle it needs;
-  see [`organization_user_workflow`](https://github.com/anyscale/terraform-provider-anyscale/blob/main/examples/resources/organization_user_workflow/main.tf)
-  for that full flow.
-- **Most data sources**, in one file (all except `anyscale_cloud_iam_mapping`,
-  `anyscale_scheduler_config`, and `anyscale_system_cluster`) - including the two zero-argument
-  connection-level singletons, `anyscale_user` and `anyscale_organization`, which have no
-  dependency on anything else in the config and are always safe to read.
-- **Two pieces of this config are opt-in, off by default**: the `anyscale_organization_invitation`
-  resource (set `invite_email` to actually send one) and the singular `anyscale_service` data source
-  lookup (set `existing_service_name` to a real service). A fresh `terraform apply` with neither set
-  creates zero instances of either - safe by default, not a placeholder you need to delete.
+  `anyscale_organization_user`, user groups and role bindings, each off by default behind a variable
+  (`org_user_email`, `enable_user_groups`, `enable_role_binding`); `anyscale_organization_user` manages an
+  *existing* member, so see
+  [`organization_user_workflow`](https://github.com/anyscale/terraform-provider-anyscale/blob/main/examples/resources/organization_user_workflow/main.tf)
+  for the invite -> adopt flow.
+- **Most data sources**, in one file, including the two zero-argument connection-level singletons,
+  `anyscale_user` and `anyscale_organization`, which depend on nothing else in the config.
+- **The `anyscale_organization_invitation` resource is opt-in**: set `invite_email` to actually send
+  one. A fresh `terraform apply` with it unset creates zero instances.
 
 ## Known limitations worth knowing before you extend this
 
