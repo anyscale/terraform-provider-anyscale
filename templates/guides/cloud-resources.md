@@ -255,8 +255,11 @@ Destroy order matters for the AWS IAM your cloud uses. Anyscale stops a cloud's 
 a service, with the cloud's control-plane role, so that role's policies must still exist while they stop.
 Referencing the role's ARN in the cloud only orders the role itself: Terraform may remove the role's
 policy attachments in parallel, Anyscale's `ec2:TerminateInstances` call is then denied, and the instances keep
-running and block deleting the VPC. Make `anyscale_cloud` and `anyscale_cloud_resource` `depends_on` the IAM
-module or the policy attachments, so Terraform destroys the IAM only after the cloud and everything that depends on it:
+running and block deleting the VPC. Make the resource that registers the IAM role, `anyscale_cloud` or `anyscale_cloud_resource`,
+`depends_on` the IAM module or the policy attachments, so Terraform destroys the IAM only after the
+cloud and everything that depends on it. If the IAM module itself takes the empty cloud's ID (the
+split pattern), that cloud cannot depend on the module without a cycle, so put the `depends_on` on
+`anyscale_cloud_resource` only.
 
 ```terraform
 resource "anyscale_cloud" "this" {
