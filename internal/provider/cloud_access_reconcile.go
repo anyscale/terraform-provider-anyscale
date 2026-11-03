@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -239,10 +240,19 @@ func (c cloudAccessCallerIdentity) matches(m cloudAccessRemoteMember) bool {
 // know to skip them, and the failure mode of guessing is locking the operator
 // out of the cloud they are managing. A guard that cannot answer must not fail
 // open.
+//
+// The same holds for a 200 with no user ID. The userinfo model requires both id
+// and email, so an empty ID means the body was not a userinfo response at all
+// ({"result": null}, {}, a proxy page), and the identity it yields cannot be
+// trusted to match anyone. An empty email alone is not rejected: matches()
+// works by user ID first, and a missing email is not something to bet on.
 func fetchCloudAccessCallerIdentity(ctx context.Context, client *Client) (cloudAccessCallerIdentity, error) {
 	userResp, err := DoRequestAndParse[userInfoResponse](ctx, client, "GET", "/api/v2/userinfo", nil, http.StatusOK)
 	if err != nil {
 		return cloudAccessCallerIdentity{}, err
+	}
+	if userResp.Result.ID == "" {
+		return cloudAccessCallerIdentity{}, errors.New("the response carried no user ID")
 	}
 	return cloudAccessCallerIdentity{UserID: userResp.Result.ID, Email: userResp.Result.Email}, nil
 }
