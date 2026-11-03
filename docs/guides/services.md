@@ -86,6 +86,91 @@ gradually, so this can take a minute or more.
 - **Import.** A held canary is recovered into `canary_percent`. A configuration that omits it
   then plans a change to null, which completes that rollout.
 
+### Example: staged rollout from CI
+
+Drive each stage with one apply by making `canary_percent` a variable. Unset, it is `null`, which
+finishes the rollout. These are fragments of a configuration that already defines the service.
+
+```hcl
+variable "canary_percent" {
+  type    = number
+  default = null
+}
+
+resource "anyscale_service" "app" {
+  # ... name, compute_config_id, build_id, ray_serve_config ...
+  canary_percent = var.canary_percent
+}
+
+output "service_url" {
+  value = anyscale_service.app.base_url
+}
+```
+
+The steps, each one `terraform apply`:
+
+1. Change the new version's inputs (for example `build_id`) and apply with `canary_percent=0`.
+   The canary starts, the apply waits until it is healthy, and it serves no traffic. Only its
+   health can be checked at this stage.
+2. Apply with `canary_percent=10`, changing nothing else. The same version takes 10% of traffic,
+   and the apply returns once it does. Watch error rates and latency on your monitoring.
+3. Raise the percentage in further applies (for example 50), again changing only the percent.
+   Changing the inputs or `version_name` while a canary is held rolls it back or is rejected.
+4. Apply with no value to finish.
+
+To abort, revert the inputs and apply with no value: the held canary is rolled back and nothing
+is redeployed. A canary that fails during an apply is rolled back by Terraform and the apply
+fails with "Service Rollout Rolled Back", which fails the job. A canary that fails afterwards
+is not acted on: check `canary_version.current_state` for `UNHEALTHY` in your monitoring step
+and abort as above.
+
+A GitHub Actions workflow that runs one stage per dispatch. It is a complete workflow if the
+repository holds the Terraform configuration at its root with a remote backend, because a runner
+has no state of its own. Add the `ANYSCALE_CLI_TOKEN` secret and your backend credentials.
+
+```yaml
+name: service-rollout
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Canary stage"
+        type: choice
+        options: ["0", "10", "50", "finish"]
+        default: "0"
+
+concurrency: service-rollout
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: production # add required reviewers for a manual gate
+    env:
+      ANYSCALE_CLI_TOKEN: ${{ secrets.ANYSCALE_CLI_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+      - run: terraform init -input=false
+      - name: Apply stage
+        env:
+          STAGE: ${{ inputs.stage }}
+        run: |
+          if [ "$STAGE" = "finish" ]; then
+            terraform apply -input=false -auto-approve
+          else
+            terraform apply -input=false -auto-approve \
+              -var "canary_percent=$STAGE"
+          fi
+      - name: Smoke test
+        if: inputs.stage != 'finish'
+        run: ./scripts/smoke-test.sh "$(terraform output -raw service_url)"
+```
+
+`./scripts/smoke-test.sh` is a placeholder for your own checks. Run the workflow once per stage,
+looking at your monitoring between runs. `concurrency` stops two stages applying at once.
+
 ## Version names
 
 `version_name` labels a version. Unset, Anyscale generates one and records it. Set, it is also a
