@@ -152,14 +152,6 @@ implicit extra one.
 
 ## Known limitations this example runs into
 
-- **Destroy can leave a service's load balancer behind.** Until the provider's cloud-delete fix ships,
-  `terraform destroy` leaves the service's ALB, target group and ACM certificate (named after the cloud
-  ID) in your AWS account, and they block deleting the VPC. After destroy, check ELB and ACM for each
-  cloud's ID, delete the ALB, then its target group, then the certificate (each is in use until the one
-  before is gone), and re-run destroy. Instances are not affected: the IAM module is destroyed only
-  after the clouds, so Anyscale can still terminate them. The System Cluster is the exception: it is
-  not stopped by destroying its resource or the cloud, so stop it first (see
-  `enable_system_cluster`).
 - **A first apply may need one retry for Cloud A's project and default compute config.**
   `anyscale_project.a` and `anyscale_compute_config.cc_a_default` are both scoped to Cloud A, and
   if Terraform schedules their creation only moments after Cloud A itself, they can fail with a
