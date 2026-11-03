@@ -32,7 +32,9 @@ bring-your-own-cluster example would help.
   pointing its `kubernetes_config` at the GKE node service account email and available zones
 - With `install_operator = true`, the Anyscale Operator, installed by Helm into
   `anyscale_k8s_namespace` with the chart's bundled ingress-nginx controller, so the cloud can run
-  workloads (see `operator.tf`)
+  workloads (see `operator.tf`). The chart version is pinned in `operator.tf`; to move to a newer
+  one, run `helm search repo anyscale/anyscale-operator --versions`, set `version`, and check
+  `helm show values` for changed keys
 
 ## Prerequisites
 

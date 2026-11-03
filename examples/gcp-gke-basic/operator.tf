@@ -20,6 +20,7 @@ resource "helm_release" "anyscale_operator" {
   name             = "anyscale-operator"
   repository       = "https://anyscale.github.io/helm-charts"
   chart            = "anyscale-operator"
+  version          = "1.12.0"
   namespace        = var.anyscale_k8s_namespace
   create_namespace = true
 
