@@ -155,7 +155,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 		// resource_cloud_upgrade.go's v3->v4 UpgradeState and CHANGELOG.md
 		// for the full rationale and migration note.
 		Version:             4,
-		MarkdownDescription: "Manages an Anyscale Cloud. Supports both all-in-one pattern (embedded configs) and empty cloud pattern (resources added separately via anyscale_cloud_resource). If a cloud with the same `name` already exists at apply time (for example, recovering from an interrupted create), this resource adopts it into Terraform state instead of creating a duplicate. If more than one cloud shares that name, create fails instead of guessing which one to adopt - the error identifies the candidates and explains how to resolve the ambiguity (rename or delete the duplicates, or import the specific cloud you intend to manage).",
+		MarkdownDescription: "Manages an Anyscale Cloud. Supports both all-in-one pattern (embedded configs) and empty cloud pattern (resources added separately via anyscale_cloud_resource). If a cloud with the same `name` already exists at apply time (for example, recovering from an interrupted create), this resource adopts it into Terraform state instead of creating a duplicate. If more than one cloud shares that name, create fails and lists the candidates: rename or delete the duplicates, or import the one you want to manage.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -212,7 +212,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
-				MarkdownDescription: "Whether to register this cloud as private - the Terraform equivalent of the Anyscale CLI's `anyscale cloud register --private-network` flag, which places Ray clusters in private subnets. This is a self-asserted flag, not a verified connectivity check: the value you set here is sent to the API as-is, and neither the provider nor the Anyscale backend validates, configures, or provisions any VPN or PrivateLink connectivity because of it. Setting `true` without real private connectivity already in place will not fail at plan or apply time - it only means private clusters may end up unreachable, which is your own responsibility to arrange separately, not something this attribute gates. Changing this value after creation requires replacement: the backend itself has no route to update an existing cloud's `is_private_cloud`, so there's no in-place alternative to fall back on.",
+				MarkdownDescription: "Whether this cloud is private - the equivalent of `anyscale cloud register --private-network`, which places Ray clusters in private subnets. Self-asserted: the value is sent as-is and nothing validates or provisions private connectivity, so `true` without it already in place plans and applies cleanly but clusters may be unreachable. Changing it replaces the cloud.",
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.RequiresReplace(),
 				},
@@ -260,7 +260,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 
 			"cloud_resource_id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The unique cloud resource ID assigned by Anyscale when this cloud's default resource was registered. This is what you pass to the Anyscale operator during installation for a K8S cloud (as `global.cloudDeploymentId` in the operator's Helm values, despite the key's name - the value is this resource id). Populated on both this all-in-one pattern and the multi-resource `anyscale_cloud_resource` pattern. Stable for the life of the cloud - it does not move out of band, so the provider pins it to the prior state between applies.",
+				MarkdownDescription: "The ID of this cloud's default resource, assigned by Anyscale at registration. For a K8S cloud, pass it to the Anyscale operator at install as `global.cloudDeploymentId` in its Helm values (the key's name predates this ID). Populated for both the all-in-one and multi-resource patterns, and stable for the cloud's life.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -326,7 +326,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					},
 					"external_id": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "External ID Anyscale passes when assuming the control-plane role; it must match the role's trust policy. Use one that starts with your organization ID (e.g. `org_1234567890abcdef-1234567890abcdef`): only such a value is recorded on the cloud itself, where services' load balancers need it, so with any other value services on the cloud cannot run. See the [Anyscale AWS IAM documentation](https://docs.anyscale.com/iam/aws) for the full trust policy.",
+						MarkdownDescription: "External ID Anyscale passes when assuming the control-plane role; it must match the role's trust policy. Start it with your organization ID (e.g. `org_1234567890abcdef-1234567890abcdef`): with any other value, services on the cloud cannot run (clusters still do), and creating the cloud warns at plan. Changing it replaces the cloud. See the [Anyscale AWS IAM documentation](https://docs.anyscale.com/iam/aws) for the full trust policy.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
