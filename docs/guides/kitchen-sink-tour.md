@@ -9,8 +9,8 @@ description: |-
 
 [`examples/kitchen-sink`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/kitchen-sink)
 wires a representative subset of this provider's resources and data sources into one configuration.
-It covers a running `anyscale_service`, `anyscale_system_cluster` and `anyscale_cloud_iam_mapping`;
-org-wide pieces (`anyscale_organization_user`, user groups, role bindings) are off by default behind
+It covers a running `anyscale_service` and `anyscale_cloud_iam_mapping`;
+`anyscale_system_cluster` and org-wide pieces (`anyscale_organization_user`, user groups, role bindings) are off by default behind
 variables. It leaves out `anyscale_scheduler_config`, `anyscale_organization_default_cloud` and the
 legacy access model (`anyscale_cloud_access`, `anyscale_organization_user_role`) because they are
 org-wide or deprecated; see the example's README for each reason.
