@@ -1,4 +1,4 @@
 ```
 release-note:fixed
-resource/anyscale_service: Creating a service whose name is held by an archived service in the same project, when `project_id` is set, now fails before anything is applied, with an error saying to use a different name, instead of a less clear API error from the apply.
+resource/anyscale_service: Creating a service whose name is held by an archived service in the same project (with `project_id` set) now fails before anything is applied, with an error asking for a different name, instead of an unclear API error during apply.
 ```
