@@ -1,13 +1,9 @@
 package acctest
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -31,60 +27,17 @@ import (
 // provider at a mock backend so this needs no real credentials or infra.
 func runTerraformPlanJSON(t *testing.T, binDir, apiURL, resourceHCL string) []tfApplyJSONLine {
 	t.Helper()
-
-	workDir := t.TempDir()
-
-	tfConfig := fmt.Sprintf(`
-provider_installation {
-  dev_overrides {
-    "terraform-providers/anyscale" = %[1]q
-  }
-  direct {}
-}
-`, binDir)
-	cliConfigPath := filepath.Join(workDir, "dev.tfrc")
-	if err := os.WriteFile(cliConfigPath, []byte(tfConfig), 0o600); err != nil {
-		t.Fatalf("failed to write scratch CLI config: %v", err)
-	}
-
-	mainTF := fmt.Sprintf(`
-terraform {
-  required_providers {
-    anyscale = {
-      source = "terraform-providers/anyscale"
-    }
-  }
-}
-
+	workDir, cliConfigPath := writeCLIWorkspace(t, binDir, fmt.Sprintf(`
 provider "anyscale" {
   api_url = %[1]q
   token   = "disclosure-check-fake-token"
 }
 
 %[2]s
-`, apiURL, resourceHCL)
-	if err := os.WriteFile(filepath.Join(workDir, "main.tf"), []byte(mainTF), 0o600); err != nil {
-		t.Fatalf("failed to write scratch main.tf: %v", err)
-	}
+`, apiURL, resourceHCL))
 
-	cmd := exec.Command("terraform", "plan", "-json")
-	cmd.Dir = workDir
-	cmd.Env = append(os.Environ(), "TF_CLI_CONFIG_FILE="+cliConfigPath)
-
-	out, _ := cmd.CombinedOutput() // plan may exit non-zero on a warning in some versions; parse regardless
-
-	var lines []tfApplyJSONLine
-	for _, rawLine := range strings.Split(string(out), "\n") {
-		rawLine = strings.TrimSpace(rawLine)
-		if rawLine == "" {
-			continue
-		}
-		var line tfApplyJSONLine
-		if err := json.Unmarshal([]byte(rawLine), &line); err != nil {
-			continue // dev_overrides banner and similar lines aren't JSON; skip rather than fail
-		}
-		lines = append(lines, line)
-	}
+	out, _ := runTerraformCLI(workDir, cliConfigPath, "plan", "-json") // plan may exit non-zero on a warning in some versions; parse regardless
+	lines := parseTFJSONLines(out)
 	if lines == nil {
 		t.Fatalf("no parseable JSON lines from `terraform plan -json`; raw output:\n%s", out)
 	}
