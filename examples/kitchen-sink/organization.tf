@@ -1,6 +1,5 @@
-# Organization-wide resources. Everything here is off by default (count = 0) and switched on by a
-# variable, because each one either sends real email, needs a real member, or needs an
-# organization feature that is not on everywhere. See README.md for what each gate needs.
+# Organization-wide resources, all off by default (count = 0) and enabled by a variable: each
+# sends real email, needs a real member, or needs an organization feature. See README.md.
 
 # --- anyscale_organization_invitation (gated by invite_email) -----------------------------------
 # Sends a real invitation email. Every invitation grants default collaborator access on

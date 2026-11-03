@@ -156,8 +156,8 @@ module "anyscale_iam_roles_b" {
   tags = local.tags
 }
 
-# Cloud B's roles need the shared bucket too: its nodes download the service's working_dir
-# package from it. roles_a owns the one S3 policy; attach it to roles_b's node and access roles.
+# Cloud B's nodes download the service's working_dir package from the shared bucket. roles_a owns
+# the one S3 policy; attach it to roles_b's node and access roles.
 resource "aws_iam_role_policy_attachment" "roles_b_node_s3" {
   role       = module.anyscale_iam_roles_b.iam_cluster_node_instance_profile_name
   policy_arn = module.anyscale_iam_roles_a.anyscale_iam_s3_policy_arn

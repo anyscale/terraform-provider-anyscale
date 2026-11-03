@@ -1,8 +1,7 @@
 # --- anyscale_runtime_env_package + anyscale_service (Cloud B) -----------------------------------
-# A Ray Serve hello world: ./app is packaged and uploaded to Cloud B's storage, and the service runs
-# it as working_dir on the image built in container_images.tf. Apply waits until the service is
-# RUNNING; destroy terminates it. Editing a file under ./app uploads a new package and rolls out
-# the service.
+# A Ray Serve hello world: ./app is uploaded to Cloud B's storage and runs as the service's
+# working_dir on the image from container_images.tf. Apply waits for RUNNING; destroy terminates the
+# service. Editing ./app uploads a new package and rolls out the service.
 
 resource "anyscale_runtime_env_package" "app" {
   source_dir = "${path.module}/app"
@@ -31,9 +30,8 @@ resource "anyscale_service" "hello" {
     ]
   }
 
-  # Cloud B's nodes read the package from the shared bucket through this policy. The IAM
-  # mapping must be in place before the service's cluster launches, or the rule it declares
-  # never applies to this service.
+  # The nodes read the package from the shared bucket through the S3 policy. The IAM mapping must
+  # exist before the cluster launches, or its rule never applies to this service.
   depends_on = [
     aws_iam_role_policy_attachment.roles_b_node_s3,
     anyscale_cloud_iam_mapping.b,
