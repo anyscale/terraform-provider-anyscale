@@ -397,7 +397,7 @@ test-aws-vm-basic: build ## Test AWS VM basic (all-in-one pattern)
 test-aws-vm-full: build ## Test AWS VM full (split pattern + EFS + MemoryDB)
 	@echo "==> Testing aws-vm-full scenario..."
 	@SUFFIX=$(SCENARIO_SUFFIX); \
-	  export TF_VAR_cloud_name=tfacc-aws-vm-full-$$SUFFIX TF_VAR_common_prefix=aws-vm-full-$$SUFFIX- TF_VAR_enable_efs=true TF_VAR_enable_memorydb=true TF_VAR_vpc_cidr_block=172.27.0.0/16 TF_VAR_vpc_public_subnets='["172.27.21.0/24","172.27.22.0/24","172.27.23.0/24"]'; \
+	  export TF_VAR_cloud_name=tfacc-aws-vm-full-$$SUFFIX TF_VAR_common_prefix=avf-$$SUFFIX- TF_VAR_enable_efs=true TF_VAR_enable_memorydb=true TF_VAR_vpc_cidr_block=172.27.0.0/16 TF_VAR_vpc_public_subnets='["172.27.21.0/24","172.27.22.0/24","172.27.23.0/24"]'; \
 	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/aws-vm $(BUILD_DIR)/aws-vm-full-$$SUFFIX.tfstate
 
 .PHONY: apply-aws-vm-basic
@@ -482,7 +482,7 @@ test-gcp-vm-basic: build ## Test GCP VM basic (all-in-one pattern)
 test-gcp-vm-full: build ## Test GCP VM full (split pattern + Filestore + Memorystore)
 	@echo "==> Testing gcp-vm-full scenario..."
 	@SUFFIX=$(SCENARIO_SUFFIX); \
-	  export TF_VAR_cloud_name=tfacc-gcp-vm-full-$$SUFFIX TF_VAR_common_prefix=gcp-vm-full-$$SUFFIX- TF_VAR_enable_filestore=true TF_VAR_enable_memorystore=true TF_VAR_vpc_public_subnet_cidr=10.103.0.0/16; \
+	  export TF_VAR_cloud_name=tfacc-gcp-vm-full-$$SUFFIX TF_VAR_common_prefix=gvf-$$SUFFIX- TF_VAR_enable_filestore=true TF_VAR_enable_memorystore=true TF_VAR_vpc_public_subnet_cidr=10.103.0.0/16; \
 	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/gcp-vm $(BUILD_DIR)/gcp-vm-full-$$SUFFIX.tfstate
 
 .PHONY: apply-gcp-vm-basic
