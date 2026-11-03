@@ -7,13 +7,18 @@
 # The run fails, with the failing step named, unless all of these hold:
 #   1. apply succeeds;
 #   2. a plan right after apply is empty (no perpetual diff);
-#   3. after every anyscale_cloud and anyscale_cloud_resource is removed from state and imported
-#      back, the plan is still empty (import round-trip, including backend-derived fields);
+#   3. after every anyscale_cloud and anyscale_cloud_resource is removed from a copy of the state
+#      and imported back, the plan is still empty (import round-trip, including backend-derived
+#      fields). The real state is never edited, so destroy and cleanup always see every cloud;
 #   4. destroy succeeds;
-#   5. every cloud the scenario created answers GET /api/v2/clouds/<id> with 404.
+#   5. every cloud the scenario created answers GET /api/v2/clouds/<id> with 404 within
+#      SCENARIO_GONE_TIMEOUT seconds (default 120), since cloud delete does not wait.
 #
 # If any step fails, an EXIT trap still destroys whatever the state holds. A failed cleanup
 # destroy is reported loudly; run `make sweep-dry-run` to find leaks.
+#
+# A scenario that creates no cloud (it targets an existing one) sets SCENARIO_NO_CLOUD=1: steps
+# 3 and 5 are then skipped, and the run fails if the state does hold a cloud.
 #
 # Inputs come from the environment only: TF_VAR_* for the example's variables (no tfvars
 # file), ANYSCALE_CLI_TOKEN or ~/.anyscale/credentials.json for the Anyscale API, and the
@@ -70,16 +75,16 @@ cleanup() {
       status=1
     fi
   fi
-  rm -f "$tf_config"
+  rm -f "$tf_config" "$state.import" "$state.import".*backup
   exit "$status"
 }
 trap cleanup EXIT
 
-# expect_empty_plan fails unless `terraform plan` reports no changes. -detailed-exitcode
-# returns 0 for an empty plan, 2 for a non-empty one, 1 for an error.
+# expect_empty_plan <label> <state-file> fails unless `terraform plan` reports no changes.
+# -detailed-exitcode returns 0 for an empty plan, 2 for a non-empty one, 1 for an error.
 expect_empty_plan() {
   local rc=0
-  terraform plan -detailed-exitcode -input=false -lock=false -state="$state" || rc=$?
+  terraform plan -detailed-exitcode -input=false -lock=false -state="$2" || rc=$?
   case "$rc" in
     0) ;;
     2) fail "$1: plan is not empty (see the plan above)" ;;
@@ -129,7 +134,7 @@ step "apply"
 terraform apply -auto-approve -input=false -state="$state" || fail "apply failed"
 
 step "plan after apply must be empty"
-expect_empty_plan "plan after apply"
+expect_empty_plan "plan after apply" "$state"
 
 # Every managed anyscale_cloud and anyscale_cloud_resource, at any module depth, as
 # "<type>\t<address>\t<id>", clouds first so each cloud resource imports after its cloud.
@@ -138,32 +143,52 @@ anyscale_resources=$(terraform show -json "$state" | jq -r '
    | select(.mode == "managed" and (.type == "anyscale_cloud" or .type == "anyscale_cloud_resource"))]
   | sort_by(.type)
   | .[] | "\(.type)\t\(.address)\t\(.values.id)"')
+if [ "${SCENARIO_NO_CLOUD:-0}" = "1" ]; then
+  [ -z "$anyscale_resources" ] || fail "SCENARIO_NO_CLOUD=1, but the state holds a cloud: $anyscale_resources"
+  step "destroy (no cloud in this scenario: import round-trip and cloud check skipped)"
+  terraform destroy -auto-approve -input=false -state="$state" || fail "destroy failed"
+  destroyed=1
+  step "PASS"
+  exit 0
+fi
 [ -n "$anyscale_resources" ] || fail "state holds no anyscale_cloud or anyscale_cloud_resource"
 
 cloud_ids=$(printf '%s\n' "$anyscale_resources" | awk -F'\t' '$1 == "anyscale_cloud" { print $3 }')
 
-step "import round-trip: remove from state"
+# The round-trip edits a copy, so a failed import cannot drop a cloud from the state that
+# destroy and cleanup use.
+import_state="$state.import" # removed again by the EXIT trap
+cp "$state" "$import_state"
+
+step "import round-trip: remove from a copy of the state"
 while IFS=$'\t' read -r _ address _; do
-  terraform state rm -state="$state" "$address" </dev/null || fail "state rm $address failed"
+  terraform state rm -state="$import_state" "$address" </dev/null || fail "state rm $address failed"
 done <<<"$anyscale_resources"
 
 step "import round-trip: import"
 while IFS=$'\t' read -r _ address id; do
-  terraform import -input=false -state="$state" "$address" "$id" </dev/null || fail "import $address $id failed"
+  terraform import -input=false -state="$import_state" "$address" "$id" </dev/null || fail "import $address $id failed"
 done <<<"$anyscale_resources"
 
 step "plan after import must be empty"
-expect_empty_plan "plan after import"
+expect_empty_plan "plan after import" "$import_state"
 
 step "destroy"
 terraform destroy -auto-approve -input=false -state="$state" || fail "destroy failed"
 destroyed=1
 
 step "clouds must be gone"
+gone_timeout=${SCENARIO_GONE_TIMEOUT:-120}
 for id in $cloud_ids; do
-  code=$(cloud_http_status "$id")
-  [ "$code" = "404" ] || fail "cloud $id still answers GET with HTTP $code after destroy, want 404"
-  echo "cloud $id: 404"
+  waited=0
+  while code=$(cloud_http_status "$id") && [ "$code" != "404" ]; do
+    [ "$waited" -lt "$gone_timeout" ] ||
+      fail "cloud $id still answers GET with HTTP $code ${gone_timeout}s after destroy, want 404"
+    sleep 10
+    waited=$((waited + 10))
+  done
+  [ "$code" = "404" ] || fail "cloud $id: GET failed"
+  echo "cloud $id: 404 after ${waited}s"
 done
 
 step "PASS"
