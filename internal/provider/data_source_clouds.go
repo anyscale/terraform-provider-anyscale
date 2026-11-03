@@ -63,6 +63,43 @@ type CloudSummaryModel struct {
 	ExternalID        types.String `tfsdk:"external_id"`
 }
 
+// cloudSummaryFromResult maps one cloud from the API to the attributes that
+// anyscale_cloud and anyscale_clouds share, so both map the same API values the
+// same way. Their inputs differ: anyscale_cloud passes the single-cloud GET and
+// anyscale_clouds the list, and the two endpoints compute is_default
+// differently, so the data sources can still disagree on is_default.
+func cloudSummaryFromResult(ctx context.Context, cloud CloudResult) (CloudSummaryModel, error) {
+	azList, azDiags := types.ListValueFrom(ctx, types.StringType, cloud.AvailabilityZones)
+	if azDiags.HasError() {
+		return CloudSummaryModel{}, fmt.Errorf("failed to convert availability_zones for cloud %s: %v", cloud.ID, azDiags)
+	}
+
+	return CloudSummaryModel{
+		ID:            types.StringValue(cloud.ID),
+		Name:          types.StringValue(cloud.Name),
+		CloudProvider: types.StringValue(cloud.Provider),
+		ComputeStack:  types.StringValue(cloud.ComputeStack),
+		Region:        types.StringValue(cloud.Region),
+		// status/state are non-Optional enum fields on the backend Cloud model
+		// (backend/server/api/base/models/clouds.py), so they are always
+		// populated today; an empty value is still mapped to null rather than "".
+		Status:                 stringOrNull(cloud.Status),
+		State:                  stringOrNull(cloud.State),
+		CreatedAt:              types.StringValue(cloud.CreatedAt),
+		CreatorID:              types.StringValue(cloud.CreatorID),
+		IsDefault:              types.BoolValue(cloud.IsDefault),
+		IsK8s:                  types.BoolValue(cloud.IsK8s),
+		IsPrivateCloud:         types.BoolValue(cloud.IsPrivateCloud),
+		AutoAddUser:            types.BoolValue(cloud.AutoAddUser),
+		LineageTrackingEnabled: types.BoolValue(cloud.LineageTrackingEnabled),
+		AggregatedLogsEnabled:  types.BoolValue(cloud.IsAggregatedLogsEnabled),
+		AvailabilityZones:      azList,
+		Version:                types.StringValue(cloud.Version),
+		// external_id is Optional[str] server-side: unset is null, never "".
+		ExternalID: types.StringPointerValue(cloud.ExternalID),
+	}, nil
+}
+
 // Metadata returns the data source type name.
 func (d *CloudsDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_clouds"
@@ -213,36 +250,9 @@ func (d *CloudsDataSource) fetchClouds(ctx context.Context, params url.Values, c
 			continue
 		}
 
-		azList, azDiags := types.ListValueFrom(ctx, types.StringType, cloud.AvailabilityZones)
-		if azDiags.HasError() {
-			return nil, fmt.Errorf("failed to convert availability_zones for cloud %s: %v", cloud.ID, azDiags)
-		}
-
-		cloudModel := CloudSummaryModel{
-			ID:            types.StringValue(cloud.ID),
-			Name:          types.StringValue(cloud.Name),
-			CloudProvider: types.StringValue(cloud.Provider),
-			ComputeStack:  types.StringValue(cloud.ComputeStack),
-			Region:        types.StringValue(cloud.Region),
-			// DS-CLOUD-3: align with the singular's null-guarding. status/state
-			// are non-Optional enum fields on the backend Cloud model today (always
-			// populated, per backend/server/api/base/models/clouds.py), so this
-			// currently never observes a real empty value - kept for defensive
-			// parity with the singular DS's identical guard, and so both DS behave
-			// the same way if that ever changes.
-			Status:                 stringOrNull(cloud.Status),
-			State:                  stringOrNull(cloud.State),
-			CreatedAt:              types.StringValue(cloud.CreatedAt),
-			CreatorID:              types.StringValue(cloud.CreatorID),
-			IsDefault:              types.BoolValue(cloud.IsDefault),
-			IsK8s:                  types.BoolValue(cloud.IsK8s),
-			IsPrivateCloud:         types.BoolValue(cloud.IsPrivateCloud),
-			AutoAddUser:            types.BoolValue(cloud.AutoAddUser),
-			LineageTrackingEnabled: types.BoolValue(cloud.LineageTrackingEnabled),
-			AggregatedLogsEnabled:  types.BoolValue(cloud.IsAggregatedLogsEnabled),
-			AvailabilityZones:      azList,
-			Version:                types.StringValue(cloud.Version),
-			ExternalID:             types.StringPointerValue(cloud.ExternalID),
+		cloudModel, err := cloudSummaryFromResult(ctx, cloud)
+		if err != nil {
+			return nil, err
 		}
 		allClouds = append(allClouds, cloudModel)
 	}
