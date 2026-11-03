@@ -1,8 +1,12 @@
 package acctest
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"regexp"
+	"sort"
 	"testing"
 	"time"
 
@@ -18,6 +22,153 @@ import (
 
 func intPtr(v int) *int { return &v }
 
+// outcomeVersions models how Anyscale matches an apply to a version (services_dao.py, the
+// apply path's _version_matches). A version is identified by md5_static_hash over its
+// base_ha_jobs_config (models_v2.py to_json_str). Of the fields that hash covers, the mock hashes
+// the ones the provider's apply body sends: build_id, compute_config_id, the service config,
+// ray_serve_config without target_capacity, and connection_ids when sent. The hash also covers
+// entrypoint, runtime_env_json, cloud_id, ray_gcs_external_storage_config and max_retries; the
+// apply body sends none of them, so they are constant per service and leaving them out is
+// equivalent. The version name, canary_percent, rollout_strategy and max_surge_percent are not
+// part of it.
+//
+// With a rollout in flight, an apply matching the rollout's goal version updates that rollout
+// (G1-1) and any other apply gets the backend's 409. With no rollout, re-sending the primary's
+// own config starts a new version (G1-7); the mock counts those so a test can bound them.
+//
+// Two corners are stricter than the backend. The backend decides whether connection_ids count
+// from the new apply alone, so a canary held with ids matches a later apply without them; the
+// mock 409s it. The provider cannot send that sequence: a connection_ids change is a deploy-field
+// change, which rolls the canary back first (decision 7). And a canary held out of band rejects
+// every apply here, where the backend would accept one with the same config.
+type outcomeVersions struct {
+	primaryHash string
+	// canaryHash is the in-flight rollout's goal version, "" for none. A canary that appears
+	// through setScript rather than an apply (held out of band) gets a hash no apply matches,
+	// since Terraform cannot know that version's config.
+	canaryHash, canaryID, canaryName string
+	// heldTarget is the last manual share an accepted apply set, nil when none is held.
+	heldTarget *int
+	// primaryResends counts applies that re-sent the primary's config with no rollout in flight.
+	primaryResends, wantPrimaryResends int
+}
+
+const outOfBandVersionHash = "out-of-band"
+
+// newCanaryMock is newOutcomeMock with version matching on. wantPrimaryResends is how many
+// applies may re-send the primary's own config (each starts a new version); the test fails at
+// cleanup if the count differs.
+func newCanaryMock(t *testing.T, serviceID, name string, wantPrimaryResends int, onApply func(n int, body map[string]any) outcomeApplyResult) (*outcomeMock, *httptest.Server) {
+	t.Helper()
+	m, server := newOutcomeMock(t, serviceID, name, onApply)
+	m.versions = &outcomeVersions{wantPrimaryResends: wantPrimaryResends}
+	t.Cleanup(func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if got := m.versions.primaryResends; got != wantPrimaryResends {
+			t.Errorf("%d applies re-sent the primary's config with no rollout in flight (each starts a new version), want %d", got, wantPrimaryResends)
+		}
+	})
+	return m, server
+}
+
+// backendVersionHash stands in for md5_static_hash. It is computed from the request body
+// independently of the provider's own apply fingerprint, so it can disagree with it.
+func backendVersionHash(body map[string]any) string {
+	rsc := map[string]any{}
+	if in, ok := body["ray_serve_config"].(map[string]any); ok {
+		for k, v := range in {
+			if k != "target_capacity" {
+				rsc[k] = v
+			}
+		}
+	}
+	fields := []any{body["build_id"], body["compute_config_id"], body["config"], rsc}
+	if conns, ok := body["connection_ids"].([]any); ok {
+		ids := make([]string, 0, len(conns))
+		for _, c := range conns {
+			ids = append(ids, fmt.Sprint(c))
+		}
+		sort.Strings(ids)
+		fields = append(fields, ids)
+	}
+	raw, _ := json.Marshal(fields) // map keys marshal sorted, like sort_keys=True
+	return string(raw)
+}
+
+// matchVersion returns the backend's rejection of an apply body, or 0 when it is accepted.
+func (m *outcomeMock) matchVersion(body map[string]any) (int, string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v := m.versions
+	if v == nil {
+		return 0, ""
+	}
+	h := backendVersionHash(body)
+	switch {
+	case v.canaryHash != "" && h != v.canaryHash:
+		id := v.canaryID
+		if len(id) > 8 {
+			id = id[len(id)-8:]
+		}
+		return http.StatusConflict, fmt.Sprintf("There is already a rollout to Service Version %s (%s) that is "+
+			"currently in progress. If you want to start a new rollout, please rollback previous rollout "+
+			"first using `anyscale service rollback` command.", v.canaryName, id)
+	case v.canaryHash == "" && v.primaryHash != "" && h == v.primaryHash:
+		v.primaryResends++
+	}
+	return 0, ""
+}
+
+// recordAcceptedVersion records what an accepted apply started, and fails the test when the
+// scripted response contradicts the backend: a manual share is reported exactly when the apply
+// sent canary_percent (auto_rollout_enabled), and a changed share has not settled in the 202.
+func (m *outcomeMock) recordAcceptedVersion(body map[string]any, resp outcomeSnapshot) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v := m.versions
+	if v == nil {
+		return
+	}
+	h := backendVersionHash(body)
+	if resp.Canary == nil {
+		v.primaryHash, v.canaryHash, v.heldTarget = h, "", nil
+		return
+	}
+	_, manual := body["canary_percent"]
+	if resp.Manual != manual {
+		m.t.Errorf("mock script: apply with canary_percent sent = %t answered with a manual hold = %t", manual, resp.Manual)
+	}
+	c := resp.Canary
+	if manual && c.TargetWeight != nil && c.CurrentWeight != nil && *c.CurrentWeight == *c.TargetWeight &&
+		(v.heldTarget == nil || *v.heldTarget != *c.TargetWeight) {
+		m.t.Errorf("mock script: a new share of %d is already settled in the apply response; current_weight lags target_weight", *c.TargetWeight)
+	}
+	v.canaryHash, v.canaryID, v.canaryName = h, c.ID, c.Name
+	v.heldTarget = nil
+	if manual {
+		v.heldTarget = c.TargetWeight
+	}
+}
+
+// observe updates the model from a snapshot GET returns: a canary that is gone was promoted
+// (it is now the primary) or rolled back, and a canary the mock did not start was held out of
+// band. Called with m.mu held.
+func (v *outcomeVersions) observe(s outcomeSnapshot) {
+	if v == nil {
+		return
+	}
+	switch {
+	case s.Canary == nil && v.canaryHash != "":
+		if s.Primary.ID == v.canaryID {
+			v.primaryHash = v.canaryHash
+		}
+		v.canaryHash, v.heldTarget = "", nil
+	case s.Canary != nil && v.canaryHash == "":
+		v.canaryHash, v.canaryID, v.canaryName = outOfBandVersionHash, s.Canary.ID, s.Canary.Name
+	}
+}
+
 // heldCanary is v2 held as a manual canary at percent, with its share settled.
 func heldCanary(percent int) outcomeSnapshot {
 	c := outcomeV2
@@ -32,7 +183,7 @@ func TestAccServiceResource_CanaryPercentOutOfBandCanaryPlansEmpty(t *testing.T)
 	SkipIfNotAcceptanceTest(t)
 
 	const name = "canary-oob"
-	m, server := newOutcomeMock(t, "svc_canary_oob", name, func(n int, _ map[string]any) outcomeApplyResult {
+	m, server := newCanaryMock(t, "svc_canary_oob", name, 0, func(n int, _ map[string]any) outcomeApplyResult {
 		if n > 1 {
 			t.Errorf("unexpected apply %d", n)
 		}
@@ -59,7 +210,7 @@ func TestAccServiceResource_CanaryPercentImportRecoversHeldCanary(t *testing.T) 
 	SkipIfNotAcceptanceTest(t)
 
 	const name = "canary-import"
-	m, server := newOutcomeMock(t, "svc_canary_import", name, func(int, map[string]any) outcomeApplyResult {
+	m, server := newCanaryMock(t, "svc_canary_import", name, 0, func(int, map[string]any) outcomeApplyResult {
 		t.Errorf("unexpected apply after import")
 		return outcomeCreate()
 	})
@@ -98,7 +249,7 @@ func TestAccServiceResource_CanaryPercentInPlaceRejected(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	const name = "canary-inplace"
-	_, server := newOutcomeMock(t, "svc_canary_inplace", name, func(int, map[string]any) outcomeApplyResult {
+	_, server := newCanaryMock(t, "svc_canary_inplace", name, 0, func(int, map[string]any) outcomeApplyResult {
 		t.Errorf("unexpected apply")
 		return outcomeCreate()
 	})
@@ -119,7 +270,7 @@ func TestAccServiceResource_CanaryPercentRenameWhileHeldRejected(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	const name = "canary-rename"
-	m, server := newOutcomeMock(t, "svc_canary_rename", name, func(int, map[string]any) outcomeApplyResult {
+	m, server := newCanaryMock(t, "svc_canary_rename", name, 0, func(int, map[string]any) outcomeApplyResult {
 		t.Errorf("unexpected apply")
 		return outcomeCreate()
 	})
@@ -164,7 +315,7 @@ func TestAccServiceResource_CanaryPercentLegacyStateOutOfBandCanaryPlansEmpty(t 
 	SkipIfNotAcceptanceTest(t)
 
 	const name = "canary-legacy-oob"
-	m, server := newOutcomeMock(t, "svc_canary_legacy_oob", name, func(n int, _ map[string]any) outcomeApplyResult {
+	m, server := newCanaryMock(t, "svc_canary_legacy_oob", name, 0, func(n int, _ map[string]any) outcomeApplyResult {
 		if n > 1 {
 			t.Errorf("unexpected apply %d", n)
 		}
@@ -204,6 +355,14 @@ func (m *outcomeMock) eventLog() []string {
 	return append([]string(nil), m.events...)
 }
 
+// completingFrom is the 202 answering an apply that drops canary_percent from a hold at current:
+// the rollout turns automatic and targets 100% (G1-3).
+func completingFrom(current int) outcomeSnapshot {
+	s := heldAt(100, intPtr(current))
+	s.Manual = false
+	return s
+}
+
 // canaryApplyBodyCheck checks one recorded PUT /apply body's canary_percent, import path and
 // whether it named a version.
 func canaryApplyBodyCheck(m *outcomeMock, i int, wantPercent any, wantImportPath string, wantVersion bool) resource.TestCheckFunc {
@@ -239,7 +398,7 @@ func TestAccServiceResource_CanaryPercentHoldShiftComplete(t *testing.T) {
 
 	const name = "canary-flow"
 	settledV2 := outcomeSnapshot{CurrentState: "RUNNING", Primary: outcomeV2}
-	m, server := newOutcomeMock(t, "svc_canary_flow", name, func(n int, _ map[string]any) outcomeApplyResult {
+	m, server := newCanaryMock(t, "svc_canary_flow", name, 0, func(n int, _ map[string]any) outcomeApplyResult {
 		switch n {
 		case 1:
 			return outcomeCreate()
@@ -248,7 +407,7 @@ func TestAccServiceResource_CanaryPercentHoldShiftComplete(t *testing.T) {
 		case 3:
 			return outcomeApplyResult{Response: heldAt(25, intPtr(0)), Script: []outcomeSnapshot{heldAt(25, intPtr(25))}}
 		default:
-			return outcomeApplyResult{Response: heldAt(25, intPtr(25)), Script: []outcomeSnapshot{settledV2}}
+			return outcomeApplyResult{Response: completingFrom(25), Script: []outcomeSnapshot{settledV2}}
 		}
 	})
 	empty := resource.ConfigPlanChecks{PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()}}
@@ -292,7 +451,7 @@ func TestAccServiceResource_CanaryPercentNoCanaryIsStateOnly(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	const name = "canary-state-only"
-	m, server := newOutcomeMock(t, "svc_canary_state_only", name, func(n int, _ map[string]any) outcomeApplyResult {
+	m, server := newCanaryMock(t, "svc_canary_state_only", name, 0, func(n int, _ map[string]any) outcomeApplyResult {
 		if n > 1 {
 			t.Errorf("unexpected apply %d", n)
 		}
@@ -323,12 +482,12 @@ func TestAccServiceResource_CanaryPercentDeployWhileHeldRollsBack(t *testing.T) 
 	SkipIfNotAcceptanceTest(t)
 
 	const name = "canary-redeploy"
-	m, server := newOutcomeMock(t, "svc_canary_redeploy", name, func(n int, _ map[string]any) outcomeApplyResult {
+	m, server := newCanaryMock(t, "svc_canary_redeploy", name, 0, func(n int, _ map[string]any) outcomeApplyResult {
 		switch n {
 		case 1:
 			return outcomeCreate()
 		case 2, 3:
-			return outcomeApplyResult{Response: heldAt(10, intPtr(10)), Script: []outcomeSnapshot{heldAt(10, intPtr(10))}}
+			return outcomeApplyResult{Response: heldAt(10, nil), Script: []outcomeSnapshot{heldAt(10, intPtr(10))}}
 		default:
 			t.Errorf("unexpected apply %d", n)
 			return outcomeCreate()
@@ -379,7 +538,7 @@ func TestAccServiceResource_CanaryPercentFailedHoldRollsBack(t *testing.T) {
 	const name = "canary-failed"
 	failed := heldAt(10, intPtr(0))
 	failed.CanaryState, failed.CurrentState, failed.CanaryRow = "UNHEALTHY", "UNHEALTHY", "UNHEALTHY"
-	m, server := newOutcomeMock(t, "svc_canary_failed", name, func(n int, _ map[string]any) outcomeApplyResult {
+	m, server := newCanaryMock(t, "svc_canary_failed", name, 0, func(n int, _ map[string]any) outcomeApplyResult {
 		if n == 1 {
 			return outcomeCreate()
 		}
@@ -414,12 +573,12 @@ func TestAccServiceResource_CanaryPercentRevertWithNewNameDeploys(t *testing.T) 
 
 	const name = "canary-revert-name"
 	renamed := outcomeVersion{ID: "svcver_v4", Name: "v1-again", ImportPath: "main:app"}
-	m, server := newOutcomeMock(t, "svc_canary_revert_name", name, func(n int, _ map[string]any) outcomeApplyResult {
+	m, server := newCanaryMock(t, "svc_canary_revert_name", name, 1, func(n int, _ map[string]any) outcomeApplyResult {
 		switch n {
 		case 1:
 			return outcomeCreate()
 		case 2:
-			return outcomeApplyResult{Response: heldAt(10, intPtr(10)), Script: []outcomeSnapshot{heldAt(10, intPtr(10))}}
+			return outcomeApplyResult{Response: heldAt(10, nil), Script: []outcomeSnapshot{heldAt(10, intPtr(10))}}
 		default:
 			return outcomeRollout(outcomeV1, renamed)
 		}
@@ -451,12 +610,12 @@ func TestAccServiceResource_CanaryPercentCutoverCompletes(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	const name = "canary-cutover"
-	m, server := newOutcomeMock(t, "svc_canary_cutover", name, func(n int, _ map[string]any) outcomeApplyResult {
+	m, server := newCanaryMock(t, "svc_canary_cutover", name, 0, func(n int, _ map[string]any) outcomeApplyResult {
 		switch n {
 		case 1:
 			return outcomeCreate()
 		case 2:
-			return outcomeApplyResult{Response: heldAt(10, intPtr(10)), Script: []outcomeSnapshot{heldAt(10, intPtr(10))}}
+			return outcomeApplyResult{Response: heldAt(10, nil), Script: []outcomeSnapshot{heldAt(10, intPtr(10))}}
 		default:
 			return outcomeApplyResult{Response: heldAt(100, intPtr(10)), Script: []outcomeSnapshot{
 				heldAt(100, intPtr(100)), {CurrentState: "RUNNING", Primary: outcomeV2},
@@ -488,7 +647,7 @@ func TestAccServiceResource_CanaryPercentUnconfirmedFailureNotRolledBack(t *test
 	const name = "canary-blip"
 	blip := heldAt(10, intPtr(0))
 	blip.CanaryState, blip.CanaryRow = "UNHEALTHY", "STARTING"
-	m, server := newOutcomeMock(t, "svc_canary_blip", name, func(n int, _ map[string]any) outcomeApplyResult {
+	m, server := newCanaryMock(t, "svc_canary_blip", name, 0, func(n int, _ map[string]any) outcomeApplyResult {
 		if n == 1 {
 			return outcomeCreate()
 		}
@@ -520,14 +679,14 @@ func TestAccServiceResource_CanaryPercentCutoverNotCompletedThenNullFinishes(t *
 	t.Cleanup(provider.SetServiceCutoverGraceForTest(time.Millisecond))
 
 	const name = "canary-cutover-stuck"
-	m, server := newOutcomeMock(t, "svc_canary_cutover_stuck", name, func(n int, _ map[string]any) outcomeApplyResult {
+	m, server := newCanaryMock(t, "svc_canary_cutover_stuck", name, 0, func(n int, _ map[string]any) outcomeApplyResult {
 		switch n {
 		case 1:
 			return outcomeCreate()
 		case 2:
 			return outcomeApplyResult{Response: heldAt(100, intPtr(0)), Script: []outcomeSnapshot{heldAt(100, intPtr(100))}}
 		default:
-			return outcomeApplyResult{Response: heldAt(100, intPtr(100)), Script: []outcomeSnapshot{{CurrentState: "RUNNING", Primary: outcomeV2}}}
+			return outcomeApplyResult{Response: completingFrom(100), Script: []outcomeSnapshot{{CurrentState: "RUNNING", Primary: outcomeV2}}}
 		}
 	})
 
@@ -559,7 +718,7 @@ func TestAccServiceResource_CanaryPercentCutoverFailureRollsBack(t *testing.T) {
 	const name = "canary-cutover-failed"
 	failed := heldAt(100, intPtr(100))
 	failed.CanaryState, failed.CurrentState, failed.CanaryRow = "UNHEALTHY", "UNHEALTHY", "UNHEALTHY"
-	m, server := newOutcomeMock(t, "svc_canary_cutover_failed", name, func(n int, _ map[string]any) outcomeApplyResult {
+	m, server := newCanaryMock(t, "svc_canary_cutover_failed", name, 0, func(n int, _ map[string]any) outcomeApplyResult {
 		if n == 1 {
 			return outcomeCreate()
 		}
@@ -592,7 +751,7 @@ func TestAccServiceResource_CanaryPercentCutoverFailureConfirmedLate(t *testing.
 	early.CanaryState, early.CurrentState = "UNHEALTHY", "UNHEALTHY"
 	confirmed := early
 	confirmed.CanaryRow = "UNHEALTHY"
-	m, server := newOutcomeMock(t, "svc_canary_cutover_late", name, func(n int, _ map[string]any) outcomeApplyResult {
+	m, server := newCanaryMock(t, "svc_canary_cutover_late", name, 0, func(n int, _ map[string]any) outcomeApplyResult {
 		if n == 1 {
 			return outcomeCreate()
 		}

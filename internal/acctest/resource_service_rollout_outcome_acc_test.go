@@ -110,6 +110,10 @@ type outcomeMock struct {
 	// rollback in arrival order.
 	rollbackScript []outcomeSnapshot
 	events         []string
+
+	// versions, when set, applies the backend's version matching to applies (see
+	// outcomeVersions); nil accepts every apply onApply accepts.
+	versions *outcomeVersions
 }
 
 // outcomeBuild is one build as GET /builds/{id} reports it.
@@ -147,6 +151,11 @@ func newOutcomeMock(t *testing.T, serviceID, name string, onApply func(n int, bo
 				`Please wait until the Service has terminated before restarting."}}`)
 			return
 		}
+		if status, detail := m.matchVersion(body); status != 0 {
+			w.WriteHeader(status)
+			_, _ = fmt.Fprintf(w, `{"error": {"detail": %q}}`, detail)
+			return
+		}
 		m.applyAuth(body)
 
 		res := m.onApply(n, body)
@@ -155,6 +164,7 @@ func newOutcomeMock(t *testing.T, serviceID, name string, onApply func(n int, bo
 			_, _ = fmt.Fprintf(w, `{"error": {"detail": %q}}`, res.Detail)
 			return
 		}
+		m.recordAcceptedVersion(body, res.Response)
 		m.setScript(res.Script...)
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = fmt.Fprint(w, `{"result": `+m.render(res.Response)+`}`)
@@ -172,6 +182,9 @@ func newOutcomeMock(t *testing.T, serviceID, name string, onApply func(n int, bo
 		}
 		m.mu.Lock()
 		m.events = append(m.events, "rollback")
+		if m.versions != nil {
+			m.versions.canaryHash, m.versions.heldTarget = "", nil
+		}
 		script := m.rollbackScript
 		m.mu.Unlock()
 		if len(script) == 0 {
@@ -348,6 +361,7 @@ func (m *outcomeMock) next() outcomeSnapshot {
 			s.CurrentState = "TERMINATING"
 		}
 	}
+	m.versions.observe(s)
 	return s
 }
 
