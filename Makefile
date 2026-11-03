@@ -384,29 +384,17 @@ test-primary-gcp: build ## Run primary GCP tests only (3 tests)
 
 .PHONY: test-aws-vm-basic
 test-aws-vm-basic: build ## Test AWS VM basic (all-in-one pattern)
-	@echo "==> Testing AWS VM basic scenario..."
-	@mkdir -p $(BUILD_DIR)
-	@bash -c 'set -u; \
-	  SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
-	  STATE=$(CURDIR)/$(BUILD_DIR)/aws-vm-basic-$$SUFFIX.tfstate; \
-	  CLOUD=tfacc-aws-vm-basic-$$SUFFIX; \
-	  cd examples/aws-vm-basic; \
-	  trap "terraform destroy -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD || true" EXIT; \
-	  terraform apply -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD'
+	@echo "==> Testing aws-vm-basic scenario..."
+	@SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	  export TF_VAR_cloud_name=tfacc-aws-vm-basic-$$SUFFIX; \
+	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/aws-vm-basic $(BUILD_DIR)/aws-vm-basic-$$SUFFIX.tfstate
 
 .PHONY: test-aws-vm-full
 test-aws-vm-full: build ## Test AWS VM full (split pattern + EFS + MemoryDB)
-	@echo "==> Testing AWS VM full scenario..."
-	@mkdir -p $(BUILD_DIR)
-	@bash -c 'set -u; \
-	  SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
-	  STATE=$(CURDIR)/$(BUILD_DIR)/aws-vm-full-$$SUFFIX.tfstate; \
-	  CLOUD=tfacc-aws-vm-full-$$SUFFIX; \
-	  PREFIX=aws-vm-full-$$SUFFIX-; \
-	  VARS="-var=cloud_name=$$CLOUD -var=common_prefix=$$PREFIX -var=enable_efs=true -var=enable_memorydb=true -var=vpc_cidr_block=172.27.0.0/16 -var=vpc_public_subnets=[\"172.27.21.0/24\",\"172.27.22.0/24\",\"172.27.23.0/24\"]"; \
-	  cd examples/aws-vm; \
-	  trap "terraform destroy -auto-approve -state=$$STATE $$VARS || true" EXIT; \
-	  terraform apply -auto-approve -state=$$STATE $$VARS'
+	@echo "==> Testing aws-vm-full scenario..."
+	@SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	  export TF_VAR_cloud_name=tfacc-aws-vm-full-$$SUFFIX TF_VAR_common_prefix=aws-vm-full-$$SUFFIX- TF_VAR_enable_efs=true TF_VAR_enable_memorydb=true TF_VAR_vpc_cidr_block=172.27.0.0/16 TF_VAR_vpc_public_subnets='["172.27.21.0/24","172.27.22.0/24","172.27.23.0/24"]'; \
+	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/aws-vm $(BUILD_DIR)/aws-vm-full-$$SUFFIX.tfstate
 
 .PHONY: apply-aws-vm-basic
 apply-aws-vm-basic: build ## Apply AWS VM basic only (override SUFFIX=<id> to pair with destroy)
@@ -448,18 +436,10 @@ destroy-aws-vm-full: ## Destroy AWS VM full (must match SUFFIX used by apply)
 
 .PHONY: test-aws-eks-basic
 test-aws-eks-basic: build ## Test AWS EKS basic (K8S)
-	@echo "==> Testing AWS EKS basic scenario..."
-	@mkdir -p $(BUILD_DIR)
-	@bash -c 'set -u; \
-	  SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
-	  STATE=$(CURDIR)/$(BUILD_DIR)/aws-eks-basic-$$SUFFIX.tfstate; \
-	  CLOUD=tfacc-aws-eks-basic-$$SUFFIX; \
-	  EKSNAME=tfacc-eks-$$SUFFIX; \
-	  TAGVARS=$(CURDIR)/$(BUILD_DIR)/aws-eks-basic-$$SUFFIX.tfvars.json; \
-	  printf "{\"tags\":{\"Environment\":\"test\",\"workload\":\"tf-provider-e2e-test\",\"Test\":\"true\",\"Repo\":\"terraform-kubernetes-anyscale-foundation-modules\",\"Example\":\"aws/eks-public\"}}" > $$TAGVARS; \
-	  cd examples/aws-eks-basic; \
-	  trap "terraform destroy -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD -var=eks_cluster_name=$$EKSNAME -var-file=$$TAGVARS || true; rm -f $$TAGVARS" EXIT; \
-	  terraform apply -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD -var=eks_cluster_name=$$EKSNAME -var-file=$$TAGVARS'
+	@echo "==> Testing aws-eks-basic scenario..."
+	@SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	  export TF_VAR_cloud_name=tfacc-aws-eks-basic-$$SUFFIX TF_VAR_eks_cluster_name=tfacc-eks-$$SUFFIX TF_VAR_tags='{"Environment":"test","workload":"tf-provider-e2e-test","Test":"true","Repo":"terraform-kubernetes-anyscale-foundation-modules","Example":"aws/eks-public"}'; \
+	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/aws-eks-basic $(BUILD_DIR)/aws-eks-basic-$$SUFFIX.tfstate
 
 .PHONY: apply-aws-eks-basic
 apply-aws-eks-basic: build ## Apply AWS EKS basic only (override SUFFIX=<id> to pair with destroy)
@@ -486,29 +466,17 @@ destroy-aws-eks-basic: ## Destroy AWS EKS basic (must match SUFFIX used by apply
 
 .PHONY: test-gcp-vm-basic
 test-gcp-vm-basic: build ## Test GCP VM basic (all-in-one pattern)
-	@echo "==> Testing GCP VM basic scenario..."
-	@mkdir -p $(BUILD_DIR)
-	@bash -c 'set -u; \
-	  SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
-	  STATE=$(CURDIR)/$(BUILD_DIR)/gcp-vm-basic-$$SUFFIX.tfstate; \
-	  CLOUD=tfacc-gcp-vm-basic-$$SUFFIX; \
-	  cd examples/gcp-vm-basic; \
-	  trap "terraform destroy -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD || true" EXIT; \
-	  terraform apply -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD'
+	@echo "==> Testing gcp-vm-basic scenario..."
+	@SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	  export TF_VAR_cloud_name=tfacc-gcp-vm-basic-$$SUFFIX; \
+	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/gcp-vm-basic $(BUILD_DIR)/gcp-vm-basic-$$SUFFIX.tfstate
 
 .PHONY: test-gcp-vm-full
 test-gcp-vm-full: build ## Test GCP VM full (split pattern + Filestore + Memorystore)
-	@echo "==> Testing GCP VM full scenario..."
-	@mkdir -p $(BUILD_DIR)
-	@bash -c 'set -u; \
-	  SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
-	  STATE=$(CURDIR)/$(BUILD_DIR)/gcp-vm-full-$$SUFFIX.tfstate; \
-	  CLOUD=tfacc-gcp-vm-full-$$SUFFIX; \
-	  PREFIX=gcp-vm-full-$$SUFFIX-; \
-	  VARS="-var=cloud_name=$$CLOUD -var=common_prefix=$$PREFIX -var=enable_filestore=true -var=enable_memorystore=true -var=vpc_public_subnet_cidr=10.103.0.0/16"; \
-	  cd examples/gcp-vm; \
-	  trap "terraform destroy -auto-approve -state=$$STATE $$VARS || true" EXIT; \
-	  terraform apply -auto-approve -state=$$STATE $$VARS'
+	@echo "==> Testing gcp-vm-full scenario..."
+	@SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	  export TF_VAR_cloud_name=tfacc-gcp-vm-full-$$SUFFIX TF_VAR_common_prefix=gcp-vm-full-$$SUFFIX- TF_VAR_enable_filestore=true TF_VAR_enable_memorystore=true TF_VAR_vpc_public_subnet_cidr=10.103.0.0/16; \
+	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/gcp-vm $(BUILD_DIR)/gcp-vm-full-$$SUFFIX.tfstate
 
 .PHONY: apply-gcp-vm-basic
 apply-gcp-vm-basic: build ## Apply GCP VM basic only (override SUFFIX=<id> to pair with destroy)
@@ -548,15 +516,10 @@ destroy-gcp-vm-full: ## Destroy GCP VM full (must match SUFFIX used by apply)
 
 .PHONY: test-gcp-gke-basic
 test-gcp-gke-basic: build ## Test GCP GKE basic (K8S)
-	@echo "==> Testing GCP GKE basic scenario..."
-	@mkdir -p $(BUILD_DIR)
-	@bash -c 'set -u; \
-	  SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
-	  STATE=$(CURDIR)/$(BUILD_DIR)/gcp-gke-basic-$$SUFFIX.tfstate; \
-	  CLOUD=tfacc-gcp-gke-basic-$$SUFFIX; \
-	  cd examples/gcp-gke-basic; \
-	  trap "terraform destroy -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD || true" EXIT; \
-	  terraform apply -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD'
+	@echo "==> Testing gcp-gke-basic scenario..."
+	@SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	  export TF_VAR_cloud_name=tfacc-gcp-gke-basic-$$SUFFIX; \
+	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/gcp-gke-basic $(BUILD_DIR)/gcp-gke-basic-$$SUFFIX.tfstate
 
 .PHONY: apply-gcp-gke-basic
 apply-gcp-gke-basic: build ## Apply GCP GKE basic only (override SUFFIX=<id> to pair with destroy)
