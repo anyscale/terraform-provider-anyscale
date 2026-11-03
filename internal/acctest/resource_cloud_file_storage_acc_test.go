@@ -788,52 +788,14 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
-// newMountPathMockCloudServer builds a mock like newC3MockCloudServer, but
-// with an add_resource response that DOES carry file_storage - the shared
-// helper's stub never does, so it can't exercise the Create-time
+// newMountPathMockCloudServer is newStaticCloudMockServer with an
+// add_resource response that DOES carry file_storage - newC3MockCloudServer's
+// minimal response never does, so it can't exercise the Create-time
 // mergeFileStorageDerivedFields resolution the two tests below need.
 func newMountPathMockCloudServer(t *testing.T, cloudID, cloudJSON, resourcesJSON, addResourceFileStorageJSON string) *httptest.Server {
 	t.Helper()
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/api/v2/clouds", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		switch r.Method {
-		case http.MethodPost:
-			_, _ = fmt.Fprintf(w, `{"result": %s}`, cloudJSON)
-		case http.MethodGet:
-			_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"total": 0, "next_paging_token": null}}`)
-		default:
-			t.Errorf("unexpected method %s on /api/v2/clouds", r.Method)
-		}
-	})
-	mux.HandleFunc("/api/v2/clouds/"+cloudID, func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			w.WriteHeader(http.StatusOK)
-			_, _ = fmt.Fprintf(w, `{"result": %s}`, cloudJSON)
-		case http.MethodDelete:
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			t.Errorf("unexpected method %s on /api/v2/clouds/%s", r.Method, cloudID)
-		}
-	})
-	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/resources", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintf(w, `{"results": %s, "metadata": {"total": 1, "next_paging_token": null}}`, resourcesJSON)
-	})
-	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/add_resource", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintf(w, `{"result": {"cloud_deployment_id": "cldrsrc_mock_default", "cloud_resource_id": "cldrsrc_mock_default", "file_storage": %s}}`, addResourceFileStorageJSON)
-	})
-	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/machine_pools", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"total": 0, "next_paging_token": null}}`)
-	})
-
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-	return server
+	return newStaticCloudMockServer(t, cloudID, cloudJSON, resourcesJSON,
+		fmt.Sprintf(`{"cloud_deployment_id": "cldrsrc_mock_default", "cloud_resource_id": "cldrsrc_mock_default", "file_storage": %s}`, addResourceFileStorageJSON))
 }
 
 // TestAccCloudResource_MountPathOmittedDoesNotForceReplace is a real
