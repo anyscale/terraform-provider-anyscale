@@ -439,9 +439,12 @@ destroy-aws-vm-full: ## Destroy AWS VM full (must match SUFFIX used by apply)
 # ============================================================================
 
 .PHONY: test-aws-eks-basic
-test-aws-eks-basic: build ## Test AWS EKS basic (K8S)
+test-aws-eks-basic: build ## Test AWS EKS basic (K8S), including the Anyscale Operator install (second apply)
 	@echo "==> Testing aws-eks-basic scenario..."
 	@SUFFIX=$(SCENARIO_SUFFIX); \
+	  test -f examples/aws-eks-basic/.charts/gateway-helm-1.8.2.tgz || \
+	    helm pull oci://docker.io/envoyproxy/gateway-helm --version 1.8.2 -d examples/aws-eks-basic/.charts || exit 1; \
+	  export SCENARIO_SECOND_APPLY_VARS=install_gateway_resources=true; \
 	  export TF_VAR_cloud_name=tfacc-aws-eks-basic-$$SUFFIX TF_VAR_eks_cluster_name=tfacc-eks-$$SUFFIX TF_VAR_tags='{"Environment":"test","workload":"tf-provider-e2e-test","Test":"true","Repo":"terraform-kubernetes-anyscale-foundation-modules","Example":"aws/eks-public"}'; \
 	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/aws-eks-basic $(BUILD_DIR)/aws-eks-basic-$$SUFFIX.tfstate
 

@@ -17,6 +17,11 @@
 # If any step fails, an EXIT trap still destroys whatever the state holds. A failed cleanup
 # destroy is reported loudly; run `make sweep-dry-run` to find leaks.
 #
+# A scenario that must apply twice (for example, an EKS cluster whose Anyscale Operator can only
+# be installed once the first apply has created its CRDs) sets SCENARIO_SECOND_APPLY_VARS to
+# space-separated <variable>=<value> pairs. After the first apply they are exported as TF_VAR_*
+# and applied again; every later step runs with them set.
+#
 # A scenario that creates no cloud (it targets an existing one) sets SCENARIO_NO_CLOUD=1: steps
 # 3 and 5 are then skipped, and the run fails if the state does hold a cloud.
 #
@@ -132,6 +137,17 @@ terraform init -input=false -upgrade=false >/dev/null || fail "init failed"
 
 step "apply"
 terraform apply -auto-approve -input=false -state="$state" || fail "apply failed"
+
+if [ -n "${SCENARIO_SECOND_APPLY_VARS:-}" ]; then
+  for pair in $SCENARIO_SECOND_APPLY_VARS; do
+    case "$pair" in
+      *=*) export "TF_VAR_${pair%%=*}=${pair#*=}" ;;
+      *) fail "SCENARIO_SECOND_APPLY_VARS entry is not <variable>=<value>: $pair" ;;
+    esac
+  done
+  step "second apply ($SCENARIO_SECOND_APPLY_VARS)"
+  terraform apply -auto-approve -input=false -state="$state" || fail "second apply failed"
+fi
 
 step "plan after apply must be empty"
 expect_empty_plan "plan after apply" "$state"

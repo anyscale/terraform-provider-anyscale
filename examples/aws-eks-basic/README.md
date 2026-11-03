@@ -144,8 +144,9 @@ terraform apply
 terraform apply -var install_gateway_resources=true
 ```
 
-Or use the repo's Makefile wrapper, which runs apply and destroy with a unique `cloud_name`
-suffix and a cleanup trap so a failed apply doesn't leak resources:
+Or use the repo's Makefile wrapper, which pulls the chart if it is missing, runs both applies with
+a unique `cloud_name` suffix, checks that the plan is empty before and after re-importing the
+cloud, destroys, and confirms the cloud is gone, with a cleanup trap if any step fails:
 
 ```bash
 make test-aws-eks-basic
