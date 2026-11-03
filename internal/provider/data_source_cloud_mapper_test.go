@@ -12,11 +12,15 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// TestCloudDataSources_SameCloudSameValues feeds one cloud through both
-// anyscale_cloud and anyscale_clouds and asserts every attribute they share
-// comes out identical. Each shared attribute is found by its tfsdk tag, so an
-// attribute added to one model and the mapper but not copied into the other
-// fails here too.
+// TestCloudDataSources_SameCloudSameValues serves one CloudResult from both the
+// single-cloud GET and the list, feeds it through anyscale_cloud and
+// anyscale_clouds, and asserts every attribute they share comes out identical.
+// Each shared attribute is found by its tfsdk tag, so an attribute added to one
+// model and the mapper but not copied into the other fails here too.
+//
+// This proves the mapping, not that the real API agrees: the real list and
+// single GET compute is_default differently, so the two data sources can
+// report different is_default values for the same cloud.
 func TestCloudDataSources_SameCloudSameValues(t *testing.T) {
 	ctx := context.Background()
 	externalID := "org_external"
