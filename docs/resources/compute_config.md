@@ -37,7 +37,7 @@ resource "anyscale_compute_config" "example" {
   maximum_uptime_minutes   = 480
 
   flags = {
-    "ray-cluster-ray-version"        = "2.9.0"
+    "ray-cluster-ray-version"        = "2.59.0"
     "ray-cluster-autoscaler-enabled" = "true"
   }
 
