@@ -704,7 +704,7 @@ func GetAnyCloudID(t *testing.T) string {
 type CloudInfo struct {
 	ID           string
 	Name         string
-	Provider     string // "AWS" or "GCP"
+	Provider     string // "AWS", "GCP", "AZURE" or "GENERIC"
 	ComputeStack string // "VM" or "K8S"
 }
 
@@ -727,13 +727,14 @@ func normalizeComputeStack(computeStack string) string {
 	return computeStack
 }
 
-// isKnownProvider returns true if the provider is a known cloud provider (AWS, GCP, or Generic for K8S).
+// isKnownProvider reports whether a cloud is on a provider the tests target: AWS or GCP on any
+// compute stack, AZURE or GENERIC on K8S.
 func isKnownProvider(provider, computeStack string) bool {
 	if provider == "AWS" || provider == "GCP" {
 		return true
 	}
-	// Generic provider is only valid for K8S compute stack
-	if provider == "Generic" && computeStack == "K8S" {
+	// AZURE and GENERIC are only valid for the K8S compute stack.
+	if (provider == "AZURE" || provider == "GENERIC") && computeStack == "K8S" {
 		return true
 	}
 	return false
