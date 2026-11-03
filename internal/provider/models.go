@@ -805,6 +805,8 @@ type DecoratedSessionResult struct {
 	ID              string  `json:"id"`
 	CloudID         *string `json:"cloud_id"`
 	IsSystemCluster bool    `json:"is_system_cluster"`
+	ArchivedAt      *string `json:"archived_at"`
+	CreatedAt       string  `json:"created_at"`
 	Cloud           *struct {
 		ID string `json:"id"`
 	} `json:"cloud"`

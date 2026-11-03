@@ -416,24 +416,32 @@ func TestTerminateSystemCluster_HitsExpectedEndpoint(t *testing.T) {
 	}
 }
 
-// decoratedSessionsTestServer serves a fixed page of DecoratedSessionResult rows for every
-// request to /api/v2/decorated_sessions/, ignoring the (dead, per source) cloud_id param -
-// deliberately, since that is exactly the real backend's own behavior findSystemWorkloadCluster
-// must work correctly against.
+// decoratedSessionsTestServer serves DecoratedSessionResult rows for every request to
+// /api/v2/decorated_sessions/. Like the real endpoint, it hides archived sessions unless the
+// request sends archive_status=ALL. It ignores cloud_id, so the rows can include other clouds'
+// sessions and the client-side cloud check is still exercised.
 func decoratedSessionsTestServer(t *testing.T, rows []DecoratedSessionResult) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		visible := rows
+		if r.URL.Query().Get("archive_status") != "ALL" {
+			visible = nil
+			for _, row := range rows {
+				if row.ArchivedAt == nil {
+					visible = append(visible, row)
+				}
+			}
+		}
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(DecoratedSessionsListResponse{Results: rows})
+		_ = json.NewEncoder(w).Encode(DecoratedSessionsListResponse{Results: visible})
 	}))
 	t.Cleanup(server.Close)
 	return server
 }
 
 func TestFindSystemWorkloadCluster_FindsMatchingCloudAmongMultiple(t *testing.T) {
-	// Reproduces the exact hazard the correction flagged: decorated_sessions' cloud_id query
-	// param is dead server-side, so a multi-cloud org's response can contain sessions for OTHER
-	// clouds too. This proves the client-side filter picks the right one, not just the first row.
+	// The client-side cloud check is kept as a guard even though the request sends cloud_id: a
+	// response containing other clouds' sessions must still yield this cloud's session.
 	rows := []DecoratedSessionResult{
 		{ID: "ses_other_cloud", CloudID: strPtr("cld_other"), IsSystemCluster: true},
 		{ID: "ses_target_cloud", CloudID: strPtr("cld_target"), IsSystemCluster: true},
@@ -702,5 +710,71 @@ func TestWaitForSystemClusterStateWithTiming_SingleTerminatedIsQuiet(t *testing.
 		if v != "false" {
 			t.Errorf("poll #%d start_cluster=%q, want \"false\" - a single Terminated observation must not trigger the backstop", i+1, v)
 		}
+	}
+}
+
+// An archived system-cluster session is still the cloud's cluster. Missing it would drop the
+// resource from state and make the next apply start the cluster again.
+func TestFindSystemWorkloadCluster_FindsArchivedSession(t *testing.T) {
+	archivedAt := "2026-11-01T00:00:00Z"
+	rows := []DecoratedSessionResult{
+		{ID: "ses_archived", CloudID: strPtr("cld_target"), IsSystemCluster: true, ArchivedAt: &archivedAt, CreatedAt: "2026-10-01T00:00:00Z"},
+	}
+	server := decoratedSessionsTestServer(t, rows)
+	client := NewClientWithToken(server.URL, "test-token")
+
+	got, err := findSystemWorkloadCluster(context.Background(), client, "cld_target")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil || got.ClusterID != "ses_archived" {
+		t.Fatalf("got = %+v, want ClusterID ses_archived", got)
+	}
+}
+
+func TestFindSystemWorkloadCluster_PrefersLiveThenMostRecent(t *testing.T) {
+	archivedAt := "2026-11-02T00:00:00Z"
+	for _, tt := range []struct {
+		name string
+		rows []DecoratedSessionResult
+		want string
+	}{
+		{"live beats a newer archived session", []DecoratedSessionResult{
+			{ID: "ses_live_old", CloudID: strPtr("cld_target"), IsSystemCluster: true, CreatedAt: "2026-09-01T00:00:00Z"},
+			{ID: "ses_archived_new", CloudID: strPtr("cld_target"), IsSystemCluster: true, ArchivedAt: &archivedAt, CreatedAt: "2026-10-01T00:00:00Z"},
+		}, "ses_live_old"},
+		{"most recent of two live sessions, in either order", []DecoratedSessionResult{
+			{ID: "ses_new", CloudID: strPtr("cld_target"), IsSystemCluster: true, CreatedAt: "2026-10-01T00:00:00Z"},
+			{ID: "ses_old", CloudID: strPtr("cld_target"), IsSystemCluster: true, CreatedAt: "2026-09-01T00:00:00Z"},
+		}, "ses_new"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			server := decoratedSessionsTestServer(t, tt.rows)
+			client := NewClientWithToken(server.URL, "test-token")
+
+			got, err := findSystemWorkloadCluster(context.Background(), client, "cld_target")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got == nil || got.ClusterID != tt.want {
+				t.Fatalf("got = %+v, want ClusterID %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFindSystemWorkloadCluster_SendsArchiveStatusAndCloudID(t *testing.T) {
+	var query url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.Query()
+		_ = json.NewEncoder(w).Encode(DecoratedSessionsListResponse{})
+	}))
+	t.Cleanup(server.Close)
+
+	if _, err := findSystemWorkloadCluster(context.Background(), NewClientWithToken(server.URL, "test-token"), "cld_target"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if query.Get("archive_status") != "ALL" || query.Get("cloud_id") != "cld_target" || query.Get("name_match") == "" {
+		t.Errorf("query = %v, want archive_status=ALL, cloud_id=cld_target and name_match", query)
 	}
 }
