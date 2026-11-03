@@ -15,7 +15,7 @@ resource "anyscale_container_image_build" "example" {
   project_id = var.project_id
 
   containerfile = <<-EOT
-    FROM anyscale/ray:2.9.0-py310
+    FROM anyscale/ray:2.59.0-py313
     RUN pip install --no-cache-dir pandas scikit-learn
   EOT
 
@@ -32,7 +32,7 @@ resource "anyscale_container_image_build" "example" {
 # then makes it available immediately.
 #
 # resource "anyscale_container_image_registry" "example" {
-#   image_uri = "docker.io/my-org/my-ray-image:2.9.0"
+#   image_uri = "docker.io/my-org/my-ray-image:2.59.0"
 #   name      = var.image_name
 #
 #   # Only needed for private registries. Omit entirely for public images.

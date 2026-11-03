@@ -3,7 +3,7 @@ resource "anyscale_container_image_build" "inline" {
   name = "my-custom-image"
 
   containerfile = <<-EOT
-    FROM anyscale/ray:2.9.0-py310
+    FROM anyscale/ray:2.59.0-py313
     RUN pip install --no-cache-dir pandas scikit-learn
   EOT
 

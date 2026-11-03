@@ -70,7 +70,7 @@ that revision's contents.
 resource "anyscale_container_image_build" "training" {
   name          = "training-image"
   containerfile = <<-EOT
-    FROM anyscale/ray:2.9.0-py310
+    FROM anyscale/ray:2.59.0-py313
   EOT
 }
 
