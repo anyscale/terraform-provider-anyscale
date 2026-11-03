@@ -431,10 +431,11 @@ this by hardcoding the ID.
 Cleanup: ephemeral clouds are destroyed by default; `ANYSCALE_TEST_KEEP=1` keeps one and prints its
 ID/name (never tokens).
 
-`ANYSCALE_TEST_IAM_MAPPING_CLOUD_ID` is not an override: it names a dedicated cloud for the
-iam_mapping real-infra tests. They skip when it is unset and refuse the STATIC fixture, because they
-rewrite the cloud's IAM mapping. Deliberately separate from `ANYSCALE_TEST_CLOUD_ID`, which pins every
-test's cloud.
+`ANYSCALE_TEST_IAM_MAPPING_CLOUD_ID` and `ANYSCALE_TEST_SYSTEM_CLUSTER_CLOUD_ID` are not overrides:
+each names a dedicated cloud for tests that change it for good (the iam_mapping tests rewrite its IAM
+mapping; the system_cluster test enables its system cluster, which Delete never disables). They skip
+when unset and refuse the STATIC fixture. Deliberately separate from `ANYSCALE_TEST_CLOUD_ID`, which
+pins every test's cloud.
 
 ### Real-infra test gates and user fixtures
 
