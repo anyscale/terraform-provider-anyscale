@@ -32,7 +32,6 @@ resource "anyscale_cloud_resource" "a_vm" {
 
   object_storage {
     bucket_name = module.anyscale_s3.s3_bucket_id
-    region      = var.aws_region
   }
 }
 
@@ -59,6 +58,5 @@ resource "anyscale_cloud_resource" "a_eks" {
 
   object_storage {
     bucket_name = module.anyscale_s3.s3_bucket_id
-    region      = var.aws_region
   }
 }

@@ -28,7 +28,6 @@ resource "anyscale_cloud" "aws_example" {
   object_storage {
     # s3:// prefix added automatically
     bucket_name = "my-anyscale-bucket"
-    region      = "us-east-2"
   }
 }
 
@@ -74,7 +73,6 @@ resource "anyscale_cloud" "eks_example" {
 
   object_storage {
     bucket_name = "my-eks-bucket"
-    region      = "us-west-2"
   }
 
   # Optional: shared file storage for the Ray cluster. mount_targets

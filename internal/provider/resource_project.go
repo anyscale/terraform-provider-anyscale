@@ -254,8 +254,9 @@ func (r *ProjectResource) Read(ctx context.Context, req resource.ReadRequest, re
 
 	// Read project
 	if err := r.readProject(ctx, projectID, &state); err != nil {
-		if errors.Is(err, ErrNotFound) {
+		if isGoneOrForbidden(err) {
 			tflog.Warn(ctx, "Project not found, removing from state", map[string]any{"project_id": projectID})
+			addForbiddenTreatedAsDeletedWarning(&resp.Diagnostics, "Project", projectID, err)
 			resp.State.RemoveResource(ctx)
 			return
 		}
@@ -329,6 +330,13 @@ func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest
 				"Project Has Active Resources",
 				fmt.Sprintf("Cannot delete project %s: it still has running jobs or services. Terminate all jobs and services in this project, then retry. (%s)", projectID, err.Error()),
 			)
+			return
+		}
+		// Reached only after deleteProjectWithRetry has ridden out the just-created permission
+		// race, or for a project outside its window, so a fresh project is not dropped early.
+		if isHTTPStatus(err, http.StatusForbidden) {
+			tflog.Warn(ctx, "Project delete returned 403, treating as already deleted", map[string]any{"project_id": projectID})
+			addForbiddenTreatedAsDeletedOnDestroyWarning(&resp.Diagnostics, "Project", projectID, err)
 			return
 		}
 		AddAPIError(&resp.Diagnostics, "delete project", err)

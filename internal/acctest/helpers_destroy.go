@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+
+	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 )
 
 // NewAPIDestroyCheck returns a CheckDestroy function that verifies every
@@ -163,10 +166,10 @@ func newAPIDestroyCheckImplWithTimeout(resourceType, attrName, getPathFmt, archi
 			path := fmt.Sprintf(getPathFmt, id)
 
 			// Poll so we don't race the backend's asynchronous archive/delete.
-			// Only a 404 or a truthy archive marker counts as destroyed. A
-			// transport error or 5xx is retried until destroyCheckPollTimeout
-			// and then fails; any other status (403 included) fails at once.
-			// No resource type here has a traced reason to read 403 as gone.
+			// Only a 404, a truthy archive marker, or a 403 for an ID the
+			// resource type's own list no longer contains counts as destroyed.
+			// A transport error or 5xx is retried until destroyCheckPollTimeout
+			// and then fails; any other status fails at once.
 			deadline := time.Now().Add(pollTimeout)
 			for {
 				resp, err := client.DoRequest(context.Background(), "GET", path, nil)
@@ -184,6 +187,24 @@ func newAPIDestroyCheckImplWithTimeout(resourceType, attrName, getPathFmt, archi
 
 				if resp.StatusCode == 404 {
 					break // gone — success
+				}
+				if resp.StatusCode == 403 {
+					// With SpiceDB authorization the backend answers 403, not 404,
+					// for an ID it has no record of, so 403 counts as destroyed.
+					// Where the type has a list endpoint the ID must also be absent
+					// from it, so a 403 for an object that still exists fails.
+					absent, determined, lerr := absentFromList(client, resourceType, id)
+					switch {
+					case lerr != nil:
+						leaks = append(leaks, fmt.Sprintf("%s (id=%s): %s returned 403 and the list check failed: %v", name, id, path, lerr))
+					case !determined:
+						log.Printf("[INFO] CheckDestroy(%s): %s returned 403 (no list to cross-check); destroyed", resourceType, path)
+					case !absent:
+						leaks = append(leaks, fmt.Sprintf("%s (id=%s): %s returned 403 but the ID is still listed", name, id, path))
+					default:
+						log.Printf("[INFO] CheckDestroy(%s): %s returned 403 and %s is absent from the full list; destroyed", resourceType, path, id)
+					}
+					break
 				}
 				if resp.StatusCode >= 500 {
 					if time.Now().After(deadline) {
@@ -264,4 +285,48 @@ func extractArchivedValue(body []byte, jsonPath string) (bool, error) {
 	default:
 		return false, nil
 	}
+}
+
+// destroyListPaths are the list endpoints absentFromList can page through, by resource type.
+var destroyListPaths = map[string]string{
+	"anyscale_cloud":   "/api/v2/clouds",
+	"anyscale_project": "/api/v2/projects",
+	"anyscale_service": "/api/v2/services-v2",
+}
+
+// absentFromList reports whether id is missing from every page of resourceType's list.
+// determined is false when the type has no known list endpoint.
+func absentFromList(client *provider.Client, resourceType, id string) (absent, determined bool, err error) {
+	listPath, ok := destroyListPaths[resourceType]
+	if !ok {
+		return false, false, nil
+	}
+	ids, err := provider.PaginatedRequest(context.Background(), client, listPath, nil,
+		func(body []byte) ([]string, *string, error) {
+			var page struct {
+				Results []struct {
+					ID string `json:"id"`
+				} `json:"results"`
+				Metadata struct {
+					NextPagingToken *string `json:"next_paging_token"`
+				} `json:"metadata"`
+			}
+			if err := json.Unmarshal(body, &page); err != nil {
+				return nil, nil, err
+			}
+			out := make([]string, 0, len(page.Results))
+			for _, r := range page.Results {
+				out = append(out, r.ID)
+			}
+			return out, page.Metadata.NextPagingToken, nil
+		})
+	if err != nil {
+		return false, true, err
+	}
+	for _, listed := range ids {
+		if listed == id {
+			return false, true, nil
+		}
+	}
+	return true, true, nil
 }

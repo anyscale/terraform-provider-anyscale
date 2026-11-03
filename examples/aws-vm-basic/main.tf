@@ -26,7 +26,6 @@ resource "anyscale_cloud" "primary" {
   # Object Storage (S3)
   object_storage {
     bucket_name = module.aws_anyscale_v2.anyscale_s3_bucket_id
-    region      = var.aws_region
   }
 
   # No file_storage block - EFS disabled

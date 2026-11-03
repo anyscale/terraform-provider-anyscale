@@ -4,8 +4,10 @@
 # this example exists partly to guard against regressing on by example.
 
 resource "anyscale_compute_config" "cc_a_default" {
-  name     = "${var.name_prefix}-cc-a-default"
-  cloud_id = anyscale_cloud.a.id
+  name = "${var.name_prefix}-cc-a-default"
+  # Taking cloud_id from a_vm, not anyscale_cloud.a, makes Terraform create the compute config only
+  # after Cloud A has a resource; the API rejects one on a cloud with none yet.
+  cloud_id = anyscale_cloud_resource.a_vm.cloud_id
   # No cloud_resource set -- defaults to Cloud A's primary resource. a_vm is primary because
   # cloud_a.tf's depends_on makes it the first resource created on Cloud A.
 
