@@ -2,10 +2,8 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -228,28 +226,12 @@ func (d *CloudDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 // (the cloud payload itself doesn't carry them) using the same resource-listing
 // semantics anyscale_cloud_resource relies on.
 func (d *CloudDataSource) readCloudIntoModel(ctx context.Context, cloudID string, config *CloudDataSourceModel) error {
-	apiResp, err := d.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
+	cloudResp, err := DoRequestAndParse[CloudResponse](ctx, d.client, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil, http.StatusOK)
 	if err != nil {
-		return fmt.Errorf("API request failed: %w", err)
-	}
-	defer CloseBody(ctx, apiResp.Body)
-
-	if apiResp.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("%w: cloud not found", ErrNotFound)
-	}
-
-	body, err := io.ReadAll(apiResp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	if apiResp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to read cloud: %s - %s", apiResp.Status, string(body))
-	}
-
-	var cloudResp CloudResponse
-	if err := json.Unmarshal(body, &cloudResp); err != nil {
-		return fmt.Errorf("failed to parse JSON response: %w", err)
+		if errors.Is(err, ErrNotFound) {
+			return fmt.Errorf("%w: cloud not found", ErrNotFound)
+		}
+		return err
 	}
 
 	summary, err := cloudSummaryFromResult(ctx, cloudResp.Result)

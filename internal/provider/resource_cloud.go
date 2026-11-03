@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -830,7 +829,7 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 		// Read the existing cloud to populate state
 		if err := r.readCloudState(ctx, existingCloudID, &plan, nil); err != nil {
-			resp.Diagnostics.AddError("Read Error", fmt.Sprintf("Failed to read existing cloud: %s", err.Error()))
+			AddAPIError(&resp.Diagnostics, "read existing cloud "+existingCloudID, err)
 			return
 		}
 		r.resolveAdoptedDerivedFields(ctx, existingCloudID, &plan, &resp.Diagnostics)
@@ -907,35 +906,14 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	// Log sanitized request (redact sensitive fields like credentials)
 	tflog.Debug(ctx, "POST /api/v2/clouds", map[string]any{"request": SanitizeJSONForLog(string(jsonData))})
 
-	httpResp, err := r.client.DoRequest(ctx, "POST", "/api/v2/clouds", strings.NewReader(string(jsonData)))
+	cloudResp, err := DoRequestAndParse[CloudResponse](ctx, r.client, "POST", "/api/v2/clouds",
+		strings.NewReader(string(jsonData)), http.StatusCreated, http.StatusOK)
 	if err != nil {
 		tflog.Error(ctx, "Failed to create cloud", map[string]any{"error": err.Error()})
-		resp.Diagnostics.AddError("API Request Failed", err.Error())
+		AddAPIError(&resp.Diagnostics, "create cloud", err)
 		return
 	}
-	defer CloseBody(ctx, httpResp.Body)
-
-	body, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		resp.Diagnostics.AddError("Response Read Error", err.Error())
-		return
-	}
-
-	tflog.Debug(ctx, "POST /api/v2/clouds response", map[string]any{"status": httpResp.StatusCode, "body": SanitizeJSONForLog(string(body))})
-
-	if httpResp.StatusCode != http.StatusCreated && httpResp.StatusCode != http.StatusOK {
-		resp.Diagnostics.AddError(
-			"Cloud Creation Failed",
-			fmt.Sprintf("Failed to create cloud: %s - %s", httpResp.Status, string(body)),
-		)
-		return
-	}
-
-	var cloudResp CloudResponse
-	if err := json.Unmarshal(body, &cloudResp); err != nil {
-		resp.Diagnostics.AddError("JSON Unmarshal Error", err.Error())
-		return
-	}
+	tflog.Debug(ctx, "POST /api/v2/clouds succeeded", map[string]any{"cloud_id": cloudResp.Result.ID})
 
 	cloudID := cloudResp.Result.ID
 	plan.ID = types.StringValue(cloudID)
@@ -1033,7 +1011,7 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 		// Read back to get final state
 		if err := r.readCloudState(ctx, cloudID, &plan, nil); err != nil {
-			resp.Diagnostics.AddError("Read Error", err.Error())
+			AddAPIError(&resp.Diagnostics, "read cloud", err)
 			return
 		}
 
@@ -1043,7 +1021,7 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 	// Step 2: Build and add cloud resource/deployment
 	if err := r.addCloudResource(ctx, &plan, cloudID, provider, computeStack); err != nil {
-		resp.Diagnostics.AddError("Add Resource Failed", err.Error())
+		AddAPIError(&resp.Diagnostics, "add the resource to cloud "+cloudID, err)
 		return
 	}
 
@@ -1082,7 +1060,7 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 	// Read back final state
 	if err := r.readCloudState(ctx, cloudID, &plan, nil); err != nil {
-		resp.Diagnostics.AddError("Read Error", err.Error())
+		AddAPIError(&resp.Diagnostics, "read cloud", err)
 		return
 	}
 
@@ -1141,7 +1119,7 @@ func (r *CloudResource) Read(ctx context.Context, req resource.ReadRequest, resp
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("Read Error", err.Error())
+		AddAPIError(&resp.Diagnostics, "read cloud", err)
 		return
 	}
 
@@ -1769,23 +1747,14 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 	addResourceCtx, cancel := context.WithTimeout(ctx, addResourceRequestTimeout)
 	defer cancel()
 
-	deployResp, err := r.client.DoRequest(addResourceCtx, "PUT", fmt.Sprintf("/api/v2/clouds/%s/add_resource", cloudID), strings.NewReader(string(deployJSON)))
+	deployBody, err := DoRequestRaw(addResourceCtx, r.client, "PUT", fmt.Sprintf("/api/v2/clouds/%s/add_resource", cloudID),
+		strings.NewReader(string(deployJSON)), http.StatusOK)
 	if err != nil {
 		tflog.Error(ctx, "Failed to add cloud resource", map[string]any{"error": err.Error()})
 		return err
 	}
-	defer CloseBody(ctx, deployResp.Body)
 
-	deployBody, err := io.ReadAll(deployResp.Body)
-	if err != nil {
-		return err
-	}
-
-	tflog.Debug(ctx, "PUT /api/v2/clouds/"+cloudID+"/add_resource response", map[string]any{"status": deployResp.StatusCode, "body": SanitizeJSONForLog(string(deployBody))})
-
-	if deployResp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to add cloud resource: %s - %s", deployResp.Status, string(deployBody))
-	}
+	tflog.Debug(ctx, "PUT /api/v2/clouds/"+cloudID+"/add_resource response", map[string]any{"body": SanitizeJSONForLog(string(deployBody))})
 
 	// Parse response to get cloud_resource_id
 	var deployResult CloudDeploymentResponse
@@ -1868,31 +1837,13 @@ func (r *CloudResource) resolveAdoptedDerivedFields(ctx context.Context, cloudID
 // just-applied Update has nothing to warn about yet). Read passes &resp.Diagnostics so the warning
 // actually surfaces.
 func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, state *CloudResourceModel, driftDiags *diag.Diagnostics) error {
-	resp, err := r.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
+	// A 403 comes back as an UnexpectedStatusError, so Read can tell it apart:
+	// the API answers 403 for a deleted cloud.
+	cloudResp, err := DoRequestAndParse[CloudResponse](ctx, r.client, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil, http.StatusOK)
 	if err != nil {
-		return err
-	}
-	defer CloseBody(ctx, resp.Body)
-
-	if resp.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("%w: cloud not found", ErrNotFound)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-
-	if resp.StatusCode == http.StatusForbidden {
-		// Typed, so Read can tell this status apart: the API answers 403 for a deleted cloud.
-		return fmt.Errorf("failed to read cloud: %w", &UnexpectedStatusError{StatusCode: resp.StatusCode, Body: string(body)})
-	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to read cloud: %s - %s", resp.Status, string(body))
-	}
-
-	var cloudResp CloudResponse
-	if err := json.Unmarshal(body, &cloudResp); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return fmt.Errorf("%w: cloud not found", ErrNotFound)
+		}
 		return err
 	}
 

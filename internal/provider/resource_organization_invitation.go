@@ -2,10 +2,8 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -176,10 +174,7 @@ func (r *OrganizationInvitationResource) Create(ctx context.Context, req resourc
 	// Fetch full invitation details (API only returns ID on create)
 	invitation, err := r.getInvitationByID(ctx, invitationID)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error reading invitation after creation",
-			fmt.Sprintf("Could not read invitation %s: %s", invitationID, err.Error()),
-		)
+		AddAPIError(&resp.Diagnostics, "read invitation "+invitationID+" after creating it", err)
 		return
 	}
 
@@ -237,10 +232,7 @@ func (r *OrganizationInvitationResource) Read(ctx context.Context, req resource.
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError(
-			"Error reading invitation",
-			fmt.Sprintf("Could not read invitation %s: %s", invitationID, err.Error()),
-		)
+		AddAPIError(&resp.Diagnostics, "read invitation "+invitationID, err)
 		return
 	}
 
@@ -329,10 +321,7 @@ func (r *OrganizationInvitationResource) ImportState(ctx context.Context, req re
 	// Fetch invitation to validate it exists
 	invitation, err := r.getInvitationByID(ctx, invitationID)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error importing invitation",
-			fmt.Sprintf("Could not find invitation %s: %s", invitationID, err.Error()),
-		)
+		AddAPIError(&resp.Diagnostics, "import invitation "+invitationID, err)
 		return
 	}
 
@@ -355,28 +344,13 @@ func (r *OrganizationInvitationResource) ImportState(ctx context.Context, req re
 
 // getInvitationByID fetches a specific invitation by ID
 func (r *OrganizationInvitationResource) getInvitationByID(ctx context.Context, invitationID string) (*OrganizationInvitationResult, error) {
-	httpResp, err := r.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/organization_invitations/%s", invitationID), nil)
+	invitationResp, err := DoRequestAndParse[OrganizationInvitationResponse](ctx, r.client, "GET",
+		fmt.Sprintf("/api/v2/organization_invitations/%s", invitationID), nil, http.StatusOK)
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, fmt.Errorf("%w: invitation not found", ErrNotFound)
+		}
 		return nil, err
-	}
-	defer func() { _ = httpResp.Body.Close() }()
-
-	if httpResp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("%w: invitation not found", ErrNotFound)
-	}
-
-	body, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("error reading response: %w", err)
-	}
-
-	if httpResp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(body))
-	}
-
-	var invitationResp OrganizationInvitationResponse
-	if err := json.Unmarshal(body, &invitationResp); err != nil {
-		return nil, fmt.Errorf("error parsing response: %w", err)
 	}
 
 	return &invitationResp.Result, nil

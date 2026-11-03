@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -172,7 +171,7 @@ func (r *OrganizationDefaultCloudResource) Read(ctx context.Context, req resourc
 	// Only a 404 means the cloud is gone. Any other non-200 (5xx, 401, 403)
 	// is an error that leaves state untouched: decoding its error body would
 	// yield is_default=false and silently drop the resource from state.
-	bodyBytes, err := DoRequestRaw(ctx, r.client, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil, http.StatusOK)
+	cloudResp, err := DoRequestAndParse[CloudResponse](ctx, r.client, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil, http.StatusOK)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			tflog.Warn(ctx, "Managed cloud no longer exists, removing from state", map[string]any{"cloud_id": cloudID})
@@ -180,12 +179,6 @@ func (r *OrganizationDefaultCloudResource) Read(ctx context.Context, req resourc
 			return
 		}
 		AddAPIError(&resp.Diagnostics, "read cloud", err)
-		return
-	}
-
-	var cloudResp CloudResponse
-	if err := json.Unmarshal(bodyBytes, &cloudResp); err != nil {
-		AddJSONError(&resp.Diagnostics, "unmarshal", "cloud response", err)
 		return
 	}
 
@@ -250,7 +243,7 @@ func (r *OrganizationDefaultCloudResource) ImportState(ctx context.Context, req 
 
 	// As in Read, only a 404 means "not found"; any other non-200 is an API
 	// error, never misreported as "Not The Organization Default".
-	bodyBytes, err := DoRequestRaw(ctx, r.client, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil, http.StatusOK)
+	cloudResp, err := DoRequestAndParse[CloudResponse](ctx, r.client, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil, http.StatusOK)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			AddConfigError(&resp.Diagnostics, "Cloud Not Found",
@@ -258,12 +251,6 @@ func (r *OrganizationDefaultCloudResource) ImportState(ctx context.Context, req 
 			return
 		}
 		AddAPIError(&resp.Diagnostics, "read cloud", err)
-		return
-	}
-
-	var cloudResp CloudResponse
-	if err := json.Unmarshal(bodyBytes, &cloudResp); err != nil {
-		AddJSONError(&resp.Diagnostics, "unmarshal", "cloud response", err)
 		return
 	}
 
