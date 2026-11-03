@@ -17,6 +17,10 @@ resource "anyscale_cloud" "primary" {
 }
 
 resource "anyscale_cloud_resource" "primary" {
+  # Keep the service account's project roles until the resource is
+  # destroyed; referencing the account alone does not order its bindings.
+  depends_on = [google_project_iam_member.gke_nodes_roles]
+
   name = var.cloud_name
 
   cloud_id       = anyscale_cloud.primary.id

@@ -266,5 +266,13 @@ resource "helm_release" "anyscale_operator" {
     })
   ]
 
-  depends_on = [kubernetes_manifest.gateway, anyscale_cloud.primary, aws_eks_pod_identity_association.anyscale_operator]
+  # The Operator's role policy is listed so destroy uninstalls the
+  # Operator before the role loses its permissions; the role ARN
+  # reference alone does not order the policy.
+  depends_on = [
+    kubernetes_manifest.gateway,
+    anyscale_cloud.primary,
+    aws_eks_pod_identity_association.anyscale_operator,
+    aws_iam_role_policy.anyscale_operator_s3,
+  ]
 }

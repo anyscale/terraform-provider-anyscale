@@ -10,6 +10,10 @@
 
 
 resource "anyscale_cloud" "primary" {
+  # Keep the Operator role's policy until the cloud is destroyed; a role
+  # ARN reference alone does not order the policy.
+  depends_on = [aws_iam_role_policy.anyscale_operator_s3]
+
   # Common Fields
   name           = var.cloud_name
   cloud_provider = "AWS"
