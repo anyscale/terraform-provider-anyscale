@@ -274,12 +274,12 @@ deletes the cloud itself. If a detach fails, the delete still goes ahead and the
 delete then fails because a pool is still attached, detach it with the Anyscale CLI or console and
 apply again.
 
-For an AWS or GCP VM cloud, destroy first has Anyscale tear down the cloud's service load balancers, which can
+For a cloud whose primary resource is an AWS or GCP VM, destroy first has Anyscale tear down the cloud's service load balancers, which can
 take several minutes, then deletes the cloud. `timeouts { delete }` (default `30m`) bounds the whole destroy.
 If the teardown fails or does not finish in time, the cloud is not deleted: fix what the error names (or raise
 `timeouts.delete`) and run `terraform destroy` again. Once the teardown has started the cloud is marked
 `DELETING`, which cannot be undone, so a destroy that fails afterwards must be re-run to finish. If the error
-says clusters are still running, terminate them first. Empty and Kubernetes clouds skip the teardown.
+says clusters are still running, terminate them first. A cloud with no cloud resource, or whose primary resource is Kubernetes, skips the teardown.
 
 ## Importing an existing cloud
 
