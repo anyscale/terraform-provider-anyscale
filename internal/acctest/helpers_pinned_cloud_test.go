@@ -1,9 +1,14 @@
 package acctest
 
 import (
+	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 )
 
 // testPlatform names the five platforms the real-infra tests target. One static fixture cloud
@@ -50,11 +55,39 @@ func (c CloudInfo) Platform() testPlatform {
 func pinnedCloud(t *testing.T) CloudInfo {
 	t.Helper()
 	id := GetTestCloudID(t)
-	cloud, ok := selectCloudByID(GetAllConfiguredClouds(t), id)
-	if !ok {
-		t.Fatalf("pinned test cloud %s is not among the configured clouds with a cloud resource", id)
+	client, err := GetTestClient()
+	if err != nil {
+		t.Fatalf("failed to get test client: %v", err)
+	}
+	cloud, err := configuredCloudByID(client, id)
+	if err != nil {
+		t.Fatalf("pinned test cloud %s: %v", id, err)
 	}
 	return cloud
+}
+
+// configuredCloudByID looks the cloud up by ID, so it is found however many clouds the org has,
+// and fails unless it is on a provider the tests target and has a cloud resource.
+func configuredCloudByID(client *provider.Client, id string) (CloudInfo, error) {
+	resp, err := provider.DoRequestAndParse[struct {
+		Result listedCloud `json:"result"`
+	}](context.Background(), client, "GET", "/api/v2/clouds/"+id, nil, http.StatusOK)
+	if err != nil {
+		return CloudInfo{}, err
+	}
+	c := resp.Result
+	stack := normalizeComputeStack(c.ComputeStack)
+	if !isKnownProvider(c.Provider, stack) {
+		return CloudInfo{}, fmt.Errorf("cloud %s is on %s/%s, which no test targets", c.Name, c.Provider, stack)
+	}
+	hasResources, definitive := cloudHasResources(client, id)
+	if !definitive {
+		return CloudInfo{}, fmt.Errorf("could not determine whether cloud %s has a cloud resource", c.Name)
+	}
+	if !hasResources {
+		return CloudInfo{}, fmt.Errorf("cloud %s has no cloud resource", c.Name)
+	}
+	return CloudInfo{ID: c.ID, Name: c.Name, Provider: c.Provider, ComputeStack: stack}, nil
 }
 
 // pinnedVMCloud is pinnedCloud for tests that need a VM cloud: on any other platform the test
@@ -78,35 +111,6 @@ func skipUnlessPlatform(t skipT, cloud CloudInfo, platforms ...testPlatform) {
 		}
 	}
 	t.Skipf("SKIP(platform): pinned cloud %s is %s; this test runs on %v", cloud.Name, got, platforms)
-}
-
-// selectCloudByID returns the cloud with the given ID, independent of list order.
-func selectCloudByID(clouds []CloudInfo, id string) (CloudInfo, bool) {
-	for _, c := range clouds {
-		if c.ID == id {
-			return c, true
-		}
-	}
-	return CloudInfo{}, false
-}
-
-// A decoy VM cloud listed ahead of the pinned one must not be selected. The old selection
-// (first entry of the provider-deduplicated VM list) picks the decoy; this is the case that
-// sent real service deployments to a throwaway cloud.
-func TestSelectCloudByIDIgnoresListOrder(t *testing.T) {
-	decoy := CloudInfo{ID: "cld_decoy", Name: "tfacc-decoy", Provider: "AWS", ComputeStack: "VM"}
-	pinned := CloudInfo{ID: "cld_pinned", Name: defaultKnownGoodCloudName, Provider: "AWS", ComputeStack: "VM"}
-	clouds := []CloudInfo{decoy, pinned}
-
-	if got, ok := selectCloudByID(clouds, pinned.ID); !ok || got.ID != pinned.ID {
-		t.Fatalf("selectCloudByID picked %q (found=%v), want %q", got.ID, ok, pinned.ID)
-	}
-	if clouds[0].ID != decoy.ID {
-		t.Fatal("positive control broken: the decoy must be listed first")
-	}
-	if _, ok := selectCloudByID(clouds, "cld_absent"); ok {
-		t.Fatal("an absent ID must not resolve")
-	}
 }
 
 // platformRecorder records whether skipUnlessPlatform skipped.
@@ -175,5 +179,48 @@ func TestIsKnownProviderCoversEveryPlatform(t *testing.T) {
 		if got := isKnownProvider(tc.provider, tc.stack); got != tc.want {
 			t.Errorf("isKnownProvider(%q, %q) = %t, want %t", tc.provider, tc.stack, got, tc.want)
 		}
+	}
+}
+
+// The pinned cloud is looked up by ID: found regardless of where it would sit in the org's cloud
+// list, and rejected when no test can use it.
+func TestConfiguredCloudByID(t *testing.T) {
+	for _, tc := range []struct {
+		name, cloud, resources string
+		status                 int
+		wantPlatform           testPlatform
+		wantErr                string
+	}{
+		{"EKS fixture", `{"id": "cld_x", "name": "eks", "provider": "AWS", "compute_stack": "K8S"}`, `[{"id": "r"}]`, 200, platformEKS, ""},
+		{"AKS fixture", `{"id": "cld_x", "name": "aks", "provider": "AZURE", "compute_stack": "K8S"}`, `[{"id": "r"}]`, 200, platformAKS, ""},
+		{"AWS VM fixture", `{"id": "cld_x", "name": "vm", "provider": "AWS", "compute_stack": "VM"}`, `[{"id": "r"}]`, 200, platformAWSVM, ""},
+		{"no cloud resource", `{"id": "cld_x", "name": "empty", "provider": "AWS", "compute_stack": "VM"}`, `[]`, 200, "", "has no cloud resource"},
+		{"untargeted provider", `{"id": "cld_x", "name": "odd", "provider": "AZURE", "compute_stack": "VM"}`, `[{"id": "r"}]`, 200, "", "no test targets"},
+		{"cloud missing", `{}`, `[]`, 404, "", "404"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v2/clouds/cld_x":
+					w.WriteHeader(tc.status)
+					_, _ = fmt.Fprintf(w, `{"result": %s}`, tc.cloud)
+				case "/api/v2/clouds/cld_x/resources":
+					_, _ = fmt.Fprintf(w, `{"results": %s}`, tc.resources)
+				default:
+					t.Errorf("unexpected request %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+			got, err := configuredCloudByID(provider.NewClientWithToken(server.URL, "pinned-cloud-fake-token"), "cld_x")
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("err = %v", err)
+			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Fatalf("err = %v, want one containing %q", err, tc.wantErr)
+			case tc.wantErr == "" && got.Platform() != tc.wantPlatform:
+				t.Fatalf("platform = %s, want %s", got.Platform(), tc.wantPlatform)
+			}
+		})
 	}
 }
