@@ -12,6 +12,11 @@ resource "anyscale_cloud" "a" {
   # compute_stack intentionally OMITTED: an empty/multi-resource cloud derives its compute stack from
   # whichever resource(s) end up attached to it. Setting it explicitly here would produce a plan
   # inconsistency the moment a_vm/a_eks below report their own (different) values back.
+
+  # Destroy order: the IAM module's policies must outlive everything under this cloud, because
+  # Anyscale terminates the cloud's instances with them. A role ARN reference orders the role, not
+  # its policy attachments, so depend on the whole module.
+  depends_on = [module.anyscale_iam_roles_a]
 }
 
 resource "anyscale_cloud_resource" "a_vm" {
@@ -33,13 +38,24 @@ resource "anyscale_cloud_resource" "a_vm" {
   object_storage {
     bucket_name = module.anyscale_s3.s3_bucket_id
   }
+
+  # Destroy order: the IAM module's policies must outlive everything under this cloud, because
+  # Anyscale terminates the cloud's instances with them. A role ARN reference orders the role, not
+  # its policy attachments, so depend on the whole module.
+  depends_on = [module.anyscale_iam_roles_a]
 }
 
 resource "anyscale_cloud_resource" "a_eks" {
   # is_default is assigned by the backend to whichever cloud resource was created first (it isn't a
   # settable field) -- this ordering keeps a_vm the default/primary resource on Cloud A, and
   # cc_a_default in compute_config.tf relies on that to land on the VM leg without naming it.
-  depends_on = [anyscale_cloud_resource.a_vm]
+  # The operator's role and its attachments must outlive this resource too, for the same destroy
+  # ordering reason as a_vm above.
+  depends_on = [
+    anyscale_cloud_resource.a_vm,
+    aws_iam_role_policy.anyscale_operator_s3,
+    aws_eks_pod_identity_association.anyscale_operator,
+  ]
 
   cloud_id = anyscale_cloud.a.id
   name     = "${var.name_prefix}-cloud-a-eks"
