@@ -110,6 +110,9 @@ type cloudAccessMockIdentity struct {
 	// Defaults to "collaborator" when unset, so only a test that cares about
 	// J.22's org-admin guard needs to set it.
 	PermissionLevel string
+	// ServiceAccount marks a service account, which the organization collaborators list returns
+	// only when asked for service accounts (see the list handler).
+	ServiceAccount bool
 }
 
 func (m *cloudAccessReconcileMock) record(r *http.Request) {
@@ -140,8 +143,26 @@ func (m *cloudAccessReconcileMock) handler(t *testing.T, cloudID string) http.Ha
 	})
 
 	mux.HandleFunc("/api/v2/organization_collaborators", func(w http.ResponseWriter, r *http.Request) {
+		// Filtered as the backend does: email is a case-insensitive substring match; with no
+		// type parameter only user accounts come back; is_service_account=true returns only
+		// service accounts; collaborator_type=all_accounts returns both.
+		q := r.URL.Query()
+		wantUsers, wantServiceAccounts := true, false
+		switch {
+		case q.Get("collaborator_type") == "all_accounts":
+			wantServiceAccounts = true
+		case q.Get("collaborator_type") == "only_service_accounts", q.Get("is_service_account") == "true":
+			wantUsers, wantServiceAccounts = false, true
+		}
+		emailFilter := strings.ToLower(q.Get("email"))
 		results := []map[string]interface{}{}
 		for email, id := range m.orgMembers {
+			if emailFilter != "" && !strings.Contains(strings.ToLower(email), emailFilter) {
+				continue
+			}
+			if (id.ServiceAccount && !wantServiceAccounts) || (!id.ServiceAccount && !wantUsers) {
+				continue
+			}
 			userID := id.UserID
 			permissionLevel := id.PermissionLevel
 			if permissionLevel == "" {
@@ -715,6 +736,44 @@ func TestReconcileCloudAccess_GrantLoopContinuesPastAFailure(t *testing.T) {
 	}
 	if mem, ok := mock.members["bob@example.com"]; !ok || len(mem.BaseRoles) == 0 || mem.BaseRoles[0] != "writer" {
 		t.Errorf("bob's grant was not attempted after alice's failed: %v", mock.memberEmails())
+	}
+}
+
+// A declared service account that already holds its role is resolved like any other member:
+// nothing is recorded as ungranted, so removals of undeclared members still run. Before the
+// fix, the organization lookup hid service accounts, the account landed in ungranted_members on
+// every apply, and that failure made the apply skip every removal.
+func TestReconcileCloudAccess_ServiceAccountMemberResolvesAndRemovalsRun(t *testing.T) {
+	const cloudID = "cld_serviceaccount"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{
+			"deploy-bot@example.com": {IdentityID: "idn_sa", UserID: "usr_sa", BaseRoles: []string{"writer"}},
+			"carol@example.com":      {IdentityID: "idn_c", UserID: "usr_c", BaseRoles: []string{"writer"}},
+		},
+		orgMembers: map[string]cloudAccessMockIdentity{
+			"deploy-bot@example.com": {IdentityID: "idn_sa", UserID: "usr_sa", ServiceAccount: true},
+			"carol@example.com":      {IdentityID: "idn_c", UserID: "usr_c"},
+		},
+	}
+
+	result, diags := reconcileCloudAccess(context.Background(),
+		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
+		cloudAccessDesired(cloudAccessDesiredMember{Email: "deploy-bot@example.com", BaseRole: "writer"}),
+		cloudAccessApplyOptions())
+
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+	if len(result.Ungranted) != 0 {
+		t.Fatalf("the service account must resolve, got Ungranted: %+v", result.Ungranted)
+	}
+	if _, still := mock.members["carol@example.com"]; still {
+		t.Errorf("undeclared carol@example.com was not removed; members now: %v", mock.memberEmails())
+	}
+	if mem, ok := mock.members["deploy-bot@example.com"]; !ok || len(mem.BaseRoles) == 0 || mem.BaseRoles[0] != "writer" {
+		t.Errorf("the service account lost its role: %v", mock.memberEmails())
 	}
 }
 

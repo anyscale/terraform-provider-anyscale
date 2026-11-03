@@ -81,6 +81,9 @@ type orgUserRoleMemberFixture struct {
 	email           string
 	baseRole        string
 	additionalRoles []string
+	// serviceAccount marks a service account. The list endpoint returns service accounts
+	// only when asked for them (see handleList).
+	serviceAccount bool
 }
 
 func newMockOrgUserRoleServer(t *testing.T) (*httptest.Server, *mockOrgUserRoleServer) {
@@ -107,6 +110,14 @@ func (s *mockOrgUserRoleServer) seedMember(email, identityID, userID, baseRole s
 		baseRole:        baseRole,
 		additionalRoles: append([]string{}, additionalRoles...),
 	}
+}
+
+// seedServiceAccount registers an existing service account member.
+func (s *mockOrgUserRoleServer) seedServiceAccount(email, identityID, userID, baseRole string) {
+	s.seedMember(email, identityID, userID, baseRole, nil)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.members[strings.ToLower(email)].serviceAccount = true
 }
 
 func (s *mockOrgUserRoleServer) handle(w http.ResponseWriter, r *http.Request) {
@@ -143,16 +154,39 @@ func (s *mockOrgUserRoleServer) handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleList serves GET /api/v2/organization_collaborators, honoring the
-// server-side email narrowing hint the provider passes.
+// handleList serves GET /api/v2/organization_collaborators the way the backend filters it
+// (organization_collaborators.py, confirmed against the live API 2026-11-03): email is a
+// case-insensitive substring match; with no type parameter only user accounts are returned;
+// is_service_account=true returns only service accounts; collaborator_type, when set, takes
+// priority and an unknown value is a 422.
 //
 // additional_roles is hardcoded to [] here on purpose - see the type comment.
 func (s *mockOrgUserRoleServer) handleList(w http.ResponseWriter, r *http.Request) {
-	emailFilter := strings.ToLower(r.URL.Query().Get("email"))
+	q := r.URL.Query()
+	emailFilter := strings.ToLower(q.Get("email"))
+	wantUsers, wantServiceAccounts := true, false
+	switch q.Get("collaborator_type") {
+	case "all_accounts":
+		wantUsers, wantServiceAccounts = true, true
+	case "only_service_accounts":
+		wantUsers, wantServiceAccounts = false, true
+	case "only_user_accounts":
+	case "":
+		if q.Get("is_service_account") == "true" {
+			wantUsers, wantServiceAccounts = false, true
+		}
+	default:
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = fmt.Fprint(w, `{"error":{"detail":"query.collaborator_type: value is not a valid enumeration member"}}`)
+		return
+	}
 
 	results := make([]OrganizationCollaboratorResult, 0, len(s.members))
 	for email, m := range s.members {
-		if emailFilter != "" && email != emailFilter {
+		if emailFilter != "" && !strings.Contains(email, emailFilter) {
+			continue
+		}
+		if (m.serviceAccount && !wantServiceAccounts) || (!m.serviceAccount && !wantUsers) {
 			continue
 		}
 		userID := m.userID
@@ -962,6 +996,38 @@ func TestResolveIdentityForEmail_ResolvesBothIDs(t *testing.T) {
 	}
 	if identityID != "ide_mixed" || userID != "usr_mixed" {
 		t.Errorf("got identityID=%q userID=%q, want identityID=%q userID=%q", identityID, userID, "ide_mixed", "usr_mixed")
+	}
+}
+
+// A service account is an organization member too. The list endpoint hides service accounts
+// unless asked, so a lookup that only asks the default way reports the account as missing,
+// and anyscale_cloud_access then lists it in ungranted_members on every apply.
+func TestResolveIdentityForEmail_ResolvesServiceAccount(t *testing.T) {
+	httpServer, mock := newMockOrgUserRoleServer(t)
+	client := NewClientWithToken(httpServer.URL, "test-token")
+	mock.seedServiceAccount("Deploy-Bot@Example.com", "ide_sa", "usr_sa", "collaborator")
+
+	identityID, userID, err := resolveIdentityForEmail(context.Background(), client, "deploy-bot@example.com")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if identityID != "ide_sa" || userID != "usr_sa" {
+		t.Errorf("got identityID=%q userID=%q, want ide_sa/usr_sa", identityID, userID)
+	}
+}
+
+// The email filter is a substring match, so another member whose email contains the one looked
+// up must not be mistaken for it: here a service account, which a lookup that includes service
+// accounts sees.
+func TestResolveIdentityForEmail_SubstringNeighbourIgnored(t *testing.T) {
+	httpServer, mock := newMockOrgUserRoleServer(t)
+	client := NewClientWithToken(httpServer.URL, "test-token")
+	mock.seedMember("ana@example.com", "ide_user", "usr_user", "collaborator", nil)
+	mock.seedServiceAccount("bot-ana@example.com", "ide_sa", "usr_sa", "collaborator")
+
+	identityID, _, err := resolveIdentityForEmail(context.Background(), client, "ana@example.com")
+	if err != nil || identityID != "ide_user" {
+		t.Fatalf("got identityID=%q err=%v, want ide_user", identityID, err)
 	}
 }
 
