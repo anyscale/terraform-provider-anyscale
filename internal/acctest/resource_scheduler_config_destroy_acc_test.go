@@ -8,9 +8,11 @@ package acctest
 // real requests against the mock catches it.
 
 import (
+	"context"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
@@ -21,7 +23,7 @@ func TestAccSchedulerConfigResource_DestroyIsStateOnly_MockServer(t *testing.T) 
 	defer server.Close()
 	config := schedulerReadImportHCL(server.URL)
 
-	var writesAfterCreate int
+	var writesAfterCreate, validatesAfterCreate int
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
@@ -34,6 +36,13 @@ func TestAccSchedulerConfigResource_DestroyIsStateOnly_MockServer(t *testing.T) 
 						return nil
 					},
 				),
+				// The step plans twice more after Check; each plan validates. PostApplyPostRefresh
+				// runs after the last of them, so this count is the baseline for the implicit destroy.
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						captureValidateHits{mock: mock, into: &validatesAfterCreate},
+					},
+				},
 			},
 		},
 	})
@@ -48,7 +57,29 @@ func TestAccSchedulerConfigResource_DestroyIsStateOnly_MockServer(t *testing.T) 
 	if writesAfterDestroy != writesAfterCreate {
 		t.Fatalf("expected Destroy to make zero write (POST) calls, but write count went from %d (after create) to %d (after implicit destroy)", writesAfterCreate, writesAfterDestroy)
 	}
+	// ModifyPlan must short-circuit on a destroy plan: its null config is fully known,
+	// so the IsFullyKnown gate does not stop it. Removing the guard is caught elsewhere
+	// only because Config.Get fails on a null object; if the config were read
+	// null-tolerantly, a destroy would POST an empty document to /config/validate with
+	// no error. This assertion catches that; WriteCount cannot (it counts only POST /config).
+	if validatesAfter := mock.ValidateHits(); validatesAfter != validatesAfterCreate {
+		t.Fatalf("expected the destroy plan to make zero /config/validate calls, but validate count went from %d (after create) to %d (after implicit destroy)", validatesAfterCreate, validatesAfter)
+	}
+	if validatesAfterCreate == 0 {
+		t.Fatalf("sanity check failed: expected Create's plan to call /config/validate at least once, got 0")
+	}
 	if writesAfterCreate != 1 {
 		t.Fatalf("sanity check failed: expected exactly 1 write call from Create's own apply, got %d", writesAfterCreate)
 	}
+}
+
+// captureValidateHits records the mock's /config/validate count at the moment
+// a plan check runs. It never fails the plan.
+type captureValidateHits struct {
+	mock *schedulerConfigServer
+	into *int
+}
+
+func (c captureValidateHits) CheckPlan(_ context.Context, _ plancheck.CheckPlanRequest, _ *plancheck.CheckPlanResponse) {
+	*c.into = c.mock.ValidateHits()
 }
