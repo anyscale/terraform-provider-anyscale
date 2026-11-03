@@ -1,3 +1,0 @@
-```release-note:fixed
-provider: Errors from `anyscale_cloud` (resource and data source), `anyscale_organization_default_cloud` and `anyscale_organization_invitation` now show the HTTP status and the API's own message instead of the raw status line and response body.
-```

@@ -1,3 +1,0 @@
-```release-note:fixed
-resource/anyscale_cloud_access: Refuses to change a cloud's members when /api/v2/userinfo returns no user ID, instead of treating the response as an unknown identity that could revoke the caller's own access.
-```

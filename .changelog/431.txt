@@ -1,3 +1,0 @@
-```release-note:fixed
-resource/anyscale_cloud: An AWS cloud created with an `aws_config.external_id` that starts with your organization ID now records it as the cloud's own external ID, so its services can pass the load balancer step instead of failing with an `sts:AssumeRole` denial. The API cannot change this on an existing cloud: an AWS cloud created by an earlier version with `aws_config.external_id` set has to be recreated before its services can work. Recreating (`terraform apply -replace=anyscale_cloud.<name>`) destroys the cloud first, and with it everything that depends on it, such as projects, compute configs and services.
-```

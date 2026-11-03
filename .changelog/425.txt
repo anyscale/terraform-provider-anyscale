@@ -1,3 +1,0 @@
-```release-note:fixed
-provider: An API error from a read that was retried now shows the API's own message instead of the raw response, and says that every attempt failed and the problem is usually transient.
-```
