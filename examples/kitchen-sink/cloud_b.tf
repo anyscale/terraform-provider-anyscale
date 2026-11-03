@@ -23,8 +23,12 @@ resource "anyscale_cloud" "b" {
     bucket_name = module.anyscale_s3.s3_bucket_id
   }
 
-  # Cloud B's roles get the shared bucket through roles_a's S3 policy (infra_aws.tf).
+  # Destroy order: the IAM policies must outlive everything under this cloud, because Anyscale
+  # terminates the cloud's instances with them. A role ARN reference orders the role, not its policy
+  # attachments, so depend on the whole module and on the S3 attachments made outside it
+  # (infra_aws.tf).
   depends_on = [
+    module.anyscale_iam_roles_b,
     aws_iam_role_policy_attachment.roles_b_node_s3,
     aws_iam_role_policy_attachment.roles_b_access_s3,
   ]
