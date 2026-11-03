@@ -165,9 +165,17 @@ func TestAPIErrorDetail_RetriedRead(t *testing.T) {
 		}
 	})
 
+	// A detail with no closing punctuation gets a period before the note.
+	t.Run("JSON detail without a period, 3 attempts", func(t *testing.T) {
+		err := &UnexpectedStatusError{StatusCode: 404, Body: `{"error":{"detail":"Cloud not found"}}`, Attempts: 3}
+		if got, want := addAPIErrorDetail(err), "Failed to read cloud (HTTP 404): Cloud not found."+advisory; got != want {
+			t.Errorf("AddAPIError detail = %q, want %q", got, want)
+		}
+	})
+
 	t.Run("non-JSON body, 3 attempts", func(t *testing.T) {
 		err := &UnexpectedStatusError{StatusCode: 502, Body: "bad gateway", Attempts: 3}
-		if got, want := addAPIErrorDetail(err), "Failed to read cloud (HTTP 502): bad gateway"+advisory; got != want {
+		if got, want := addAPIErrorDetail(err), "Failed to read cloud (HTTP 502): bad gateway."+advisory; got != want {
 			t.Errorf("AddAPIError detail = %q, want %q", got, want)
 		}
 		// No detail to extract: callers get the full error text, as before.
@@ -178,7 +186,7 @@ func TestAPIErrorDetail_RetriedRead(t *testing.T) {
 
 	t.Run("empty body, 3 attempts", func(t *testing.T) {
 		err := &UnexpectedStatusError{StatusCode: 504, Body: "", Attempts: 3}
-		if got, want := addAPIErrorDetail(err), "Failed to read cloud (HTTP 504): the response had no body"+advisory; got != want {
+		if got, want := addAPIErrorDetail(err), "Failed to read cloud (HTTP 504): the response had no body."+advisory; got != want {
 			t.Errorf("AddAPIError detail = %q, want %q", got, want)
 		}
 	})

@@ -42,6 +42,9 @@ func AddAPIError(diags *diag.Diagnostics, operation string, err error) {
 		}
 		msg := fmt.Sprintf("Failed to %s (HTTP %d): %s", operation, statusErr.StatusCode, detail)
 		if statusErr.Attempts > 1 {
+			if !strings.HasSuffix(msg, ".") && !strings.HasSuffix(msg, "!") && !strings.HasSuffix(msg, "?") {
+				msg += "."
+			}
 			msg += fmt.Sprintf(" The request failed on all %d attempts; this is usually a transient Anyscale API problem, so re-run the command.", statusErr.Attempts)
 		}
 		diags.AddError("API Request Failed", msg)
