@@ -27,8 +27,8 @@ cluster with the operator). Everything else only needs a working cloud. So:
   cloud.
 
 Layer 2 needs a static fixture cloud per platform. Only `tfp-test-aws-useast1-STATIC` (AWS-VM)
-exists today. **Open decision:** engineering provisions GCP-VM, EKS, GKE and AKS fixtures, named
-`tfp-test-<platform>-STATIC`, by name only (IDs are never committed).
+exists today. GCP-VM, EKS, GKE and AKS fixtures are created by this project, named
+`tfp-test-<platform>-STATIC` and referenced by name only (IDs are never committed).
 
 ## Prerequisite: platform-aware fixture resolution
 
@@ -118,11 +118,16 @@ per-platform matrix.
 
 ## Open decisions
 
-1. Static fixture clouds for GCP-VM, EKS, GKE, AKS (engineering).
+1. Static fixture clouds for GCP-VM, EKS, GKE and AKS: defined and created by this project, not
+   by engineering. AKS needs an Azure subscription to be arranged.
 2. AKS real-infra runs (user approval).
 3. Dedicated IAM-mapping clouds per platform, or skip IAM mapping outside AWS-VM.
-4. Whether `enable_task_dashboard_k8s` is on for the K8S fixtures.
-5. A dedicated system-cluster cloud per platform (`ANYSCALE_TEST_SYSTEM_CLUSTER_CLOUD_ID`), or AWS-VM only.
+4. System cluster coverage on one VM and one Kubernetes platform: AWS-VM and EKS. On Kubernetes
+   the backend refuses to launch a system cluster unless the cloud-scoped flag
+   `enable_task_dashboard_k8s` is on (`_is_system_cluster_enabled_for_cloud` in
+   `system_workload_service.py` returns 501 otherwise), so it must be enabled for the EKS
+   system-cluster cloud. The system cluster is what backs the task dashboard.
+5. Dedicated system-cluster clouds (`ANYSCALE_TEST_SYSTEM_CLUSTER_CLOUD_ID`) for AWS-VM and EKS.
 6. Network reach from the Buildkite runners to each fixture cloud's service ingress. The
    service-credentials test sends real requests to the running service and fails, not skips, when the
    load balancer is unreachable; the static AWS fixture's ingress does not admit arbitrary addresses.
