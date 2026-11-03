@@ -83,9 +83,11 @@ data "anyscale_service" "hello" {
   id = anyscale_service.hello.id
 }
 
-# --- anyscale_system_cluster ---------------------------------------------------------------------
+# --- anyscale_system_cluster (gated by enable_system_cluster) ------------------------------------
 data "anyscale_system_cluster" "b" {
-  cloud_id = anyscale_system_cluster.b.cloud_id
+  count = var.enable_system_cluster ? 1 : 0
+
+  cloud_id = anyscale_system_cluster.b[0].cloud_id
 }
 
 # --- anyscale_cloud_iam_mapping ------------------------------------------------------------------

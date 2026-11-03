@@ -148,3 +148,9 @@ variable "enable_role_binding" {
     error_message = "enable_role_binding needs enable_user_groups: the binding is granted to the kitchen-sink user group."
   }
 }
+
+variable "enable_system_cluster" {
+  description = "Enable and start Cloud B's System Cluster. Off by default: destroy does not stop it, so its instance keeps running and blocks the VPC's teardown until you stop it or terminate the instance."
+  type        = bool
+  default     = false
+}

@@ -141,8 +141,8 @@ output "package_uri" {
 }
 
 output "system_cluster_state" {
-  value       = data.anyscale_system_cluster.b.state
-  description = "Cloud B's System Cluster state, read back by the data source."
+  value       = var.enable_system_cluster ? data.anyscale_system_cluster.b[0].state : null
+  description = "Cloud B's System Cluster state. Null unless enable_system_cluster is set."
 }
 
 output "iam_mapping_rules" {
