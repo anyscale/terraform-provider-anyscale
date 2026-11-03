@@ -431,10 +431,11 @@ this by hardcoding the ID.
 Cleanup: ephemeral clouds are destroyed by default; `ANYSCALE_TEST_KEEP=1` keeps one and prints its
 ID/name (never tokens).
 
-`ANYSCALE_TEST_IAM_MAPPING_CLOUD_ID` is not an override: it names a dedicated cloud for the
-iam_mapping real-infra tests. They skip when it is unset and refuse the STATIC fixture, because they
-rewrite the cloud's IAM mapping. Deliberately separate from `ANYSCALE_TEST_CLOUD_ID`, which pins every
-test's cloud.
+`ANYSCALE_TEST_IAM_MAPPING_CLOUD_ID` and `ANYSCALE_TEST_SYSTEM_CLUSTER_CLOUD_ID` are not overrides:
+each names a dedicated cloud for tests that change it for good (the iam_mapping tests rewrite its IAM
+mapping; the system_cluster test enables its system cluster, which Delete never disables). They skip
+when unset and refuse the STATIC fixture. Deliberately separate from `ANYSCALE_TEST_CLOUD_ID`, which
+pins every test's cloud.
 
 ### Real-infra test gates and user fixtures
 
@@ -455,6 +456,9 @@ comment gives the exact command). They skip cleanly when unset.
   `converted`. Tests that need one mode skip in the other; a test that hits the other mode's 409
   fails with the value to set. CI reads the repository variable of the same name. Set it to match
   the org you run against, or real-API runs fail loudly by design.
+- `ANYSCALE_TEST_ORG_MUTATION=1` — gates real-API tests that change org-wide state (default cloud,
+  scheduler config, organization_user); requires `ANYSCALE_TEST_ORG_NAME`. Each snapshots the value
+  and restores it in cleanup (`skipUnlessOrgMutation`).
 
 Same reasoning as `ANYSCALE_TEST_CLOUD_NAME`: the literal address is never committed. Use a real
 disposable plus-alias in an inbox you control (`you+tfprovidertest@yourdomain.com`). Never a

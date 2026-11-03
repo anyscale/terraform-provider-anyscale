@@ -16,7 +16,7 @@ import (
 
 // End-to-end tests of anyscale_service canary_percent (docs/decisions/service-canary-percent)
 // against the real backend. Each test creates one compute config, one ephemeral project and one
-// service on the pinned static VM cloud (pinnedVMCloud), and destroys all of them at the end.
+// service on the pinned fixture cloud (pinnedWorkloadCloud: any platform), and destroys them all.
 //
 //   - TestAccServiceResource_RealInfra_CanaryPercentHoldShiftComplete (decisions 4, 5, 12): a deploy
 //     held at 0, shifted to 25 (same canary, no new version), then completed by removing
@@ -56,11 +56,7 @@ type canaryRealInfraFixture struct {
 
 func newCanaryRealInfraFixture(t *testing.T, slug string) canaryRealInfraFixture {
 	t.Helper()
-	cloud := pinnedVMCloud(t)
-	instanceTypes := cloud.InstanceTypes()
-	if !instanceTypes.IsValid() {
-		t.Skip("No valid instance types on the resolved cloud")
-	}
+	cloud, headInstanceType := pinnedWorkloadCloud(t)
 	// Scoped to the cloud: see TestAccServiceResource_RealInfra for why not the default project.
 	projectID, _, err := CreateEphemeralTestProjectForCloud(t, cloud.ID)
 	if err != nil {
@@ -70,7 +66,7 @@ func newCanaryRealInfraFixture(t *testing.T, slug string) canaryRealInfraFixture
 		computeConfigName: UniqueName(t, "cc-"+slug),
 		serviceName:       UniqueName(t, slug),
 		cloudID:           cloud.ID,
-		instanceType:      instanceTypes.Small,
+		instanceType:      headInstanceType,
 		projectID:         projectID,
 	}
 }

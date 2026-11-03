@@ -704,7 +704,7 @@ func GetAnyCloudID(t *testing.T) string {
 type CloudInfo struct {
 	ID           string
 	Name         string
-	Provider     string // "AWS" or "GCP"
+	Provider     string // "AWS", "GCP", "AZURE" or "GENERIC"
 	ComputeStack string // "VM" or "K8S"
 }
 
@@ -727,16 +727,25 @@ func normalizeComputeStack(computeStack string) string {
 	return computeStack
 }
 
-// isKnownProvider returns true if the provider is a known cloud provider (AWS, GCP, or Generic for K8S).
+// isKnownProvider reports whether a cloud is on a provider the tests target: AWS or GCP on any
+// compute stack, AZURE or GENERIC on K8S.
 func isKnownProvider(provider, computeStack string) bool {
 	if provider == "AWS" || provider == "GCP" {
 		return true
 	}
-	// Generic provider is only valid for K8S compute stack
-	if provider == "Generic" && computeStack == "K8S" {
+	// AZURE and GENERIC are only valid for the K8S compute stack.
+	if (provider == "AZURE" || provider == "GENERIC") && computeStack == "K8S" {
 		return true
 	}
 	return false
+}
+
+// listedCloud is the subset of a /api/v2/clouds entry the test helpers read.
+type listedCloud struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Provider     string `json:"provider"`
+	ComputeStack string `json:"compute_stack"`
 }
 
 // GetAllConfiguredClouds returns all clouds that have cloud resources configured.
@@ -762,33 +771,23 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 		t.Fatalf("GetAllConfiguredClouds: failed to get test client: %v", err)
 	}
 
-	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/clouds", nil)
+	// Every page: the fixture or auto-discovered cloud may sit past the first page in an org
+	// with many clouds.
+	results, err := provider.PaginatedRequest(context.Background(), client, "/api/v2/clouds", nil,
+		func(body []byte) ([]listedCloud, *string, error) {
+			var page struct {
+				Results  []listedCloud `json:"results"`
+				Metadata struct {
+					NextPagingToken *string `json:"next_paging_token"`
+				} `json:"metadata"`
+			}
+			if err := json.Unmarshal(body, &page); err != nil {
+				return nil, nil, err
+			}
+			return page.Results, page.Metadata.NextPagingToken, nil
+		})
 	if err != nil {
 		t.Fatalf("GetAllConfiguredClouds: failed to list clouds: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("GetAllConfiguredClouds: list clouds returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("GetAllConfiguredClouds: failed to read response: %v", err)
-	}
-
-	var cloudsResp struct {
-		Results []struct {
-			ID           string `json:"id"`
-			Name         string `json:"name"`
-			Provider     string `json:"provider"`
-			ComputeStack string `json:"compute_stack"`
-		} `json:"results"`
-	}
-
-	if err := json.Unmarshal(body, &cloudsResp); err != nil {
-		t.Fatalf("GetAllConfiguredClouds: failed to parse clouds response: %v", err)
 	}
 
 	var clouds []CloudInfo
@@ -799,7 +798,7 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 	// is absent from each result, not an empty array), so checking an inline
 	// field would exclude every cloud and silently skip every caller.
 	// Resource health comes from the per-cloud endpoint instead.
-	for _, cloud := range cloudsResp.Results {
+	for _, cloud := range results {
 		computeStack := normalizeComputeStack(cloud.ComputeStack)
 		if !isKnownProvider(cloud.Provider, computeStack) {
 			continue

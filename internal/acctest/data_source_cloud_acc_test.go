@@ -1,12 +1,16 @@
 package acctest
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"strconv"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+
+	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 )
 
 func TestAccCloudDataSource_ByID(t *testing.T) {
@@ -51,10 +55,43 @@ func TestAccCloudDataSource_ByName(t *testing.T) {
 					resource.TestCheckResourceAttrSet("data.anyscale_cloud.test", "id"),
 					resource.TestCheckResourceAttrSet("data.anyscale_cloud.test", "cloud_provider"),
 					resource.TestCheckResourceAttrSet("data.anyscale_cloud.test", "region"),
+					testAccCheckCloudDataSourceMatchesAPIPlatform("data.anyscale_cloud.test"),
 				),
 			},
 		},
 	})
+}
+
+// testAccCheckCloudDataSourceMatchesAPIPlatform checks that the data source reports the cloud's
+// provider and compute stack as the API does, so the test proves the read-back on whichever
+// platform's fixture is pinned.
+func testAccCheckCloudDataSourceMatchesAPIPlatform(addr string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[addr]
+		if !ok {
+			return fmt.Errorf("not found in state: %s", addr)
+		}
+		client, err := GetTestClient()
+		if err != nil {
+			return err
+		}
+		resp, err := provider.DoRequestAndParse[struct {
+			Result listedCloud `json:"result"`
+		}](context.Background(), client, "GET", "/api/v2/clouds/"+rs.Primary.Attributes["id"], nil, http.StatusOK)
+		if err != nil {
+			return err
+		}
+		want := map[string]string{
+			"cloud_provider": resp.Result.Provider,
+			"compute_stack":  normalizeComputeStack(resp.Result.ComputeStack),
+		}
+		for attr, v := range want {
+			if got := rs.Primary.Attributes[attr]; got != v {
+				return fmt.Errorf("%s.%s = %q, API reports %q", addr, attr, got, v)
+			}
+		}
+		return nil
+	}
 }
 
 func TestAccCloudDataSource_WithComputeConfig(t *testing.T) {

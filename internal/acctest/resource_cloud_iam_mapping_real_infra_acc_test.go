@@ -349,6 +349,22 @@ resource "anyscale_cloud_iam_mapping" "test" {
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: false,
 			},
+			{
+				// The anyscale_cloud_iam_mapping data source reads back what the resource wrote.
+				Config: updateConfig + `
+data "anyscale_cloud_iam_mapping" "test" {
+  cloud_id          = anyscale_cloud_iam_mapping.test.cloud_id
+  cloud_resource_id = anyscale_cloud_iam_mapping.test.cloud_resource_id
+}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("data.anyscale_cloud_iam_mapping.test", "rules.#", "2"),
+					resource.TestCheckResourceAttrPair("data.anyscale_cloud_iam_mapping.test", "rules.0.value", "anyscale_cloud_iam_mapping.test", "rules.0.value"),
+					resource.TestCheckResourceAttrPair("data.anyscale_cloud_iam_mapping.test", "rules.1.selector", "anyscale_cloud_iam_mapping.test", "rules.1.selector"),
+					resource.TestCheckResourceAttrPair("data.anyscale_cloud_iam_mapping.test", "fallback_rule", "anyscale_cloud_iam_mapping.test", "fallback_rule"),
+					resource.TestCheckResourceAttrPair("data.anyscale_cloud_iam_mapping.test", "mode", "anyscale_cloud_iam_mapping.test", "mode"),
+				),
+			},
 		},
 		CheckDestroy: func(_ *terraform.State) error {
 			// Independent real read, not a terraform-state check: this is

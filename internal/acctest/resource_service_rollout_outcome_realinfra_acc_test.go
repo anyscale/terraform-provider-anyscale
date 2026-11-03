@@ -37,11 +37,7 @@ func TestAccServiceResource_RealInfra_RolledBackRollout(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	SkipIfNoRealInfra(t)
 
-	cloud := pinnedVMCloud(t)
-	instanceTypes := cloud.InstanceTypes()
-	if !instanceTypes.IsValid() {
-		t.Skip("No valid instance types on the resolved cloud")
-	}
+	cloud, headInstanceType := pinnedWorkloadCloud(t)
 	// Scoped to the cloud: see TestAccServiceResource_RealInfra for why not the default project.
 	projectID, _, err := CreateEphemeralTestProjectForCloud(t, cloud.ID)
 	if err != nil {
@@ -81,7 +77,7 @@ resource "anyscale_service" "test" {
     ]
   }
 }
-`, computeConfigName, cloud.ID, instanceTypes.Small, serviceName, projectID, importPath)
+`, computeConfigName, cloud.ID, headInstanceType, serviceName, projectID, importPath)
 	}
 	good := configFor("main:app")
 	broken := configFor("main:tfacc_missing_app")
