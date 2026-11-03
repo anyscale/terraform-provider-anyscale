@@ -94,14 +94,14 @@ implicit extra one.
 
 - `anyscale_runtime_env_package` packages `./app`, and `anyscale_service` runs it as a Ray Serve
   hello-world on the built image. Apply waits for `RUNNING`; destroy terminates the service.
-- `anyscale_system_cluster` keeps running after `terraform destroy`: removing the resource only drops it from state, and deleting Cloud B does not stop it.
 - `anyscale_cloud_iam_mapping` maps jobs and services to Cloud B's own node role (a no-op at runtime).
-- Data sources `anyscale_system_cluster`, `anyscale_cloud_iam_mapping` and `anyscale_role` (`project_viewer`).
+- Data sources `anyscale_cloud_iam_mapping` and `anyscale_role` (`project_viewer`); `anyscale_system_cluster` is gated (below).
 
 **Gated (zero instances unless you set the variable):**
 
 | Variable | Enables | Needs |
 | --- | --- | --- |
+| `enable_system_cluster` | `anyscale_system_cluster` (Cloud B) and its data source | Nothing extra, but destroying it only removes it from state and deleting the cloud leaves its instance running: stop or terminate it yourself first |
 | `org_user_email` | `anyscale_organization_user` and its data source | An existing member's email (a non-member gets a real invitation) |
 | `enable_user_groups` | `anyscale_user_group`, `anyscale_user_group_members`, and the `anyscale_user_group` / `anyscale_user_groups` data sources | User groups enabled for your org (org-wide objects behind a feature flag) |
 | `user_group_member_emails` | Group membership | Each email must be an accepted org member |
@@ -130,7 +130,7 @@ implicit extra one.
    billing. Track your own state and tear it down when you're done.
 2. **This creates two real clouds, two projects, three compute configs, two container images, and a
    running Ray Serve service** in your Anyscale org, plus the AWS infrastructure above. Deleting a
-   cloud does not stop its running clusters: Cloud B's System Cluster (and any service cluster that has
+   cloud does not stop its running clusters: Cloud B's System Cluster, if you enabled it (and any service cluster that has
    not finished terminating) keeps its EC2 instances, which pin the VPC's internet gateway, so
    `terraform destroy` can hang or leak the VPC. After destroying, terminate leftover instances in the
    VPC (or the cluster in the Anyscale console), then re-run destroy.
