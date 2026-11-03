@@ -69,6 +69,29 @@ type CloudDataSourceModel struct {
 	ExternalID        types.String `tfsdk:"external_id"`
 }
 
+// applyCloudSummary copies the attributes anyscale_cloud shares with
+// anyscale_clouds from the one mapper both use, cloudSummaryFromResult.
+func (m *CloudDataSourceModel) applyCloudSummary(s CloudSummaryModel) {
+	m.ID = s.ID
+	m.Name = s.Name
+	m.CloudProvider = s.CloudProvider
+	m.ComputeStack = s.ComputeStack
+	m.Region = s.Region
+	m.Status = s.Status
+	m.State = s.State
+	m.CreatedAt = s.CreatedAt
+	m.CreatorID = s.CreatorID
+	m.IsDefault = s.IsDefault
+	m.IsK8s = s.IsK8s
+	m.IsPrivateCloud = s.IsPrivateCloud
+	m.AutoAddUser = s.AutoAddUser
+	m.LineageTrackingEnabled = s.LineageTrackingEnabled
+	m.AggregatedLogsEnabled = s.AggregatedLogsEnabled
+	m.AvailabilityZones = s.AvailabilityZones
+	m.Version = s.Version
+	m.ExternalID = s.ExternalID
+}
+
 // Metadata returns the data source type name.
 func (d *CloudDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_cloud"
@@ -229,45 +252,11 @@ func (d *CloudDataSource) readCloudIntoModel(ctx context.Context, cloudID string
 		return fmt.Errorf("failed to parse JSON response: %w", err)
 	}
 
-	config.ID = types.StringValue(cloudResp.Result.ID)
-	config.Name = types.StringValue(cloudResp.Result.Name)
-	config.CloudProvider = types.StringValue(cloudResp.Result.Provider)
-	config.Region = types.StringValue(cloudResp.Result.Region)
-
-	// DS-CLOUD-3: shared with the plural DS's identical guard (stringOrNull) so
-	// the two behave the same way, not just similarly.
-	config.Status = stringOrNull(cloudResp.Result.Status)
-	config.State = stringOrNull(cloudResp.Result.State)
-
-	// Cloud-level boolean settings come straight off the cloud payload.
-	config.AutoAddUser = types.BoolValue(cloudResp.Result.AutoAddUser)
-	config.LineageTrackingEnabled = types.BoolValue(cloudResp.Result.LineageTrackingEnabled)
-	config.AggregatedLogsEnabled = types.BoolValue(cloudResp.Result.IsAggregatedLogsEnabled)
-
-	// C2: parity fields with the plural anyscale_clouds data source - mapped
-	// the same unconditional way plural's fetchClouds does, so the two
-	// report identical values for the same cloud rather than diverging on
-	// edge cases like an empty compute_stack from a pre-field-existing cloud.
-	config.ComputeStack = types.StringValue(cloudResp.Result.ComputeStack)
-	config.CreatedAt = types.StringValue(cloudResp.Result.CreatedAt)
-	config.CreatorID = types.StringValue(cloudResp.Result.CreatorID)
-	config.IsDefault = types.BoolValue(cloudResp.Result.IsDefault)
-	config.IsPrivateCloud = types.BoolValue(cloudResp.Result.IsPrivateCloud)
-
-	// DS-CLOUD-4/DS-CLOUD-5 (Phase B parity fields). is_k8s/version are plain
-	// bool/string on the backend Cloud model (always populated, no null case).
-	// external_id is genuinely Optional[str] server-side (validated to start
-	// with "org_" when set) - StringPointerValue so an unset external_id is
-	// Terraform null, never "".
-	config.IsK8s = types.BoolValue(cloudResp.Result.IsK8s)
-	config.Version = types.StringValue(cloudResp.Result.Version)
-	config.ExternalID = types.StringPointerValue(cloudResp.Result.ExternalID)
-
-	azList, azDiags := types.ListValueFrom(ctx, types.StringType, cloudResp.Result.AvailabilityZones)
-	if azDiags.HasError() {
-		return fmt.Errorf("failed to convert availability_zones: %v", azDiags)
+	summary, err := cloudSummaryFromResult(ctx, cloudResp.Result)
+	if err != nil {
+		return err
 	}
-	config.AvailabilityZones = azList
+	config.applyCloudSummary(summary)
 
 	// is_empty_cloud and cloud_resource_id aren't on the cloud payload itself -
 	// derive them from the cloud's resources the same way anyscale_cloud_resource

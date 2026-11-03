@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -216,16 +215,7 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	// Fetch clouds the user has access to from /api/v2/clouds, across every
 	// page rather than just the first (this endpoint paginates - see the
 	// dedicated anyscale_clouds data source, which already does the same).
-	clouds, err := PaginatedRequest(
-		ctx, d.client, "/api/v2/clouds", nil,
-		func(body []byte) ([]CloudResult, *string, error) {
-			var listResp CloudsListResponse
-			if err := json.Unmarshal(body, &listResp); err != nil {
-				return nil, nil, fmt.Errorf("failed to unmarshal clouds: %w", err)
-			}
-			return listResp.Results, listResp.Metadata.NextPagingToken, nil
-		},
-	)
+	clouds, err := listAllClouds(ctx, d.client, nil)
 	if err != nil {
 		tflog.Error(ctx, "Failed to fetch clouds", map[string]any{"error": err.Error()})
 		AddAPIError(&resp.Diagnostics, "fetch clouds", err)
