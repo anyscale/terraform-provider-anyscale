@@ -13,13 +13,12 @@ package acctest
 // support for permanent deletion of container images.
 
 import (
-	"context"
 	"fmt"
+	"net/http"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
-	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 // TestAccContainerImageBuildResource_Basic tests building from an inline containerfile.
@@ -185,35 +184,14 @@ RUN pip install emoji==2.15.0`
 
 // Helper functions
 
+// containerImageBuildExistsCheck is how testAccCheckContainerImageBuildExistsInAPI finds the resource.
+var containerImageBuildExistsCheck = apiExistsCheck{
+	noun: "cluster environment", id: attrID("id"), getPathFmt: "/api/v2/application_templates/%s",
+	accepted: []int{http.StatusOK},
+}
+
 func testAccCheckContainerImageBuildExistsInAPI(resourceName string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		rs, ok := s.RootModule().Resources[resourceName]
-		if !ok {
-			return fmt.Errorf("resource not found: %s", resourceName)
-		}
-
-		clusterEnvID := rs.Primary.Attributes["id"]
-		if clusterEnvID == "" {
-			return fmt.Errorf("cluster environment ID not set")
-		}
-
-		client, err := GetTestClient()
-		if err != nil {
-			return fmt.Errorf("failed to get test client: %w", err)
-		}
-
-		resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/application_templates/%s", clusterEnvID), nil)
-		if err != nil {
-			return fmt.Errorf("failed to get cluster environment: %w", err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-
-		if resp.StatusCode != 200 {
-			return fmt.Errorf("cluster environment not found in API: status %d", resp.StatusCode)
-		}
-
-		return nil
-	}
+	return NewAPIExistsCheck(resourceName, containerImageBuildExistsCheck)
 }
 
 // Configuration templates

@@ -13,8 +13,8 @@ package acctest
 // support for permanent deletion of container images.
 
 import (
-	"context"
 	"fmt"
+	"net/http"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -194,35 +194,14 @@ func TestAccContainerImageRegistryResource_BYOD(t *testing.T) {
 
 // Helper functions
 
+// containerImageRegistryExistsCheck is how testAccCheckContainerImageRegistryExistsInAPI finds the resource.
+var containerImageRegistryExistsCheck = apiExistsCheck{
+	noun: "build", id: attrID("build_id"), getPathFmt: "/api/v2/builds/%s",
+	accepted: []int{http.StatusOK, http.StatusCreated},
+}
+
 func testAccCheckContainerImageRegistryExistsInAPI(resourceName string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		rs, ok := s.RootModule().Resources[resourceName]
-		if !ok {
-			return fmt.Errorf("resource not found: %s", resourceName)
-		}
-
-		buildID := rs.Primary.Attributes["build_id"]
-		if buildID == "" {
-			return fmt.Errorf("build ID not set")
-		}
-
-		client, err := GetTestClient()
-		if err != nil {
-			return fmt.Errorf("failed to get test client: %w", err)
-		}
-
-		resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/builds/%s", buildID), nil)
-		if err != nil {
-			return fmt.Errorf("failed to get build: %w", err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-
-		if resp.StatusCode != 200 && resp.StatusCode != 201 {
-			return fmt.Errorf("build not found in API: status %d", resp.StatusCode)
-		}
-
-		return nil
-	}
+	return NewAPIExistsCheck(resourceName, containerImageRegistryExistsCheck)
 }
 
 // Configuration templates

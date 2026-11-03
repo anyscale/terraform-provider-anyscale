@@ -115,59 +115,14 @@ func TestAccCloudResource_GCP_K8S(t *testing.T) {
 }
 
 // Helper function to check if cloud exists in API and fetch its details
+// cloudExistsCheck is how testAccCheckCloudExistsInAPI finds the resource.
+var cloudExistsCheck = apiExistsCheck{
+	noun: "cloud", id: primaryID, getPathFmt: "/api/v2/clouds/%s", accepted: []int{http.StatusOK},
+	checkBody: checkCloudResponseID,
+}
+
 func testAccCheckCloudExistsInAPI(resourceName string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		rs, ok := s.RootModule().Resources[resourceName]
-		if !ok {
-			return fmt.Errorf("not found: %s", resourceName)
-		}
-
-		if rs.Primary.ID == "" {
-			return fmt.Errorf("no Cloud ID is set")
-		}
-
-		// Get the API client
-		client, err := GetTestClient()
-		if err != nil {
-			return fmt.Errorf("failed to get test client: %w", err)
-		}
-
-		// Make API call to verify cloud exists
-		cloudID := rs.Primary.ID
-		resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
-		if err != nil {
-			return fmt.Errorf("API request failed: %w", err)
-		}
-		defer func() {
-			if closeErr := resp.Body.Close(); closeErr != nil {
-				log.Printf("[WARN] Failed to close response body: %v", closeErr)
-			}
-		}()
-
-		if resp.StatusCode == http.StatusNotFound {
-			return fmt.Errorf("cloud %s not found in API", cloudID)
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return fmt.Errorf("failed to read response body: %w", err)
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("API returned error status %d: %s", resp.StatusCode, string(body))
-		}
-
-		var cloudResp provider.CloudResponse
-		if err := json.Unmarshal(body, &cloudResp); err != nil {
-			return fmt.Errorf("failed to parse API response: %w", err)
-		}
-
-		if cloudResp.Result.ID != cloudID {
-			return fmt.Errorf("cloud ID mismatch: expected %s, got %s", cloudID, cloudResp.Result.ID)
-		}
-
-		return nil
-	}
+	return NewAPIExistsCheck(resourceName, cloudExistsCheck)
 }
 
 // Helper function to validate cloud attributes in the API

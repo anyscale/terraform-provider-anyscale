@@ -113,35 +113,13 @@ func TestAccProjectResource_WithDescription(t *testing.T) {
 
 // Helper functions
 
+// projectExistsCheck is how testAccCheckProjectExistsInAPI finds the resource.
+var projectExistsCheck = apiExistsCheck{
+	noun: "project", id: attrID("id"), getPathFmt: "/api/v2/projects/%s", accepted: []int{http.StatusOK},
+}
+
 func testAccCheckProjectExistsInAPI(resourceName string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		rs, ok := s.RootModule().Resources[resourceName]
-		if !ok {
-			return fmt.Errorf("resource not found: %s", resourceName)
-		}
-
-		projectID := rs.Primary.Attributes["id"]
-		if projectID == "" {
-			return fmt.Errorf("project ID not set")
-		}
-
-		client, err := GetTestClient()
-		if err != nil {
-			return fmt.Errorf("failed to get test client: %w", err)
-		}
-
-		resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/projects/%s", projectID), nil)
-		if err != nil {
-			return fmt.Errorf("failed to get project: %w", err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-
-		if resp.StatusCode != 200 {
-			return fmt.Errorf("project not found in API: status %d", resp.StatusCode)
-		}
-
-		return nil
-	}
+	return NewAPIExistsCheck(resourceName, projectExistsCheck)
 }
 
 // Configuration templates
