@@ -12,7 +12,11 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 // createBodyServer answers the adopt lookup with no match and records the body
@@ -195,5 +199,43 @@ func TestWarnCreateExternalIDNotRecorded(t *testing.T) {
 				t.Fatalf("want no diagnostics, got: %v", diags)
 			}
 		})
+	}
+}
+
+// TestCloudResourceModifyPlan_WarnsOnNonOrgExternalID proves ModifyPlan itself
+// surfaces the warning on a create plan, not only the helper.
+func TestCloudResourceModifyPlan_WarnsOnNonOrgExternalID(t *testing.T) {
+	ctx := context.Background()
+	r := &CloudResource{}
+	var schemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+
+	run := func(t *testing.T, externalID string) diag.Diagnostics {
+		p := preflightPlan(t, "tfacc-extid", "AWS", "VM", "us-east-1")
+		p.AWSConfig = awsConfigWithExternalID(t, externalID)
+		plan := tfsdk.Plan{Schema: schemaResp.Schema}
+		if d := plan.Set(ctx, &p); d.HasError() {
+			t.Fatalf("plan fixture: %v", d)
+		}
+		req := resource.ModifyPlanRequest{
+			Plan:   plan,
+			Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: plan.Raw},
+			State:  tfsdk.State{Schema: schemaResp.Schema, Raw: tftypes.NewValue(schemaResp.Schema.Type().TerraformType(ctx), nil)},
+		}
+		resp := &resource.ModifyPlanResponse{Plan: plan}
+		r.ModifyPlan(ctx, req, resp)
+		return resp.Diagnostics
+	}
+
+	diags := run(t, "my-external-id")
+	if diags.HasError() {
+		t.Fatalf("want no error, got: %v", diags)
+	}
+	if !diagsContainSummary(diags, "External ID Not Recorded On The Cloud") {
+		t.Fatalf("create plan with a non-org_ external_id: want the warning, got: %v", diags)
+	}
+
+	if diags := run(t, "org_abcd-1234"); diagsContainSummary(diags, "External ID Not Recorded On The Cloud") {
+		t.Errorf("control: an org_ external_id must not warn, got: %v", diags)
 	}
 }
