@@ -327,6 +327,7 @@ Optional:
 Optional:
 
 - `create` (String) Maximum time to wait for a newly created cloud to become ready (e.g. `20m`, `1h`). Defaults to `30m`. Purely local to this provider - never sent to or read from the Anyscale API.
+- `delete` (String) Maximum time for destroy, including tearing down the cloud's service load balancers. Defaults to `30m`.
 
 ## Import
 

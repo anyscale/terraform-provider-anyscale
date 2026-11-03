@@ -263,7 +263,7 @@ func TestCreate_MultipleExistingCloudsProducesResourceLevelDiagnostic(t *testing
 		KubernetesConfig: types.ObjectNull(kubernetesConfigAttrTypes()),
 		ObjectStorage:    types.ObjectNull(objectStorageAttrTypes()),
 		FileStorage:      types.ObjectNull(fileStorageAttrTypes()),
-		Timeouts:         timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType})},
+		Timeouts:         timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType, "delete": types.StringType})},
 	}
 
 	_, diags := runCloudResourceCreate(t, r, plan)
@@ -312,7 +312,7 @@ func TestCloudResourceCreate_AdoptLookupFailureFailsClosed(t *testing.T) {
 		KubernetesConfig: types.ObjectNull(kubernetesConfigAttrTypes()),
 		ObjectStorage:    types.ObjectNull(objectStorageAttrTypes()),
 		FileStorage:      types.ObjectNull(fileStorageAttrTypes()),
-		Timeouts:         timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType})},
+		Timeouts:         timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType, "delete": types.StringType})},
 	}
 
 	_, diags := runCloudResourceCreate(t, r, plan)

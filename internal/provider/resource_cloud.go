@@ -595,6 +595,8 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			"timeouts": timeouts.Block(ctx, timeouts.Opts{
 				Create:            true,
 				CreateDescription: "Maximum time to wait for a newly created cloud to become ready (e.g. `20m`, `1h`). Defaults to `30m`. Purely local to this provider - never sent to or read from the Anyscale API.",
+				Delete:            true,
+				DeleteDescription: "Maximum time for destroy, including tearing down the cloud's service load balancers. Defaults to `30m`.",
 			}),
 		},
 	}
@@ -1390,6 +1392,17 @@ func (r *CloudResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 	cloudID := state.ID.ValueString()
 	tflog.Info(ctx, "Deleting Anyscale Cloud", map[string]any{"id": cloudID})
 
+	deleteTimeout, timeoutDiags := state.Timeouts.Delete(ctx, defaultCloudDeleteTimeout)
+	resp.Diagnostics.Append(timeoutDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	// One deadline for the whole destroy. The DELETE request uses it too: it can
+	// take minutes, far past the client's per-request default.
+	outerCtx := ctx
+	ctx, cancel := context.WithTimeout(ctx, deleteTimeout)
+	defer cancel()
+
 	// Before deleting the cloud, detach any machine pools that are attached to it
 	if err := r.detachMachinePoolsFromCloud(ctx, cloudID); err != nil {
 		tflog.Warn(ctx, "Failed to detach machine pools from cloud", map[string]any{
@@ -1412,16 +1425,46 @@ func (r *CloudResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 		)
 	}
 
-	_, err := DoRequestRaw(ctx, r.client, "DELETE", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil,
+	tornDown, err := tearDownCloudLoadBalancers(ctx, r.client, cloudID)
+	if err != nil {
+		detail := err.Error()
+		if errors.Is(err, errCloudLBTeardownTimeout) {
+			detail = fmt.Sprintf("%s (timeouts.delete = %s). Raise timeouts.delete and run terraform destroy again.", detail, deleteTimeout)
+		}
+		if tornDown {
+			detail += " The cloud is marked DELETING, which cannot be undone."
+		}
+		resp.Diagnostics.AddError("Cloud Load Balancer Teardown Failed",
+			fmt.Sprintf("Cloud %s was not deleted: %s", cloudID, detail))
+		return
+	}
+
+	_, err = DoRequestRaw(ctx, r.client, "DELETE", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil,
 		http.StatusOK, http.StatusNoContent, http.StatusNotFound)
 	if isHTTPStatus(err, http.StatusForbidden) {
 		confirmGoneAfterForbiddenDelete(ctx, &resp.Diagnostics, "Cloud", cloudID, err,
-			readBackByGET(ctx, r.client, fmt.Sprintf("/api/v2/clouds/%s", cloudID)))
+			readBackByGET(outerCtx, r.client, fmt.Sprintf("/api/v2/clouds/%s", cloudID)))
+		return
+	}
+	if err != nil && ctx.Err() != nil {
+		// The request ran out of time; the backend may still have deleted the cloud.
+		readBack := readBackByGET(outerCtx, r.client, fmt.Sprintf("/api/v2/clouds/%s", cloudID))()
+		if isGoneOrForbidden(readBack) {
+			tflog.Info(ctx, "Cloud DELETE timed out but the cloud is gone", map[string]any{"id": cloudID})
+			return
+		}
+		state := "the cloud can still be read"
+		if readBack != nil {
+			state = "reading it back to tell whether it is gone failed: " + extractAPIErrorDetail(readBack)
+		}
+		resp.Diagnostics.AddError("Cloud Delete Timed Out",
+			fmt.Sprintf("Deleting cloud %s did not finish within timeouts.delete (%s), and %s. "+
+				"Raise timeouts.delete and run terraform destroy again.", cloudID, deleteTimeout, state))
 		return
 	}
 	if err != nil {
 		tflog.Error(ctx, "Failed to delete cloud", map[string]any{"error": err.Error()})
-		AddAPIError(&resp.Diagnostics, "delete cloud", err)
+		addCloudDeleteError(&resp.Diagnostics, cloudID, tornDown, err)
 		return
 	}
 

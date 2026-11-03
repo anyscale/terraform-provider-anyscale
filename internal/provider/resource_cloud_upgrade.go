@@ -350,7 +350,7 @@ func (m cloudResourceModelV1) toCloudResourceModel() CloudResourceModel {
 		FileStorage:            m.FileStorage,
 		IsEmptyCloud:           m.IsEmptyCloud,
 		CloudResourceID:        m.CloudResourceID,
-		Timeouts:               timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType})},
+		Timeouts:               timeouts.Value{Object: types.ObjectNull(cloudTimeoutsAttrTypes())},
 	}
 }
 
@@ -739,7 +739,7 @@ func (m cloudResourceModelV2) toCloudResourceModel() CloudResourceModel {
 		FileStorage:            m.FileStorage,
 		IsEmptyCloud:           m.IsEmptyCloud,
 		CloudResourceID:        m.CloudResourceID,
-		Timeouts:               timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType})},
+		Timeouts:               timeouts.Value{Object: types.ObjectNull(cloudTimeoutsAttrTypes())},
 	}
 }
 
@@ -1315,7 +1315,7 @@ func (m cloudResourceModelV3) toCloudResourceModel() CloudResourceModel {
 		FileStorage:            m.FileStorage,
 		IsEmptyCloud:           m.IsEmptyCloud,
 		CloudResourceID:        m.CloudResourceID,
-		Timeouts:               m.Timeouts,
+		Timeouts:               upgradeCloudTimeouts(m.Timeouts),
 	}
 }
 
@@ -1763,4 +1763,26 @@ func cloudResourceSchemaV3() *schema.Schema {
 			}),
 		},
 	}
+}
+
+// cloudTimeoutsAttrTypes is the current shape of anyscale_cloud's timeouts
+// block.
+func cloudTimeoutsAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{"create": types.StringType, "delete": types.StringType}
+}
+
+// upgradeCloudTimeouts carries a prior version's timeouts block (create only)
+// into the current shape, with delete unset.
+func upgradeCloudTimeouts(prior timeouts.Value) timeouts.Value {
+	if prior.IsNull() || prior.IsUnknown() {
+		return timeouts.Value{Object: types.ObjectNull(cloudTimeoutsAttrTypes())}
+	}
+	create, ok := prior.Attributes()["create"].(types.String)
+	if !ok {
+		create = types.StringNull()
+	}
+	return timeouts.Value{Object: types.ObjectValueMust(cloudTimeoutsAttrTypes(), map[string]attr.Value{
+		"create": create,
+		"delete": types.StringNull(),
+	})}
 }
