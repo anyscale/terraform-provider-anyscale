@@ -58,10 +58,11 @@ terraform plan
 terraform apply
 ```
 
-Or use the repo's Makefile wrapper, which runs apply and destroy with a unique `cloud_name` suffix
-and a cleanup trap so a failed apply doesn't leak resources - you still need your own variables
-supplied first (via `terraform.tfvars` or `TF_VAR_*` environment variables), since the wrapper only
-overrides `cloud_name`:
+Or use the repo's Makefile wrapper, which runs the full end-to-end check with a unique `cloud_name`
+suffix: apply, an empty plan, a re-import of the cloud followed by another empty plan, destroy, and
+a check that the cloud is gone. Any failed step fails the target, and a cleanup trap destroys what
+was created. Supply your own variables first (via `terraform.tfvars` or `TF_VAR_*` environment
+variables); the wrapper only sets `cloud_name`:
 
 ```bash
 make test-aws-vm-basic

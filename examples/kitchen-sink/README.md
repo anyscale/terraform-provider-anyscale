@@ -106,12 +106,11 @@ Anyscale Scheduler API is not implemented yet.
    cluster for Cloud A, and a second VM leg for Cloud B, all via the same modules
    [aws-eks-basic](../aws-eks-basic/) uses. Budget real time (EKS cluster creation alone is commonly
    15-20+ minutes) and real AWS spend for as long as you leave it up.
-   **Unlike [aws-eks-basic](../aws-eks-basic/), this example has no `make test-kitchen-sink`
-   wrapper and no exit-trap destroy** — running it is a plain `terraform apply`/`terraform
-   destroy` by hand, and this repo's sweeper only ever reaches Anyscale-side resources, never into
-   your own AWS account. A forgotten or abandoned `terraform destroy` here leaves a real VPC and
-   EKS cluster billing indefinitely, with nothing automated to clean it up. Track your own state
-   and tear it down when you're done.
+   `make test-kitchen-sink` runs the full cycle as a test (unique `name_prefix`, empty-plan and
+   import checks, destroy, and a cleanup trap if a step fails). Run by hand, it is a plain
+   `terraform apply`/`terraform destroy`: this repo's sweeper only reaches Anyscale-side
+   resources, never your AWS account, so an abandoned apply leaves a real VPC and EKS cluster
+   billing. Track your own state and tear it down when you're done.
 2. **This creates two real clouds, two projects, three compute configs, and two container images**
    in your Anyscale org, plus the AWS infrastructure above.
 3. **The real invitation email is opt-in, not automatic.** Leave `invite_email` unset (the

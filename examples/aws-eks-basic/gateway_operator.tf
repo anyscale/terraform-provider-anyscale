@@ -232,6 +232,7 @@ resource "helm_release" "anyscale_operator" {
   name             = "anyscale-operator"
   repository       = "https://anyscale.github.io/helm-charts"
   chart            = "anyscale-operator"
+  version          = "1.12.0"
   namespace        = "anyscale-operator"
   create_namespace = false # created above by kubernetes_namespace.anyscale_operator
 

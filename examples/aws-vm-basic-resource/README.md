@@ -90,15 +90,13 @@ When you're done:
 terraform destroy
 ```
 
-Unlike most other scenario examples in this repo - including its own
-[aws-vm-basic](../aws-vm-basic/) sibling - there is no `make test-aws-vm-basic-resource` target, no
-paired `make apply-aws-vm-basic-resource` / `make destroy-aws-vm-basic-resource`, and it isn't part
-of the `make test-primary` matrix either. This directory has no Makefile automation at all: no
-unique-suffix `cloud_name`, no exit-trap destroy on a failed apply, nothing beyond the plain
-`terraform` commands above. Track your own state and run `terraform destroy` yourself when you're
-finished - this repo's sweeper only ever reaches Anyscale-side resources, never the underlying AWS
-VPC/IAM/S3 infrastructure, so an abandoned apply here leaks real AWS spend with nothing automated
-to catch it.
+To run the whole cycle as a test instead, use `make test-aws-vm-basic-resource`: it applies with a
+unique `cloud_name`, checks that the plan is empty before and after re-importing the cloud and
+cloud resource, destroys, and confirms the cloud is gone, with a cleanup trap that destroys
+everything if a step fails. Supply your own variables first (via `terraform.tfvars` or `TF_VAR_*`).
+It is not part of the `make test-primary` matrix. If you run the plain `terraform` commands above
+instead, run `terraform destroy` yourself when you're finished: this repo's sweeper only reaches
+Anyscale-side resources, never the underlying AWS VPC/IAM/S3 infrastructure.
 
 Real AWS costs apply for as long as resources stay up - the compute configs created here define
 *what Ray clusters would look like* if launched against this cloud, but don't launch anything

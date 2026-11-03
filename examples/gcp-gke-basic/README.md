@@ -30,6 +30,11 @@ bring-your-own-cluster example would help.
   `gpu_instance_configs` (a single `T4` pair by default - more entries mean more pool pairs)
 - An `anyscale_cloud` (empty) plus an `anyscale_cloud_resource` with `compute_stack = "K8S"`,
   pointing its `kubernetes_config` at the GKE node service account email and available zones
+- With `install_operator = true`, the Anyscale Operator, installed by Helm into
+  `anyscale_k8s_namespace` with the chart's bundled ingress-nginx controller, so the cloud can run
+  workloads (see `operator.tf`). The chart version is pinned in `operator.tf`; to move to a newer
+  one, run `helm search repo anyscale/anyscale-operator --versions`, set `version`, and check
+  `helm show values` for changed keys
 
 ## Prerequisites
 
@@ -54,9 +59,11 @@ terraform plan
 terraform apply
 ```
 
-Or use the repo's Makefile wrapper, which runs apply and destroy with a unique `cloud_name`
-suffix and a cleanup trap so a failed apply doesn't leak resources - you still need your own
-`terraform.tfvars` in place first, since the wrapper only overrides `cloud_name`:
+Or use the repo's Makefile wrapper, which applies with a unique `cloud_name`, applies again with
+`install_operator = true`, checks that the plan is empty before and after re-importing the cloud,
+destroys, and confirms the cloud is gone, with a cleanup trap if any step fails. You still need
+your own `terraform.tfvars` in place first; the wrapper only sets `cloud_name` and
+`install_operator`:
 
 ```bash
 make test-gcp-gke-basic
@@ -85,6 +92,7 @@ make destroy-gcp-gke-basic SUFFIX=dev1
 | `gpu_instance_configs` | Map of GPU node pool definitions to generate (see the variable's own description in `variables.tf` for the object shape) | a single `T4` entry |
 | `enable_filestore` | Create a shared Filestore instance | `false` |
 | `anyscale_k8s_namespace` | Kubernetes namespace the Anyscale Operator deploys into; must match the Workload Identity binding | `anyscale-operator` |
+| `install_operator` | Install the Anyscale Operator with Helm. Apply once without it first, so the cluster exists | `false` |
 | `ingress_cidr_ranges` | CIDR blocks allowed through the firewall on 443/22 | `["0.0.0.0/0"]` |
 | `cloud_name` | Name of the Anyscale cloud to create | `tf-gke-test` |
 | `labels` | Labels applied to every resource that accepts them | `{example = true, environment = "example"}` |
