@@ -1507,8 +1507,7 @@ func waitForCloudReady(ctx context.Context, client *Client, cloudID string, time
 			// Handle rate limiting (429) with backoff. 429 must not be in the
 			// accepted list above: an accepted 429 body would be parsed as a
 			// cloud.
-			var statusErr *UnexpectedStatusError
-			if errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusTooManyRequests {
+			if isHTTPStatus(err, http.StatusTooManyRequests) {
 				tflog.Warn(ctx, "Rate limited, backing off", map[string]any{"poll_count": pollCount, "backoff": currentBackoff.String()})
 				select {
 				case <-ctx.Done():

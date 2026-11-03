@@ -2,8 +2,11 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -69,4 +72,31 @@ func doWriteWithRetry(
 		}
 	}
 	return lastResp, lastErr
+}
+
+// transientWriteError reports whether a failed write is worth retrying: an
+// HTTP response whose status is one of statuses, or a failure before any
+// response arrived.
+//
+// The status check is structural, not a text match: DoRequestRaw's
+// "unexpected status %d: %s" format embeds the raw response body after the
+// code, so grepping for "unexpected status 503" would also match a body that
+// echoes that text (a gateway relaying an upstream status, for instance) and
+// misclassify a real 4xx decision as transient. errors.As unwraps the typed
+// value however many times the error was wrapped with %w.
+//
+// No UnexpectedStatusError means the request never got a response:
+// client.DoRequest itself failed (DNS, connection refused, a timeout
+// mid-request), which DoRequestRaw wraps as "API request failed: %w". That
+// text match is safe because the prefix never embeds a response body; there
+// was no response to embed.
+func transientWriteError(err error, statuses ...int) bool {
+	if err == nil {
+		return false
+	}
+	var statusErr *UnexpectedStatusError
+	if errors.As(err, &statusErr) {
+		return slices.Contains(statuses, statusErr.StatusCode)
+	}
+	return strings.Contains(err.Error(), "API request failed")
 }

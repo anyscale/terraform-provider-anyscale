@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -68,34 +67,8 @@ const (
 // already absorbs its own conflict response (J.3); neither holds for a batch
 // endpoint, which is why those stay unused here.
 func cloudAccessRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	// Structural check on the real numeric status, not a text match: DoRequestRaw's
-	// "unexpected status %d: %s" format embeds the raw response BODY after the
-	// code, so grepping for "unexpected status 503" would also match a body that
-	// happens to echo that text - a gateway or proxy relaying an upstream status,
-	// for instance - misclassifying an actual decision (a 4xx the backend meant)
-	// as transient. errors.As unwraps to the typed value regardless of how many
-	// times the error has been wrapped with %w.
-	var statusErr *UnexpectedStatusError
-	if errors.As(err, &statusErr) {
-		switch statusErr.StatusCode {
-		case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
-			return true
-		default:
-			return false
-		}
-	}
-
-	// No UnexpectedStatusError to unwrap means the request never got as far as a
-	// response - client.DoRequest itself failed (DNS, connection refused, a
-	// timeout mid-request), which DoRequestRaw wraps as "API request failed: %w".
-	// That text match is safe: this prefix is written by exactly one call site in
-	// the whole provider and never embeds a response body, since there was no
-	// response to embed.
-	return strings.Contains(err.Error(), "API request failed")
+	return transientWriteError(err,
+		http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout)
 }
 
 // cloudAccessDoWriteRetry wraps DoRequestRaw with J.13's bounded retry
