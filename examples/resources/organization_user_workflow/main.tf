@@ -1,20 +1,8 @@
 # Complete workflow: Invite -> Wait -> Manage role -> Manage membership
 #
-# This is a walkthrough, not a single-shot apply: steps 2 and 3 depend
-# on a real person accepting an email invitation (seconds to days, and
-# it happens outside Terraform entirely). Both are left commented out
-# below so a fresh copy of this file applies cleanly (it only sends
-# invitations) instead of failing on parts that cannot succeed yet.
-# Uncomment and apply again as you move through each step. Steps 2 and 3
-# are both keyed by email alone -- neither needs an identity_id or
-# user_id lookup -- and can be uncommented together as soon as the
-# invitation is accepted.
-#
-# Granting scoped access on a specific cloud is not included here:
-# there is currently no resource that can do it.
-# anyscale_cloud_user_role, which used to fill this role, has been
-# removed with no direct replacement yet - see the RBAC guide for the
-# current state of that surface.
+# Steps 2 and 3 need the invitation accepted first (outside Terraform),
+# so they are commented out and a fresh copy applies cleanly. Uncomment
+# and apply again after acceptance. Both are keyed by email alone.
 
 terraform {
   required_providers {
@@ -24,10 +12,8 @@ terraform {
   }
 }
 
-# Step 1: Send an invitation to a new user. There's no role argument
-# here -- every invitation grants default collaborator access on
-# acceptance; the API has no way to set a different role at invite time.
-# Step 2 below is where a different role actually gets set.
+# Step 1: invite. Invitees get the default collaborator role; step 2
+# sets a different one.
 resource "anyscale_organization_invitation" "new_member" {
   email = "newmember@example.com"
 }

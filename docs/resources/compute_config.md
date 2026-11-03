@@ -36,7 +36,6 @@ resource "anyscale_compute_config" "example" {
   idle_termination_minutes = 30
   maximum_uptime_minutes   = 480
 
-  # Native HCL syntax - no jsonencode needed!
   flags = {
     "ray-cluster-ray-version"        = "2.9.0"
     "ray-cluster-autoscaler-enabled" = "true"

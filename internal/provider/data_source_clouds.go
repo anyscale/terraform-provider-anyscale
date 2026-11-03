@@ -116,7 +116,7 @@ func (d *CloudsDataSource) Schema(ctx context.Context, req datasource.SchemaRequ
 	// see a DIFFERENT cloud marked is_default here.
 	itemAttributes["is_default"] = schema.BoolAttribute{
 		Computed:            true,
-		MarkdownDescription: "Whether this cloud is the organization's default cloud. Unlike the singular `anyscale_cloud` data source's `is_default`, this is not a direct per-cloud comparison: the backend resolves one default-cloud candidate for the whole list request through a fallback chain (the org's real default, then the caller's last-used cloud, then the first cloud the caller can see) and marks that one cloud's row `is_default = true` across the response. If the caller cannot see whichever cloud is the org's actual default, a different cloud in this list can read `is_default = true` even though it is not the real org default. Do not use this field to determine which cloud is the org default - use the `anyscale_cloud` data source's `is_default` for a specific cloud, which has no such fallback.",
+		MarkdownDescription: "Best-effort marker, not a reliable org-default flag. The backend picks one default candidate for the whole list through a fallback (the org default, then the caller's last-used cloud, then the first cloud the caller can see) and marks only that row `true`; if the caller cannot see the real default, a different cloud can read `true`. For a specific cloud, use the `anyscale_cloud` data source's `is_default`.",
 	}
 
 	resp.Schema = schema.Schema{

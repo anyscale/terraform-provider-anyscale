@@ -450,7 +450,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					"memorystore_endpoint": schema.StringAttribute{
 						Optional:            true,
 						Computed:            true,
-						MarkdownDescription: "Memorystore endpoint address. Unlike AWS MemoryDB, Memorystore does not support TLS for this connection. Derived automatically from `memorystore_instance_name` when left unset, the same way as MemoryDB's arn/endpoint fields above; set it explicitly only if you have a specific reason to pin a value yourself. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for full cluster requirements.",
+						MarkdownDescription: "Memorystore endpoint address (no TLS, unlike AWS MemoryDB). Derived from `memorystore_instance_name` when unset. Conflicts with `kubernetes_config.redis_endpoint`: the backend rejects more than one GCS fault-tolerance backing store per cloud. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.UseStateForUnknown(),
 							stringplanmodifier.RequiresReplace(),
@@ -522,7 +522,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					},
 					"region": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "The bucket region (if different from cloud region). A configuration that sets this to the same value as the cloud resource's own region is treated as equivalent to a null recovered value for plan purposes, so it will not force replacement - the Anyscale API cannot tell \"never set\" apart from \"explicitly set to the resource's own region\" once stored, so there is no matching value to compare against otherwise. A cloud resource that already has a null value in state from an older provider version reconciles this with a one-time in-place update on its next plan, never a replace. A genuinely different bucket region round-trips normally via the real API value, and a real change to it still requires replacement.",
+						MarkdownDescription: "Bucket region, if different from the cloud resource's region. Setting it to the cloud resource's own region is treated as unset, so it does not force replacement; any other change forces replacement. A cloud resource from an older provider version with a null value reconciles with a one-time in-place update, never a replace.",
 						PlanModifiers: []planmodifier.String{
 							// regionSemanticEqualPlanModifier replaces the
 							// plain stringplanmodifier.RequiresReplace() other

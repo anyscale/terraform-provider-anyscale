@@ -240,14 +240,14 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
-				MarkdownDescription: "Whether to enable lineage tracking for this cloud. Named to match the backend's own field name (and the plural `anyscale_clouds` data source, which always used this name) - a previous provider version called this `enable_lineage_tracking` on both the resource and the singular `anyscale_cloud` data source; see CHANGELOG.md and the guide's [Naming differences between resources and data sources](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources) section for the migration note.",
+				MarkdownDescription: "Whether lineage tracking is enabled for this cloud. Previously named `enable_lineage_tracking`; see CHANGELOG.md and [Naming differences](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources).",
 			},
 
 			"aggregated_logs_enabled": schema.BoolAttribute{
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
-				MarkdownDescription: "Whether to enable aggregated log ingestion for this cloud. Uniform `<noun>_enabled` naming with its sibling `lineage_tracking_enabled` - a previous provider version called this `enable_log_ingestion` on the resource and singular `anyscale_cloud` data source, then briefly `is_aggregated_logs_enabled` (matching the backend's own field name and the plural `anyscale_clouds` data source at the time) before settling here; see CHANGELOG.md and the guide's [Naming differences between resources and data sources](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources) section for the migration note.",
+				MarkdownDescription: "Whether aggregated log ingestion is enabled for this cloud. Previously named `enable_log_ingestion`; see CHANGELOG.md and [Naming differences](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources).",
 			},
 
 			// ─── Computed Fields ──────────────────────────────────
@@ -504,7 +504,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					},
 					"region": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "The bucket region (if different from cloud region). A configuration that sets this to the same value as the cloud's own region is treated as equivalent to a null recovered value for plan purposes, so it will not force replacement - the Anyscale API cannot tell \"never set\" apart from \"explicitly set to the cloud's own region\" once stored, so there is no matching value to compare against otherwise. A cloud that already has a null value in state from an older provider version reconciles this with a one-time in-place update on its next plan, never a replace. A genuinely different bucket region round-trips normally via the real API value, and a real change to it still requires replacement.",
+						MarkdownDescription: "Bucket region, if different from the cloud's region. Setting it to the cloud's own region is treated as unset, so it does not force replacement; any other change forces replacement. A cloud from an older provider version with a null value reconciles with a one-time in-place update, never a replace.",
 						PlanModifiers: []planmodifier.String{
 							// regionSemanticEqualPlanModifier replaces the
 							// plain stringplanmodifier.RequiresReplace() other
