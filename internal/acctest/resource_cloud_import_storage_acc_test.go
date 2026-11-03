@@ -63,7 +63,7 @@ func TestAccCloudResource_ImportRecoversStorageBlocks_AWSVM(t *testing.T) {
 			"security_group_ids": ["sg-storagetest"],
 			"anyscale_iam_role_id": "arn:aws:iam::123456789012:role/storagetest-crossaccount",
 			"cluster_iam_role_id": "arn:aws:iam::123456789012:role/storagetest-cluster-node",
-			"external_id": "storagetest-external-id"
+			"external_id": "org_storagetest-external-id"
 		},
 		"object_storage": {"bucket_name": "s3://my-bucket", "region": null},
 		"file_storage": {"file_storage_id": "fs-storagetest123"}
@@ -88,7 +88,7 @@ resource "anyscale_cloud" "test" {
     security_group_ids        = ["sg-storagetest"]
     controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/storagetest-crossaccount"
     dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/storagetest-cluster-node"
-    external_id               = "storagetest-external-id"
+    external_id               = "org_storagetest-external-id"
   }
 
   # Customer mirror: bucket_name ONLY - no region, no endpoint.
@@ -148,7 +148,7 @@ const mountTargetsImportResourcesJSON = `[{
 		"security_group_ids": ["sg-mounttargets"],
 		"anyscale_iam_role_id": "arn:aws:iam::123456789012:role/mounttargets-crossaccount",
 		"cluster_iam_role_id": "arn:aws:iam::123456789012:role/mounttargets-cluster-node",
-		"external_id": "mounttargets-external-id"
+		"external_id": "org_mounttargets-external-id"
 	},
 	"object_storage": {"bucket_name": "s3://my-mounttargets-bucket"},
 	"file_storage": {
@@ -183,7 +183,7 @@ resource "anyscale_cloud" "test" {
     security_group_ids        = ["sg-mounttargets"]
     controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/mounttargets-crossaccount"
     dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/mounttargets-cluster-node"
-    external_id               = "mounttargets-external-id"
+    external_id               = "org_mounttargets-external-id"
   }
 
   object_storage {

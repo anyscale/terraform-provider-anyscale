@@ -125,7 +125,7 @@ func TestAccCloudResource_ObjectStorageRegionSemanticEqualOnImport_AWSVM(t *test
 			"security_group_ids": ["sg-storageregiontest"],
 			"anyscale_iam_role_id": "arn:aws:iam::123456789012:role/storageregiontest-crossaccount",
 			"cluster_iam_role_id": "arn:aws:iam::123456789012:role/storageregiontest-cluster-node",
-			"external_id": "storageregiontest-external-id"
+			"external_id": "org_storageregiontest-external-id"
 		},
 		"object_storage": {"bucket_name": "s3://my-region-bucket", "region": null}
 	}]`
@@ -149,7 +149,7 @@ resource "anyscale_cloud" "test" {
     security_group_ids        = ["sg-storageregiontest"]
     controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/storageregiontest-crossaccount"
     dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/storageregiontest-cluster-node"
-    external_id               = "storageregiontest-external-id"
+    external_id               = "org_storageregiontest-external-id"
   }
 
   # THE explicit-equal case: region set on purpose, to the same value as
@@ -247,7 +247,7 @@ func TestAccCloudResource_ObjectStorageRegionSelfHealsFromNullState_AWSVM(t *tes
 			"security_group_ids": ["sg-storageregionselfheal"],
 			"anyscale_iam_role_id": "arn:aws:iam::123456789012:role/storageregionselfheal-crossaccount",
 			"cluster_iam_role_id": "arn:aws:iam::123456789012:role/storageregionselfheal-cluster-node",
-			"external_id": "storageregionselfheal-external-id"
+			"external_id": "org_storageregionselfheal-external-id"
 		},
 		"object_storage": {"bucket_name": "s3://my-selfheal-bucket", "region": null}
 	}]`
@@ -271,7 +271,7 @@ resource "anyscale_cloud" "test" {
     security_group_ids        = ["sg-storageregionselfheal"]
     controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/storageregionselfheal-crossaccount"
     dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/storageregionselfheal-cluster-node"
-    external_id               = "storageregionselfheal-external-id"
+    external_id               = "org_storageregionselfheal-external-id"
   }
 
   object_storage {

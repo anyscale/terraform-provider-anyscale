@@ -151,6 +151,17 @@ func validateEmbeddedCreateConfig(ctx context.Context, data *CloudResourceModel,
 	if !bad {
 		return diags
 	}
+	return failUnlessAdopting(ctx, data, lookup, summary, detail)
+}
+
+// failUnlessAdopting returns the error summary/detail for a create that would
+// POST a new cloud, and nothing when Create would adopt an existing cloud of the
+// same name instead (adopting sends no create request). The name lookup runs
+// only here, so a valid config costs no API call. A failed or ambiguous lookup
+// fails the plan with the error Create would raise; an unknown name or an
+// unconfigured client skips the check.
+func failUnlessAdopting(ctx context.Context, data *CloudResourceModel, lookup cloudNameLookup, summary, detail string) diag.Diagnostics {
+	var diags diag.Diagnostics
 	if data.Name.IsUnknown() || lookup == nil {
 		return diags
 	}
@@ -168,4 +179,42 @@ func validateEmbeddedCreateConfig(ctx context.Context, data *CloudResourceModel,
 		diags.AddError(summary, detail)
 	}
 	return diags
+}
+
+// cloudExternalIDPrefix is the prefix POST /api/v2/clouds requires of a
+// cloud-level external_id (the CreateCloud model's validator,
+// backend/server/api/base/models/clouds.py).
+const cloudExternalIDPrefix = "org_"
+
+// validateCreateExternalID fails a create plan whose aws_config.external_id the
+// create request would carry but the API would refuse. The cloud record's own
+// external_id is what the services load balancer assumes the control-plane role
+// with, so Create sends it; the API rejects a value that does not start with
+// the organization ID. Existing clouds are not checked: nothing re-sends it.
+func validateCreateExternalID(ctx context.Context, data *CloudResourceModel, lookup cloudNameLookup) diag.Diagnostics {
+	externalID, known := awsConfigExternalID(ctx, data.AWSConfig)
+	if !known || externalID == "" || strings.HasPrefix(externalID, cloudExternalIDPrefix) {
+		return nil
+	}
+	return failUnlessAdopting(ctx, data, lookup, "Invalid aws_config.external_id",
+		fmt.Sprintf("aws_config.external_id %q must start with your organization ID (for example %q). "+
+			"Anyscale records it on the cloud itself, and services use it to reach their load balancer, "+
+			"so the API refuses to create a cloud with any other value. Use the external ID from your "+
+			"control-plane role's trust policy, which follows the same rule.", externalID, "org_abcd-1234"))
+}
+
+// awsConfigExternalID returns aws_config.external_id. known is false when the
+// block or the value is unknown; a null block or value is known and "".
+func awsConfigExternalID(ctx context.Context, awsConfig types.Object) (externalID string, known bool) {
+	if awsConfig.IsUnknown() {
+		return "", false
+	}
+	if awsConfig.IsNull() {
+		return "", true
+	}
+	v, ok := awsConfig.Attributes()["external_id"].(types.String)
+	if !ok || v.IsUnknown() {
+		return "", !ok
+	}
+	return v.ValueString(), true
 }

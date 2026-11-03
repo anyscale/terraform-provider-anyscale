@@ -25,6 +25,10 @@ type CreateCloudRequest struct {
 	// a plain bool would either drop an explicit GCP "false" or leak a
 	// spurious value into every non-GCP request.
 	IsPrivateServiceCloud *bool `json:"is_private_service_cloud,omitempty"`
+
+	// ExternalID is the cloud-level external_id, from aws_config.external_id.
+	// Omitted when unset, as in the CLI's register_aws_cloud.
+	ExternalID *string `json:"external_id,omitempty"`
 }
 
 // CloudResponse represents a cloud in the Anyscale API

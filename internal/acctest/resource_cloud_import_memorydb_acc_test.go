@@ -65,7 +65,7 @@ func TestAccCloudResource_MemoryDBFieldsRecoverOnImport_AWSVM(t *testing.T) {
 		"security_group_ids": ["sg-memorydbtest"],
 		"anyscale_iam_role_id": "arn:aws:iam::123456789012:role/memorydbtest-crossaccount",
 		"cluster_iam_role_id": "arn:aws:iam::123456789012:role/memorydbtest-cluster-node",
-		"external_id": "memorydbtest-external-id",
+		"external_id": "org_memorydbtest-external-id",
 		"memorydb_cluster_name": "memorydbtest-cluster",
 		"memorydb_cluster_arn": "arn:aws:memorydb:us-east-2:123456789012:cluster/memorydbtest-cluster",
 		"memorydb_cluster_endpoint": "memorydbtest-cluster.abc123.clustercfg.memorydb.us-east-2.amazonaws.com:6379"
@@ -95,7 +95,7 @@ resource "anyscale_cloud" "test" {
     security_group_ids        = ["sg-memorydbtest"]
     controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/memorydbtest-crossaccount"
     dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/memorydbtest-cluster-node"
-    external_id               = "memorydbtest-external-id"
+    external_id               = "org_memorydbtest-external-id"
 
     # The exact bug-report shape: name set, arn/endpoint left for the
     # backend to derive.
