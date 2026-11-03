@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -207,16 +206,7 @@ func (d *CloudsDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 // backend has no provider/region query params on this endpoint). Either post-filter is skipped
 // when its argument is "".
 func (d *CloudsDataSource) fetchClouds(ctx context.Context, params url.Values, cloudProvider, region string) ([]CloudSummaryModel, error) {
-	// Use PaginatedRequest helper to fetch all clouds
-	cloudResults, err := PaginatedRequest(ctx, d.client, "/api/v2/clouds", params,
-		func(body []byte) ([]CloudResult, *string, error) {
-			var cloudsResp CloudsListResponse
-			if err := json.Unmarshal(body, &cloudsResp); err != nil {
-				return nil, nil, fmt.Errorf("failed to parse clouds response: %w", err)
-			}
-			return cloudsResp.Results, cloudsResp.Metadata.NextPagingToken, nil
-		},
-	)
+	cloudResults, err := listAllClouds(ctx, d.client, params)
 	if err != nil {
 		return nil, err
 	}

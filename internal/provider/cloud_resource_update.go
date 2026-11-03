@@ -22,6 +22,17 @@ func findCloudResourceByID(results []CloudDeploymentResult, cloudResourceID stri
 	return nil
 }
 
+// findCloudResourceByName returns the first deployment in results named name, or nil if none
+// is.
+func findCloudResourceByName(results []CloudDeploymentResult, name string) *CloudDeploymentResult {
+	for i := range results {
+		if results[i].Name == name {
+			return &results[i]
+		}
+	}
+	return nil
+}
+
 // buildCloudResourceUpdateRequest assembles the body for PUT /api/v2/clouds/{cloud_id}/resources
 // per the design in docs/decisions/cloud-file-storage-lifecycle/README.md: round-trip the
 // live deployment's own scalars and its one owned provider-config block verbatim from a fresh

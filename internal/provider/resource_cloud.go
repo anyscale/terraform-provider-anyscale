@@ -631,7 +631,7 @@ func (r *CloudResource) Configure(ctx context.Context, req resource.ConfigureReq
 // whose omitted compute_stack and region come from state.
 //
 // Scoped to exactly the configurations that would reach buildProviderConfig:
-// hasEmbeddedResourceConfig must be true (an empty cloud - no aws_config/
+// hasEmbeddedCloudConfig must be true (an empty cloud - no aws_config/
 // gcp_config/azure_config/kubernetes_config at all - never calls
 // addCloudResource, so cloud_provider=AZURE/GENERIC on a genuinely empty
 // cloud is harmless and left alone here, matching today's real, working
@@ -643,7 +643,7 @@ func (r *CloudResource) ValidateConfig(ctx context.Context, req resource.Validat
 		return
 	}
 
-	if !r.hasEmbeddedResourceConfig(&data) {
+	if !hasEmbeddedCloudConfig(&data) {
 		return
 	}
 
@@ -714,20 +714,6 @@ func generateRandomString(length int) string {
 	return string(b)
 }
 
-// hasEmbeddedResourceConfig checks if the cloud has embedded resource
-// configuration (all-in-one pattern). kubernetes_config counts on its own,
-// separate from aws_config/gcp_config/azure_config: aws_config/gcp_config are
-// optional for K8S clouds (see addCloudResource), so a K8S cloud can be
-// defined by kubernetes_config alone. Omitting it here (as this function did
-// before) misclassified such a cloud as empty, so Create took the
-// empty-cloud branch and never called addCloudResource at all - no K8S
-// resource was ever created, and the cloud rolled up to VM on read
-// ("Provider produced inconsistent result after apply: .compute_stack: was
-// K8S, but now VM").
-func (r *CloudResource) hasEmbeddedResourceConfig(plan *CloudResourceModel) bool {
-	return hasEmbeddedCloudConfig(plan)
-}
-
 // regionRequiredForCreateError returns a diagnostic-ready error for an
 // all-in-one create whose region could not be determined by the time
 // addCloudResource is about to be called. A non-empty region
@@ -767,20 +753,11 @@ func (e *multipleCloudsWithNameError) Error() string {
 	)
 }
 
-// findCloudByName looks for an existing cloud with the given name, paginating through every
-// page of GET /api/v2/clouds (mirrors CloudDataSource.findCloudByName's PaginatedRequest/
-// CloudsListResponse mechanics in data_source_cloud.go). Returns ("", nil) if no cloud has
-// this name, (id, nil) if exactly one does, or a *multipleCloudsWithNameError if 2+ do.
+// findCloudByName looks for an existing cloud with the given name across every page of
+// GET /api/v2/clouds. Returns ("", nil) if no cloud has this name, (id, nil) if exactly one
+// does, or a *multipleCloudsWithNameError if 2+ do.
 func (r *CloudResource) findCloudByName(ctx context.Context, name string) (string, error) {
-	results, err := PaginatedRequest(ctx, r.client, "/api/v2/clouds", nil,
-		func(body []byte) ([]CloudResult, *string, error) {
-			var cloudsResp CloudsListResponse
-			if err := json.Unmarshal(body, &cloudsResp); err != nil {
-				return nil, nil, fmt.Errorf("failed to parse clouds response: %w", err)
-			}
-			return cloudsResp.Results, cloudsResp.Metadata.NextPagingToken, nil
-		},
-	)
+	results, err := listAllClouds(ctx, r.client, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to list clouds: %w", err)
 	}
@@ -814,7 +791,7 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	name := plan.Name.ValueString()
 
 	// Determine if this is an empty cloud (no embedded config)
-	isEmptyCloud := !r.hasEmbeddedResourceConfig(&plan)
+	isEmptyCloud := !hasEmbeddedCloudConfig(&plan)
 
 	// Auto-detect cloud provider from config blocks (AWS for an empty cloud)
 	provider := plan.CloudProvider.ValueString()
@@ -1625,12 +1602,8 @@ func (r *CloudResource) getOrGenerateCredentials(ctx context.Context, plan *Clou
 		// correctly-configured all-in-one AWS+K8S cloud hit the placeholder path
 		// and fired a "set aws_config.controlplane_iam_role_arn" warning that
 		// does not apply to K8S clouds at all - confirmed on a live EKS cloud.
-		if !plan.KubernetesConfig.IsNull() {
-			var k8sModel KubernetesConfigModel
-			diags := plan.KubernetesConfig.As(ctx, &k8sModel, basetypes.ObjectAsOptions{})
-			if !diags.HasError() && !k8sModel.AnyscaleOperatorIAMIdentity.IsNull() && k8sModel.AnyscaleOperatorIAMIdentity.ValueString() != "" {
-				return k8sModel.AnyscaleOperatorIAMIdentity.ValueString(), false, nil
-			}
+		if identity := operatorIdentityFromK8sConfig(ctx, plan.KubernetesConfig); identity != "" {
+			return identity, false, nil
 		}
 	case "GCP":
 		if !plan.GCPConfig.IsNull() {
@@ -1670,21 +1643,17 @@ func (r *CloudResource) getOrGenerateCredentials(ctx context.Context, plan *Clou
 		// that's exactly what this field means on GCP (see the schema
 		// description). provider_id/project_id have no equivalent in
 		// kubernetes_config, so they stay placeholder-style.
-		if !plan.KubernetesConfig.IsNull() {
-			var k8sModel KubernetesConfigModel
-			diags := plan.KubernetesConfig.As(ctx, &k8sModel, basetypes.ObjectAsOptions{})
-			if !diags.HasError() && !k8sModel.AnyscaleOperatorIAMIdentity.IsNull() && k8sModel.AnyscaleOperatorIAMIdentity.ValueString() != "" {
-				gcpCreds := map[string]string{
-					"provider_id":           "projects/000000000000/locations/global/workloadIdentityPools/k8s-operator/providers/k8s-operator",
-					"project_id":            "k8s-operator-identity",
-					"service_account_email": k8sModel.AnyscaleOperatorIAMIdentity.ValueString(),
-				}
-				credsJSON, err := json.Marshal(gcpCreds)
-				if err != nil {
-					return "", false, fmt.Errorf("failed to marshal GCP K8S credentials: %w", err)
-				}
-				return string(credsJSON), false, nil
+		if identity := operatorIdentityFromK8sConfig(ctx, plan.KubernetesConfig); identity != "" {
+			gcpCreds := map[string]string{
+				"provider_id":           "projects/000000000000/locations/global/workloadIdentityPools/k8s-operator/providers/k8s-operator",
+				"project_id":            "k8s-operator-identity",
+				"service_account_email": identity,
 			}
+			credsJSON, err := json.Marshal(gcpCreds)
+			if err != nil {
+				return "", false, fmt.Errorf("failed to marshal GCP K8S credentials: %w", err)
+			}
+			return string(credsJSON), false, nil
 		}
 	case "AZURE":
 		// Azure clouds are Kubernetes-only, so unlike AWS/GCP there is no
@@ -1696,12 +1665,8 @@ func (r *CloudResource) getOrGenerateCredentials(ctx context.Context, plan *Clou
 		// the backend to accept an arbitrary string here (no Azure-specific
 		// credentials parser exists - see clouds_resource.py's
 		// create_cloud_without_permissions, which only special-cases GCP).
-		if !plan.KubernetesConfig.IsNull() {
-			var k8sModel KubernetesConfigModel
-			diags := plan.KubernetesConfig.As(ctx, &k8sModel, basetypes.ObjectAsOptions{})
-			if !diags.HasError() && !k8sModel.AnyscaleOperatorIAMIdentity.IsNull() && k8sModel.AnyscaleOperatorIAMIdentity.ValueString() != "" {
-				return k8sModel.AnyscaleOperatorIAMIdentity.ValueString(), false, nil
-			}
+		if identity := operatorIdentityFromK8sConfig(ctx, plan.KubernetesConfig); identity != "" {
+			return identity, false, nil
 		}
 	}
 
@@ -1721,6 +1686,21 @@ func (r *CloudResource) getOrGenerateCredentials(ctx context.Context, plan *Clou
 	default:
 		return fmt.Sprintf("placeholder-%s", uniqueSuffix), true, nil
 	}
+}
+
+// operatorIdentityFromK8sConfig returns kubernetes_config.anyscale_operator_iam_identity,
+// or "" when the block is null, cannot be converted, or the identity is unset
+// or empty. getOrGenerateCredentials treats all of those alike: fall through
+// to the next credential source.
+func operatorIdentityFromK8sConfig(ctx context.Context, k8sConfig types.Object) string {
+	if k8sConfig.IsNull() {
+		return ""
+	}
+	var k8sModel KubernetesConfigModel
+	if diags := k8sConfig.As(ctx, &k8sModel, basetypes.ObjectAsOptions{}); diags.HasError() {
+		return ""
+	}
+	return k8sModel.AnyscaleOperatorIAMIdentity.ValueString()
 }
 
 // addCloudResource adds a cloud resource/deployment to an existing cloud
