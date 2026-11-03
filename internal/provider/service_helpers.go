@@ -2,8 +2,10 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -263,4 +265,19 @@ func getServiceByID(ctx context.Context, client *Client, serviceID string) (*Ser
 		return nil, err
 	}
 	return &serviceResp.Result, nil
+}
+
+// listServices returns every service from GET /api/v2/services-v2 across all pages. params carries
+// the caller's filters and page size unchanged. The error is returned
+// unwrapped so each caller keeps its own context.
+func listServices(ctx context.Context, client *Client, params url.Values) ([]ServiceResult, error) {
+	return PaginatedRequest(ctx, client, "/api/v2/services-v2", params,
+		func(body []byte) ([]ServiceResult, *string, error) {
+			var listResp ServicesListResponse
+			if err := json.Unmarshal(body, &listResp); err != nil {
+				return nil, nil, err
+			}
+			return listResp.Results, listResp.Metadata.NextPagingToken, nil
+		},
+	)
 }

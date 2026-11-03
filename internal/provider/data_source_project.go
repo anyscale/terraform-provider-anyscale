@@ -227,16 +227,7 @@ func (d *ProjectDataSource) findProjectByName(ctx context.Context, name string, 
 		params.Add("parent_cloud_id", cloudID)
 	}
 
-	// Use PaginatedRequest to fetch all projects
-	results, err := PaginatedRequest(ctx, d.client, "/api/v2/projects", params,
-		func(body []byte) ([]ProjectResult, *string, error) {
-			var projectsResp ProjectsListResponse
-			if err := json.Unmarshal(body, &projectsResp); err != nil {
-				return nil, nil, err
-			}
-			return projectsResp.Results, projectsResp.Metadata.NextPagingToken, nil
-		},
-	)
+	results, err := listProjects(ctx, d.client, params)
 	if err != nil {
 		return "", fmt.Errorf("failed to list projects: %w", err)
 	}

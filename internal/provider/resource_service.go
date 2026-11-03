@@ -2077,15 +2077,7 @@ func findExistingServiceIDs(ctx context.Context, client *Client, name, projectID
 		params.Add("project_id", projectID)
 	}
 
-	results, err := PaginatedRequest(ctx, client, "/api/v2/services-v2", params,
-		func(body []byte) ([]ServiceResult, *string, error) {
-			var servicesResp ServicesListResponse
-			if err := json.Unmarshal(body, &servicesResp); err != nil {
-				return nil, nil, err
-			}
-			return servicesResp.Results, servicesResp.Metadata.NextPagingToken, nil
-		},
-	)
+	results, err := listServices(ctx, client, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list services: %w", err)
 	}
@@ -2133,25 +2125,13 @@ func populateServiceResourceModelComputed(ctx context.Context, m *ServiceResourc
 	// has ever gone healthy - confirmed via a real CI acceptance-test crash, see models.go's
 	// ServiceResult.PrimaryVersion doc comment). types.Object represents that null cleanly; do
 	// NOT synthesize a fake empty-string version instead.
-	if s.PrimaryVersion != nil {
-		primaryVersion, vDiags := serviceVersionResultToModel(ctx, *s.PrimaryVersion)
-		diags.Append(vDiags...)
-		primaryObj, pObjDiags := types.ObjectValueFrom(ctx, serviceVersionAttrTypes, primaryVersion)
-		diags.Append(pObjDiags...)
-		m.PrimaryVersion = primaryObj
-	} else {
-		m.PrimaryVersion = types.ObjectNull(serviceVersionAttrTypes)
-	}
+	primaryObj, primaryObjDiags := serviceVersionObject(ctx, s.PrimaryVersion)
+	diags.Append(primaryObjDiags...)
+	m.PrimaryVersion = primaryObj
 
-	if s.CanaryVersion != nil {
-		canaryVersion, cDiags := serviceVersionResultToModel(ctx, *s.CanaryVersion)
-		diags.Append(cDiags...)
-		canaryObj, cObjDiags := types.ObjectValueFrom(ctx, serviceVersionAttrTypes, canaryVersion)
-		diags.Append(cObjDiags...)
-		m.CanaryVersion = canaryObj
-	} else {
-		m.CanaryVersion = types.ObjectNull(serviceVersionAttrTypes)
-	}
+	canaryObj, canaryObjDiags := serviceVersionObject(ctx, s.CanaryVersion)
+	diags.Append(canaryObjDiags...)
+	m.CanaryVersion = canaryObj
 
 	if checklist := serviceStatusChecklistToModel(s.ServiceStatusChecklist); checklist != nil {
 		checklistObj, chkDiags := types.ObjectValueFrom(ctx, serviceStatusChecklistAttrTypes, *checklist)

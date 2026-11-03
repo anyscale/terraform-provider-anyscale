@@ -2,9 +2,11 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -175,7 +177,16 @@ func archiveClusterEnvironment(ctx context.Context, client *Client, clusterEnvID
 
 // getBuild fetches the current build details.
 func getBuild(ctx context.Context, client *Client, buildID string) (*BuildResult, error) {
-	// Note: The Anyscale API returns 201 for GET build endpoints
+	build, err := fetchBuild(ctx, client, buildID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get build %s: %w", buildID, err)
+	}
+	return build, nil
+}
+
+// fetchBuild fetches one build, returning the error unwrapped. The Anyscale API
+// returns 201 for GET build endpoints.
+func fetchBuild(ctx context.Context, client *Client, buildID string) (*BuildResult, error) {
 	buildResp, err := DoRequestAndParse[BuildResponse](
 		ctx,
 		client,
@@ -186,8 +197,39 @@ func getBuild(ctx context.Context, client *Client, buildID string) (*BuildResult
 		http.StatusCreated,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get build %s: %w", buildID, err)
+		return nil, err
 	}
-
 	return &buildResp.Result, nil
+}
+
+// fetchApplicationTemplate fetches the decorated application template (it
+// carries latest_build), returning the error unwrapped.
+func fetchApplicationTemplate(ctx context.Context, client *Client, templateID string) (*ApplicationTemplateResult, error) {
+	templateResp, err := DoRequestAndParse[ApplicationTemplateResponse](
+		ctx,
+		client,
+		"GET",
+		fmt.Sprintf("/api/v2/application_templates/%s", templateID),
+		nil,
+		http.StatusOK,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &templateResp.Result, nil
+}
+
+// listApplicationTemplates returns every application template from GET /api/v2/application_templates/ across all pages. params carries
+// the caller's filters and page size unchanged. The error is returned
+// unwrapped so each caller keeps its own context.
+func listApplicationTemplates(ctx context.Context, client *Client, params url.Values) ([]ApplicationTemplateResult, error) {
+	return PaginatedRequest(ctx, client, "/api/v2/application_templates/", params,
+		func(body []byte) ([]ApplicationTemplateResult, *string, error) {
+			var listResp ApplicationTemplatesListResponse
+			if err := json.Unmarshal(body, &listResp); err != nil {
+				return nil, nil, err
+			}
+			return listResp.Results, listResp.Metadata.NextPagingToken, nil
+		},
+	)
 }

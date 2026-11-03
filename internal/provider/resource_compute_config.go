@@ -188,6 +188,25 @@ type computeTemplate struct {
 	Config         computeTemplateConfig `json:"config"`
 }
 
+// setComputeTemplateIdentity copies a created or updated template's identity
+// and timestamps onto the plan. Version, created_at and last_modified_at are
+// copied only when the API sent them, so a plan value is never replaced by a
+// zero value.
+func setComputeTemplateIdentity(plan *ComputeConfigResourceModel, t computeTemplate) {
+	plan.ID = types.StringValue(t.Name)
+	plan.ConfigID = types.StringValue(t.ID)
+	if t.Version > 0 {
+		plan.Version = types.Int64Value(t.Version)
+		plan.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", t.Name, t.Version))
+	}
+	if t.CreatedAt != "" {
+		plan.CreatedAt = types.StringValue(t.CreatedAt)
+	}
+	if t.LastModifiedAt != "" {
+		plan.LastModifiedAt = types.StringValue(t.LastModifiedAt)
+	}
+}
+
 func (r *ComputeConfigResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_compute_config"
 }
@@ -1270,20 +1289,8 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
-	plan.ID = types.StringValue(resultData.Name)
-	plan.ConfigID = types.StringValue(resultData.ID)
+	setComputeTemplateIdentity(&plan, resultData)
 	log.Printf("[INFO] Created compute config: name=%s, config_id=%s", resultData.Name, resultData.ID)
-
-	if resultData.Version > 0 {
-		plan.Version = types.Int64Value(resultData.Version)
-		plan.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", resultData.Name, resultData.Version))
-	}
-	if resultData.CreatedAt != "" {
-		plan.CreatedAt = types.StringValue(resultData.CreatedAt)
-	}
-	if resultData.LastModifiedAt != "" {
-		plan.LastModifiedAt = types.StringValue(resultData.LastModifiedAt)
-	}
 
 	// head_node/worker_nodes are Required/Optional blocks, but sub-attributes
 	// like resources are Optional+Computed (the API fills them in from
@@ -1356,11 +1363,19 @@ func populateComputedFieldsFromResponse(
 		plan.AdditionalResources = buildAdditionalResourcesList(ctx, additionalEntries, priorByName, false, diags)
 	}
 
+	setNodesFromResponse(ctx, eff, priorHeadNode, priorWorkerNodes, plan, diags)
+}
+
+// setNodesFromResponse sets head_node and worker_nodes from the response,
+// masked against their prior values so attributes the user omitted stay null.
+// Each is left unchanged when the response has none, or when diags already
+// holds an error.
+func setNodesFromResponse(ctx context.Context, eff effectiveComputeConfig, priorHeadNode types.Object, priorWorkerNodes types.List, model *ComputeConfigResourceModel, diags *diag.Diagnostics) {
 	if eff.HeadNodeType != nil {
 		headNodeObj, headNodeDiags := apiNodeTypeToTerraform(ctx, eff.HeadNodeType)
 		diags.Append(headNodeDiags...)
 		if !diags.HasError() {
-			plan.HeadNode = maskNodeFromPrior(ctx, headNodeObj, priorHeadNode, diags)
+			model.HeadNode = maskNodeFromPrior(ctx, headNodeObj, priorHeadNode, diags)
 		}
 	}
 
@@ -1368,7 +1383,7 @@ func populateComputedFieldsFromResponse(
 		workerNodesList, workerNodesDiags := apiWorkerNodeTypesToTerraform(ctx, eff.WorkerNodeTypes)
 		diags.Append(workerNodesDiags...)
 		if !diags.HasError() {
-			plan.WorkerNodes = maskWorkerNodesFromPrior(ctx, workerNodesList, priorWorkerNodes, diags)
+			model.WorkerNodes = maskWorkerNodesFromPrior(ctx, workerNodesList, priorWorkerNodes, diags)
 		}
 	}
 }
@@ -1508,35 +1523,32 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 
 	state.AutoSelectWorkerConfig = types.BoolValue(eff.AutoSelect)
 
-	if eff.Flags != nil {
-		if minResources, ok := eff.Flags["min_resources"].(map[string]interface{}); ok {
-			minResourcesMap, diags := InterfaceMapToFloat64(ctx, minResources)
-			resp.Diagnostics.Append(diags...)
-			state.MinResources = restoreMapKeyCasing(ctx, minResourcesMap, priorMinResources)
-		}
+	// A nil Flags map reads as absent keys below.
+	if minResources, ok := eff.Flags["min_resources"].(map[string]interface{}); ok {
+		minResourcesMap, diags := InterfaceMapToFloat64(ctx, minResources)
+		resp.Diagnostics.Append(diags...)
+		state.MinResources = restoreMapKeyCasing(ctx, minResourcesMap, priorMinResources)
+	}
 
-		if maxResources, ok := eff.Flags["max_resources"].(map[string]interface{}); ok {
-			maxResourcesMap, diags := InterfaceMapToFloat64(ctx, maxResources)
-			resp.Diagnostics.Append(diags...)
-			state.MaxResources = restoreMapKeyCasing(ctx, maxResourcesMap, priorMaxResources)
-		}
+	if maxResources, ok := eff.Flags["max_resources"].(map[string]interface{}); ok {
+		maxResourcesMap, diags := InterfaceMapToFloat64(ctx, maxResources)
+		resp.Diagnostics.Append(diags...)
+		state.MaxResources = restoreMapKeyCasing(ctx, maxResourcesMap, priorMaxResources)
+	}
 
-		// allow-cross-zone-autoscaling: resolve unconditionally, not just when
-		// the key is present. The backend omits this flag entirely once it is false (confirmed
-		// live: a freshly created config that never touched cross-zone
-		// scaling comes back with an empty flags object, no key at all), so
-		// "only assign when present" silently relied on prior state already
-		// being correct. That holds for ordinary Create/Read (Create always
-		// resolves the schema Default to a real false before Create even
-		// runs), but not for ImportState, which starts with nothing set --
-		// absent key there meant permanently null instead of settling on
-		// false, a phantom diff forever. False-if-absent is correct on every
-		// entry path, not just import.
-		if enableCrossZone, ok := eff.Flags["allow-cross-zone-autoscaling"].(bool); ok {
-			state.EnableCrossZoneScaling = types.BoolValue(enableCrossZone)
-		} else {
-			state.EnableCrossZoneScaling = types.BoolValue(false)
-		}
+	// allow-cross-zone-autoscaling: resolve unconditionally, not just when
+	// the key is present. The backend omits this flag entirely once it is false (confirmed
+	// live: a freshly created config that never touched cross-zone
+	// scaling comes back with an empty flags object, no key at all), so
+	// "only assign when present" silently relied on prior state already
+	// being correct. That holds for ordinary Create/Read (Create always
+	// resolves the schema Default to a real false before Create even
+	// runs), but not for ImportState, which starts with nothing set --
+	// absent key there meant permanently null instead of settling on
+	// false, a phantom diff forever. False-if-absent is correct on every
+	// entry path, not just import.
+	if enableCrossZone, ok := eff.Flags["allow-cross-zone-autoscaling"].(bool); ok {
+		state.EnableCrossZoneScaling = types.BoolValue(enableCrossZone)
 	} else {
 		state.EnableCrossZoneScaling = types.BoolValue(false)
 	}
@@ -1556,21 +1568,7 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 	// where prior state was null - so after an import, with no prior, they come
 	// back exactly as the API sent them.
 
-	if eff.HeadNodeType != nil {
-		headNodeObj, headNodeDiags := apiNodeTypeToTerraform(ctx, eff.HeadNodeType)
-		resp.Diagnostics.Append(headNodeDiags...)
-		if !resp.Diagnostics.HasError() {
-			state.HeadNode = maskNodeFromPrior(ctx, headNodeObj, priorHeadNode, &resp.Diagnostics)
-		}
-	}
-
-	if len(eff.WorkerNodeTypes) > 0 {
-		workerNodesList, workerNodesDiags := apiWorkerNodeTypesToTerraform(ctx, eff.WorkerNodeTypes)
-		resp.Diagnostics.Append(workerNodesDiags...)
-		if !resp.Diagnostics.HasError() {
-			state.WorkerNodes = maskWorkerNodesFromPrior(ctx, workerNodesList, priorWorkerNodes, &resp.Diagnostics)
-		}
-	}
+	setNodesFromResponse(ctx, eff, priorHeadNode, priorWorkerNodes, &state, &resp.Diagnostics)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -1801,18 +1799,7 @@ func (r *ComputeConfigResource) Update(ctx context.Context, req resource.UpdateR
 		"new_version":   resultData.Version,
 	})
 
-	plan.ID = types.StringValue(resultData.Name)
-	plan.ConfigID = types.StringValue(resultData.ID)
-	if resultData.Version > 0 {
-		plan.Version = types.Int64Value(resultData.Version)
-		plan.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", resultData.Name, resultData.Version))
-	}
-	if resultData.CreatedAt != "" {
-		plan.CreatedAt = types.StringValue(resultData.CreatedAt)
-	}
-	if resultData.LastModifiedAt != "" {
-		plan.LastModifiedAt = types.StringValue(resultData.LastModifiedAt)
-	}
+	setComputeTemplateIdentity(&plan, resultData)
 
 	// Same as Create: resolve head_node/worker_nodes' Computed sub-attributes
 	// (and idle_termination_minutes/maximum_uptime_minutes) from the response,

@@ -2,9 +2,7 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/url"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -234,19 +232,11 @@ func (d *ContainerImageDataSource) Read(ctx context.Context, req datasource.Read
 func (d *ContainerImageDataSource) getApplicationTemplateByID(ctx context.Context, id string) (*ApplicationTemplateResult, error) {
 	tflog.Debug(ctx, "Fetching application template by ID", map[string]any{"id": id})
 
-	templateResp, err := DoRequestAndParse[ApplicationTemplateResponse](
-		ctx,
-		d.client,
-		"GET",
-		fmt.Sprintf("/api/v2/application_templates/%s", id),
-		nil,
-		http.StatusOK,
-	)
+	template, err := fetchApplicationTemplate(ctx, d.client, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get cluster environment %s: %w", id, err)
 	}
-
-	return &templateResp.Result, nil
+	return template, nil
 }
 
 // getApplicationTemplateByName fetches an application template by exact name match.
@@ -260,15 +250,7 @@ func (d *ContainerImageDataSource) getApplicationTemplateByName(ctx context.Cont
 	params.Set("name_contains", name)
 	params.Set("include_archived", "false")
 
-	results, err := PaginatedRequest(ctx, d.client, "/api/v2/application_templates/", params,
-		func(body []byte) ([]ApplicationTemplateResult, *string, error) {
-			var listResp ApplicationTemplatesListResponse
-			if err := json.Unmarshal(body, &listResp); err != nil {
-				return nil, nil, err
-			}
-			return listResp.Results, listResp.Metadata.NextPagingToken, nil
-		},
-	)
+	results, err := listApplicationTemplates(ctx, d.client, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search cluster environments: %w", err)
 	}

@@ -607,19 +607,11 @@ func (r *ContainerImageBuildResource) getLatestBuildID(ctx context.Context, temp
 
 // getApplicationTemplate fetches the decorated application template by ID.
 func (r *ContainerImageBuildResource) getApplicationTemplate(ctx context.Context, templateID string) (*ApplicationTemplateResult, error) {
-	templateResp, err := DoRequestAndParse[ApplicationTemplateResponse](
-		ctx,
-		r.client,
-		"GET",
-		fmt.Sprintf("/api/v2/application_templates/%s", templateID),
-		nil,
-		http.StatusOK,
-	)
+	template, err := fetchApplicationTemplate(ctx, r.client, templateID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get application template %s: %w", templateID, err)
 	}
-
-	return &templateResp.Result, nil
+	return template, nil
 }
 
 // waitForBuild polls the build status until it reaches a terminal state.
