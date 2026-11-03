@@ -41,7 +41,10 @@ example would help.
 - [Envoy Gateway](https://gateway.envoyproxy.io/) and the Anyscale Operator itself, installed via
   Terraform (`helm_release`/`kubernetes_manifest`) rather than left as a manual post-apply step —
   see "Running the example" below for the two-apply flow this requires and "Known limitation"
-  for a required one-time Helm chart prerequisite
+  for a required one-time Helm chart prerequisite. The operator chart version is pinned in
+  `gateway_operator.tf`; to move to a newer one, run
+  `helm search repo anyscale/anyscale-operator --versions`, set `version`, and check
+  `helm show values` for changed keys
 
 For capacity-reserved GPU capacity (ODCR), see the [targeted ODCR
 pattern](https://aws-ia.github.io/terraform-aws-eks-blueprints/patterns/machine-learning/targeted-odcr/)
