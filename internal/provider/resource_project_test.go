@@ -382,7 +382,10 @@ func TestProjectResourceDelete_403Retry(t *testing.T) {
 		const projectID = "prj_old_no_retry"
 		var requestCount int
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			requestCount++
+			// Count DELETEs only: after the final 403, Delete reads the project back (also 403 here).
+			if r.Method == http.MethodDelete {
+				requestCount++
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"error":{"detail":"Permission denied"}}`))
@@ -436,7 +439,10 @@ func TestProjectResourceDelete_403Retry(t *testing.T) {
 		const projectID = "prj_recent_exhausts"
 		var requestCount int
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			requestCount++
+			// Count DELETEs only: after the final 403, Delete reads the project back (also 403 here).
+			if r.Method == http.MethodDelete {
+				requestCount++
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"error":{"detail":"Permission denied"}}`))
@@ -465,7 +471,10 @@ func TestProjectResourceDelete_403Retry(t *testing.T) {
 		const projectID = "prj_missing_created_at"
 		var requestCount int
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			requestCount++
+			// Count DELETEs only: after the final 403, Delete reads the project back (also 403 here).
+			if r.Method == http.MethodDelete {
+				requestCount++
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"error":{"detail":"Permission denied"}}`))
