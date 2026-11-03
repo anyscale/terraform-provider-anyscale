@@ -341,7 +341,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					"memorydb_cluster_arn": schema.StringAttribute{
 						Optional:            true,
 						Computed:            true,
-						MarkdownDescription: "MemoryDB cluster ARN. Derived automatically from `memorydb_cluster_name` when left unset - the Anyscale API returns the cluster's real ARN once it exists, and the provider records it in state at create time and recovers it at import; set it explicitly only if you have a specific reason to pin a value yourself. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements.",
+						MarkdownDescription: "MemoryDB cluster ARN. Derived from `memorydb_cluster_name` when unset (recorded at create, recovered at import); set it only to pin a value. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.UseStateForUnknown(),
 							stringplanmodifier.RequiresReplace(),
@@ -350,7 +350,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					"memorydb_cluster_endpoint": schema.StringAttribute{
 						Optional:            true,
 						Computed:            true,
-						MarkdownDescription: "MemoryDB cluster endpoint address, formatted as `<name>.<random>.clustercfg.memorydb.<region>.amazonaws.com:6379`. Requires TLS - use a `rediss://` prefix when connecting. Derived automatically from `memorydb_cluster_name` when left unset, the same way as `memorydb_cluster_arn` above; set it explicitly only if you have a specific reason to pin a value yourself. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for full cluster requirements.",
+						MarkdownDescription: "MemoryDB cluster endpoint address, formatted as `<name>.<random>.clustercfg.memorydb.<region>.amazonaws.com:6379`. Requires TLS: use a `rediss://` prefix. Derived from `memorydb_cluster_name` when unset, like `memorydb_cluster_arn`; set it only to pin a value. Conflicts with `kubernetes_config.redis_endpoint` (the backend rejects more than one GCS fault-tolerance store per cloud). See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.UseStateForUnknown(),
 							stringplanmodifier.RequiresReplace(),
@@ -394,7 +394,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					"subnet_names": schema.ListAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
-						MarkdownDescription: "List of subnet names within the VPC for Anyscale resources. VM compute only - GKE networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time rather than silently corrupting the registered networking (the backend applies this field unconditionally after the Kubernetes zone list is written, discarding it). Genuinely supports more than one subnet on VM compute - Anyscale spreads instances across whichever are configured, this is not a modeling mismatch.",
+						MarkdownDescription: "List of subnet names within the VPC for Anyscale resources. VM compute only: GKE networking comes from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time. More than one subnet is supported; Anyscale spreads instances across them.",
 						PlanModifiers: []planmodifier.List{
 							listplanmodifier.RequiresReplace(),
 						},
@@ -431,7 +431,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					"memorystore_endpoint": schema.StringAttribute{
 						Optional:            true,
 						Computed:            true,
-						MarkdownDescription: "Memorystore endpoint address. Unlike AWS MemoryDB, Memorystore does not support TLS for this connection. Derived automatically from `memorystore_instance_name` when left unset, the same way as MemoryDB's arn/endpoint fields above; set it explicitly only if you have a specific reason to pin a value yourself. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for full cluster requirements.",
+						MarkdownDescription: "Memorystore endpoint address. Unlike AWS MemoryDB, Memorystore does not support TLS for this connection. Derived from `memorystore_instance_name` when unset; set it only to pin a value. Conflicts with `kubernetes_config.redis_endpoint` (the backend rejects more than one GCS fault-tolerance store per cloud). See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.UseStateForUnknown(),
 							stringplanmodifier.RequiresReplace(),
@@ -442,7 +442,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 
 			// ─── Azure Configuration ──────────────────────────────
 			"azure_config": schema.SingleNestedBlock{
-				MarkdownDescription: "Azure-specific configuration. Required when cloud_provider is AZURE. Azure clouds are Kubernetes-only (AKS) - Anyscale does not support Azure VM clouds, so compute_stack must be \"K8S\"; setting azure_config with any other compute_stack is a plan-time error. Unlike aws_config/gcp_config, this has a single field: AKS setup creates no VNet/subnet resources of its own, and real authentication is operator workload-identity federation (see kubernetes_config.anyscale_operator_iam_identity), not network or IAM-role wiring.",
+				MarkdownDescription: "Azure-specific configuration. Required when cloud_provider is AZURE. Azure clouds are Kubernetes-only (AKS), so compute_stack must be \"K8S\"; azure_config with any other compute_stack is a plan-time error. Unlike aws_config/gcp_config it has a single field: AKS creates no VNet/subnet of its own, and authentication is operator workload-identity federation (see kubernetes_config.anyscale_operator_iam_identity).",
 				Attributes: map[string]schema.Attribute{
 					"tenant_id": schema.StringAttribute{
 						Optional:            true,
@@ -460,7 +460,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				Attributes: map[string]schema.Attribute{
 					"anyscale_operator_iam_identity": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "The IAM identity for the Anyscale operator. For AWS EKS: the ARN of an IAM role whose trust policy allows `pods.eks.amazonaws.com`, wired to the operator via an `aws_eks_pod_identity_association` (see the [Anyscale EKS IAM documentation](https://docs.anyscale.com/iam/eks)) - a node group's IAM role will NOT work here, since node roles trust `ec2.amazonaws.com` instead; the provider cannot see a role's trust policy, so getting this wrong fails the operator's own authentication at runtime, not at `terraform plan`. For GCP GKE: service account email (see the [Anyscale GKE IAM documentation](https://docs.anyscale.com/iam/gke)). For Azure AKS: the managed identity's principal ID (not its client ID - the reference AKS setup flow distinguishes the two: principal ID here, client ID only in the operator's own values.yaml).",
+						MarkdownDescription: "The IAM identity for the Anyscale operator. AWS EKS: the ARN of an IAM role whose trust policy allows `pods.eks.amazonaws.com`, wired to the operator through an `aws_eks_pod_identity_association` (see the [Anyscale EKS IAM documentation](https://docs.anyscale.com/iam/eks)). A node group's IAM role will NOT work (it trusts `ec2.amazonaws.com`), and the provider cannot see trust policies, so a wrong role fails at runtime, not at `terraform plan`. GCP GKE: service account email (see the [Anyscale GKE IAM documentation](https://docs.anyscale.com/iam/gke)). Azure AKS: the managed identity's principal ID, not its client ID (the client ID belongs only in the operator's own values.yaml).",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -539,7 +539,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					"mount_path": schema.StringAttribute{
 						Optional:            true,
 						Computed:            true,
-						MarkdownDescription: "The mount path for the file storage. Only meaningful on GCP Filestore and Azure/Generic NFS-backed clouds; AWS rejects it at plan time, and it is ignored for `persistent_volume_claim`/`csi_ephemeral_volume_driver` configs. Null when the backend has no value - never fabricated - and recovered from the live value at import. On GCP, if `mount_targets` is unset Anyscale auto-discovers the Filestore share and overwrites this value. `file_storage` is not refreshed on read, so state keeps the import-time value; `terraform plan` warns when it drifts, except for a legacy `/mnt/shared` value that the backend has no counterpart for. Applying a new value corrects state in place; re-import is needed only if config already matches the stale value. Mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver`.",
+						MarkdownDescription: "The mount path for the file storage. Only meaningful on GCP Filestore and Azure/Generic NFS-backed clouds: AWS rejects it at plan time, and it is ignored with `persistent_volume_claim`/`csi_ephemeral_volume_driver` (mutually exclusive with both). Null when the backend has no value. On GCP, if `mount_targets` is unset Anyscale auto-discovers the Filestore share and overwrites this value. `file_storage` is not refreshed on read, so state keeps the import-time value and `terraform plan` warns on drift; see [Importing an existing cloud](../guides/cloud-resources.md#importing-an-existing-cloud). Applying a new value corrects state in place; if config already equals the stale value, re-import.",
 						PlanModifiers: []planmodifier.String{
 							fileStorageDerivedStringModifier{},
 						},
@@ -573,7 +573,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					"mount_targets": schema.ListNestedAttribute{
 						Optional:            true,
 						Computed:            true,
-						MarkdownDescription: "Mount targets, each an address with an optional zone. The NFS-style mechanism; mutually exclusive with the Kubernetes-native `persistent_volume_claim`/`csi_ephemeral_volume_driver`. Derived from `file_storage_id` when unset, and re-derived whenever that ID changes - the backend discovers the address once the EFS/Filestore resource exists. Set it only to pin a value, e.g. a sibling EFS/Filestore module output (see the aws-vm/gcp-vm examples). `file_storage` is not refreshed on read, so this is a create/import-time snapshot; `terraform plan` warns if the address later changes. Applying a new value corrects state in place; re-import is needed only if config already matches the stale value.",
+						MarkdownDescription: "Mount targets, each an address with an optional zone: the NFS-style mechanism, mutually exclusive with `persistent_volume_claim`/`csi_ephemeral_volume_driver`. Derived from `file_storage_id` when unset (and re-derived when that ID changes); set it only to pin a value, e.g. a sibling EFS/Filestore module output (see the aws-vm/gcp-vm examples). `file_storage` is not refreshed on read, so this is a create/import-time snapshot and `terraform plan` warns if the address later changes; see [Importing an existing cloud](../guides/cloud-resources.md#importing-an-existing-cloud). Applying a new value corrects state in place; if config already equals the stale value, re-import.",
 						PlanModifiers: []planmodifier.List{
 							fileStorageDerivedListModifier{},
 						},
