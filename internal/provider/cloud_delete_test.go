@@ -28,6 +28,7 @@ type cloudDeleteMock struct {
 	delHang   bool // DELETE never answers before the client gives up
 	getStatus int  // GET of the cloud itself; 0 = 404
 	putStatus int  // PUT state status; 0 = 204
+	lbStatus  int  // get_lb_resource status; 0 = 200
 }
 
 func (m *cloudDeleteMock) server(t *testing.T) *httptest.Server {
@@ -53,6 +54,11 @@ func (m *cloudDeleteMock) server(t *testing.T) *httptest.Server {
 			}
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodPost && r.URL.Path == cloud+"/get_lb_resource":
+			if m.lbStatus != 0 {
+				w.WriteHeader(m.lbStatus)
+				_, _ = fmt.Fprint(w, `{"error": {"detail": "lb lookup failed"}}`)
+				return
+			}
 			m.mu.Lock()
 			done := !m.lbNever && m.lbPending <= 0
 			m.lbPending--
@@ -253,5 +259,23 @@ func TestCloudResourceDelete_GoneAtTeardownProceedsToDelete(t *testing.T) {
 	want := []string{"GET /api/v2/clouds/cld_del/resources", "PUT /api/v2/clouds/cld_del/state", "DELETE /api/v2/clouds/cld_del"}
 	if got := m.teardownCalls(); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("calls = %v, want %v", got, want)
+	}
+}
+
+// A failed get_lb_resource check is not "torn down": the cloud is not deleted,
+// since deleting it with its load balancer still up is the leak this prevents.
+func TestCloudResourceDelete_FailedLoadBalancerCheckSkipsDelete(t *testing.T) {
+	m := &cloudDeleteMock{resources: awsVMResource, lbStatus: http.StatusInternalServerError}
+	diags := runCloudDelete(t, m, "")
+	if !diagsContainSummary(diags, "Cloud Load Balancer Teardown Failed") {
+		t.Fatalf("want a teardown error, got: %v", diags)
+	}
+	if d := diags[0].Detail(); !strings.Contains(d, "failed to check the load balancer teardown") || !strings.Contains(d, "lb lookup failed") {
+		t.Errorf("detail %q should say the check failed and carry the API's detail", d)
+	}
+	for _, c := range m.teardownCalls() {
+		if strings.HasPrefix(c, "DELETE ") {
+			t.Fatalf("the cloud was deleted although the teardown check failed: %v", m.teardownCalls())
+		}
 	}
 }
