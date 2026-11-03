@@ -118,26 +118,31 @@ The steps, each one `terraform apply`:
    Changing the inputs or `version_name` while a canary is held rolls it back or is rejected.
 4. Apply with no value to finish.
 
-To abort, revert the inputs and apply with no value: the held canary is rolled back and nothing
-is redeployed. A canary that fails during an apply is rolled back by Terraform and the apply
+To abort, revert the inputs and apply: the held canary is rolled back and nothing is
+redeployed. A canary that fails during an apply is rolled back by Terraform and the apply
 fails with "Service Rollout Rolled Back", which fails the job. A canary that fails afterwards
 is not acted on: check `canary_version.current_state` for `UNHEALTHY` in your monitoring step
 and abort as above.
 
-A GitHub Actions workflow that runs one stage per dispatch. It is a complete workflow if the
-repository holds the Terraform configuration at its root with a remote backend, because a runner
-has no state of its own. Add the `ANYSCALE_CLI_TOKEN` secret and your backend credentials.
+A GitHub Actions workflow that triggers it. The configuration lives in the repository root with
+a remote backend (a runner has no state of its own); add the `ANYSCALE_CLI_TOKEN` secret and your
+backend credentials.
 
 ```yaml
 name: service-rollout
 on:
+  # Stage 0: merging the new build_id (or other input) to main
+  # deploys it as a canary with no traffic.
+  push:
+    branches: [main]
+  # Later stages: click "Run workflow" and pick a stage.
   workflow_dispatch:
     inputs:
       stage:
-        description: "Canary stage"
+        description: "Canary percent, or finish"
         type: choice
         options: ["0", "10", "50", "finish"]
-        default: "0"
+        default: "10"
 
 concurrency: service-rollout
 
@@ -147,6 +152,7 @@ jobs:
     environment: production # add required reviewers for a manual gate
     env:
       ANYSCALE_CLI_TOKEN: ${{ secrets.ANYSCALE_CLI_TOKEN }}
+      STAGE: ${{ inputs.stage || '0' }}
     steps:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v3
@@ -154,8 +160,6 @@ jobs:
           terraform_version: "1.10.5"
       - run: terraform init -input=false
       - name: Apply stage
-        env:
-          STAGE: ${{ inputs.stage }}
         run: |
           if [ "$STAGE" = "finish" ]; then
             terraform apply -input=false -auto-approve
@@ -164,12 +168,23 @@ jobs:
               -var "canary_percent=$STAGE"
           fi
       - name: Smoke test
-        if: inputs.stage != 'finish'
+        if: env.STAGE != 'finish'
         run: ./scripts/smoke-test.sh "$(terraform output -raw service_url)"
 ```
 
-`./scripts/smoke-test.sh` is a placeholder for your own checks. Run the workflow once per stage,
-looking at your monitoring between runs. `concurrency` stops two stages applying at once.
+How a rollout runs:
+
+1. **Merge the change.** The push applies stage `0`: the canary starts and takes no traffic. The
+   job's smoke test can check only that it is healthy.
+2. **Shift traffic.** In the Actions tab, run the workflow on `main` with stage `10`. Look at your
+   monitoring, then run it again with `50`. Run each stage on the same commit; merging
+   another change in between starts a new rollout.
+3. **Finish.** Run it with `finish`.
+4. **Abort.** Revert the change on `main`. The reverted configuration matches the one from
+   before the canary, so the push rolls the held canary back and redeploys nothing.
+
+`./scripts/smoke-test.sh` is a placeholder for your own checks. `concurrency` stops two stages
+applying at once.
 
 ## Version names
 
