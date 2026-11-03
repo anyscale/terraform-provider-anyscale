@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -274,5 +276,55 @@ func TestCreate_MultipleExistingCloudsProducesResourceLevelDiagnostic(t *testing
 	}
 	if postCreateCalled {
 		t.Error("Create must not attempt to POST a new cloud when the adopt lookup is ambiguous")
+	}
+}
+
+// TestCloudResourceCreate_AdoptLookupFailureFailsClosed: when the by-name lookup that decides
+// adopt-vs-create cannot list clouds, Create must stop with an error naming that failure and must
+// not POST a new cloud. Creating anyway would turn a transient list failure into a duplicate cloud.
+func TestCloudResourceCreate_AdoptLookupFailureFailsClosed(t *testing.T) {
+	const name = "tfacc-adopt-list-fails"
+	postCreateCalled := false
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/clouds":
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = fmt.Fprint(w, `{"error": {"detail": "list clouds is down"}}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/clouds":
+			postCreateCalled = true
+			w.WriteHeader(http.StatusCreated)
+			_, _ = fmt.Fprintf(w, `{"result": {"id": "cld_new", "name": %q}}`, name)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClientWithToken(server.URL, "test-token")
+	client.SetRetrySleep(func(context.Context, time.Duration) error { return nil })
+	r := &CloudResource{client: client}
+	plan := CloudResourceModel{
+		Name:             types.StringValue(name),
+		AWSConfig:        types.ObjectNull(awsConfigAttrTypes()),
+		GCPConfig:        types.ObjectNull(gcpConfigAttrTypes()),
+		AzureConfig:      types.ObjectNull(azureConfigAttrTypes()),
+		KubernetesConfig: types.ObjectNull(kubernetesConfigAttrTypes()),
+		ObjectStorage:    types.ObjectNull(objectStorageAttrTypes()),
+		FileStorage:      types.ObjectNull(fileStorageAttrTypes()),
+		Timeouts:         timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType})},
+	}
+
+	_, diags := runCloudResourceCreate(t, r, plan)
+
+	if !diags.HasError() {
+		t.Fatal("expected an error when the existing-cloud lookup fails, got none")
+	}
+	if got := fmt.Sprint(diags); !strings.Contains(got, "list clouds is down") || !strings.Contains(got, name) {
+		t.Errorf("diagnostic should name the cloud and the list failure, got: %v", diags)
+	}
+	if postCreateCalled {
+		t.Error("Create must not POST a new cloud when it could not check for an existing one")
 	}
 }

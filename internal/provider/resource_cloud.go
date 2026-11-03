@@ -819,7 +819,10 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		resp.Diagnostics.AddError("Multiple Clouds Found", ambiguousCloudErr.Error())
 		return
 	} else if err != nil {
-		tflog.Warn(ctx, "Failed to check for existing cloud", map[string]any{"error": err.Error()})
+		// Fail closed: creating without knowing whether a cloud with this name exists would
+		// turn a transient list failure into a duplicate cloud instead of an adoption.
+		AddAPIError(&resp.Diagnostics, fmt.Sprintf("check for an existing cloud named %q before creating one; no cloud was created, retry the apply", name), err)
+		return
 	} else if existingCloudID != "" {
 		tflog.Info(ctx, "Found existing cloud, adopting", map[string]any{"name": name, "id": existingCloudID})
 		plan.ID = types.StringValue(existingCloudID)

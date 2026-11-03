@@ -1,0 +1,4 @@
+```
+release-note:fixed
+resource/anyscale_cloud: If the check for an existing cloud with the same name fails during create, the apply now stops with an error naming the failure instead of creating the cloud anyway, which could produce a duplicate cloud. Retry the apply.
+```
