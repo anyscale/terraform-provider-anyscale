@@ -2,6 +2,12 @@
 # No EFS, No MemoryDB - Minimal AWS cloud configuration
 
 resource "anyscale_cloud" "primary" {
+  # Keep the IAM roles and their policies until everything under the
+  # cloud is destroyed: Anyscale needs them to terminate clusters and
+  # tear down load balancers. A role ARN reference alone does not
+  # order the policy attachments.
+  depends_on = [module.aws_anyscale_v2]
+
   # Common Fields
   name           = var.cloud_name
   cloud_provider = "AWS"

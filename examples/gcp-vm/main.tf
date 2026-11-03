@@ -20,6 +20,12 @@ resource "anyscale_cloud" "primary" {
 
 # Step 2: Attach cloud resource with configuration
 resource "anyscale_cloud_resource" "primary" {
+  # Keep the IAM roles and their policies until everything under the
+  # cloud is destroyed: Anyscale needs them to terminate clusters and
+  # tear down load balancers. A role ARN reference alone does not
+  # order the policy attachments.
+  depends_on = [module.google_anyscale_v2]
+
   name = var.cloud_name
 
   cloud_id      = anyscale_cloud.primary.id

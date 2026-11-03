@@ -43,8 +43,12 @@ resource "helm_release" "anyscale_operator" {
     })
   ]
 
+  # The service account's project roles are listed so destroy uninstalls
+  # the Operator before it loses them; referencing the account alone does
+  # not order its role bindings.
   depends_on = [
     anyscale_cloud.primary,
     google_service_account_iam_binding.workload_identity_bindings,
+    google_project_iam_member.gke_nodes_roles,
   ]
 }

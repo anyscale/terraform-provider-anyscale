@@ -2,6 +2,12 @@
 # No Filestore, No Memorystore - Minimal GCP cloud configuration
 
 resource "anyscale_cloud" "primary" {
+  # Keep the IAM roles and their policies until everything under the
+  # cloud is destroyed: Anyscale needs them to terminate clusters and
+  # tear down load balancers. A role ARN reference alone does not
+  # order the policy attachments.
+  depends_on = [module.google_anyscale_v2]
+
   # Common Fields
   name           = var.cloud_name
   cloud_provider = "GCP"
