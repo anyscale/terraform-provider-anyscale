@@ -893,10 +893,12 @@ func (r *ServiceResource) Create(ctx context.Context, req resource.CreateRequest
 		AddAPIError(&resp.Diagnostics, "check for existing service", err)
 		return
 	}
-	if len(existingMatches) == 0 {
+	if len(existingMatches) == 0 && projectID != "" {
 		// The listing hides archived services by default, and PUT /apply rejects a name held
-		// by an archived service. The list results carry no archived marker, so ask for
-		// archived services separately.
+		// by an archived service in the same project. The list results carry no archived
+		// marker, so ask for archived services separately. Only with project_id set: without
+		// it the search spans every project, and an archived name in another project does not
+		// block the apply.
 		archivedMatches, err := findExistingServiceIDs(ctx, r.client, name, projectID, "ARCHIVED")
 		if err != nil {
 			AddAPIError(&resp.Diagnostics, "check for an archived service with the same name", err)

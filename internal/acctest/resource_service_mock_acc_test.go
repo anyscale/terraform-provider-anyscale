@@ -623,3 +623,69 @@ func TestAccServiceResource_ArchivedSameNameRefusedAtCreate(t *testing.T) {
 		t.Errorf("PUT /apply was called %d time(s); Create must refuse before applying", got)
 	}
 }
+
+// TestAccServiceResource_ArchivedSameNameInAnotherProjectIgnored: with project_id omitted, the
+// same-name search spans every project the token sees, and the backend applies to the resolved
+// default project. An archived same-name service elsewhere must not block the create.
+func TestAccServiceResource_ArchivedSameNameInAnotherProjectIgnored(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const (
+		name      = "archived-elsewhere"
+		serviceID = "svc_archived_elsewhere"
+	)
+	var applyCalls, terminated int32
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v2/services-v2/apply", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&applyCalls, 1)
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = fmt.Fprint(w, `{"result": `+serviceFindingsJSON(serviceID, name, "prj_default", "RUNNING")+`}`)
+	})
+	mux.HandleFunc("/api/v2/services-v2", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		switch r.URL.Query().Get("archive_status") {
+		case "ARCHIVED", "ALL":
+			_, _ = fmt.Fprint(w, `{"results": [`+serviceFindingsJSON("svc_old", name, "prj_other", "TERMINATED")+`], "metadata": {"total": 1, "next_paging_token": null}}`)
+		default:
+			_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"total": 0, "next_paging_token": null}}`)
+		}
+	})
+	mux.HandleFunc("/api/v2/services-v2/"+serviceID, func(w http.ResponseWriter, r *http.Request) {
+		serveServiceGetOrDelete(t, w, r, serviceFindingsJSON(serviceID, name, "prj_default", serviceFindingsCurrentState(&terminated)))
+	})
+	mux.HandleFunc("/api/v2/services-v2/"+serviceID+"/terminate", func(w http.ResponseWriter, r *http.Request) {
+		atomic.StoreInt32(&terminated, 1)
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = fmt.Fprint(w, `{"result": {}}`)
+	})
+	mux.HandleFunc("/api/v2/tags/resource", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, emptyTagsBody)
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	config := testAccProviderBlock(server.URL) + fmt.Sprintf(`
+resource "anyscale_service" "test" {
+  name              = %[1]q
+  build_id          = "bld_findings"
+  compute_config_id = "cpt_findings"
+%[2]s
+}
+`, name, testAccServiceRayServeConfigHCL)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check:  resource.TestCheckResourceAttr("anyscale_service.test", "id", serviceID),
+			},
+		},
+	})
+	if got := atomic.LoadInt32(&applyCalls); got != 1 {
+		t.Errorf("PUT /apply was called %d time(s), want 1: an archived name in another project must not block the create", got)
+	}
+}
