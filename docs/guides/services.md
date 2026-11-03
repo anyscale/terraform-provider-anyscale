@@ -63,10 +63,12 @@ gradually, so this can take a minute or more.
 - **Finishing.** Remove `canary_percent` (the rollout completes with Anyscale's automatic ramp)
   or set it to `100` (an immediate cutover, like `anyscale service deploy --canary-percent 100`).
   `100` completes only where Anyscale auto-completes manual rollouts. Elsewhere the apply fails
-  after a grace period saying the rollout is held at 100%; remove the attribute to finish it.
+  after a 5-minute grace period saying the rollout is held at 100%; remove the attribute to
+  finish it.
 - **Changing the deploy while a canary is held.** Terraform rolls the held canary back, then
   deploys the new configuration, and the plan warns about it. If you revert to the configuration
-  from before the canary, it only rolls back.
+  from before the canary, it only rolls back, unless `version_name` changed: a new name deploys
+  a new version.
 - **`version_name`.** Changing only the name of a held canary is rejected at plan time, because
   Anyscale ignores it.
 - **Canary fails during the apply.** Terraform rolls it back and reports "Service Rollout
