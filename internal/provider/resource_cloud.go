@@ -326,7 +326,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					},
 					"external_id": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "External ID Anyscale passes when assuming the control-plane role; it must match the role's trust policy. Must start with your organization ID (e.g. `org_1234567890abcdef-1234567890abcdef`): it is also recorded on the cloud itself, where services' load balancers use it, and the API refuses any other value on create. It cannot be changed in place. See the [Anyscale AWS IAM documentation](https://docs.anyscale.com/iam/aws) for the full trust policy.",
+						MarkdownDescription: "External ID Anyscale passes when assuming the control-plane role; it must match the role's trust policy. Use one that starts with your organization ID (e.g. `org_1234567890abcdef-1234567890abcdef`): only such a value is recorded on the cloud itself, where services' load balancers need it, so with any other value services on the cloud cannot run. See the [Anyscale AWS IAM documentation](https://docs.anyscale.com/iam/aws) for the full trust policy.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -899,11 +899,13 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 	// The cloud record's own external_id is what the services load balancer
 	// assumes the control-plane role with; when it is null the backend falls
-	// back to the cloud ID, which the role's trust policy rejects. Sent only
-	// for AWS and only when set, as the CLI's register_aws_cloud does. The API
-	// cannot change it after create.
+	// back to the cloud ID, which the role's trust policy rejects. Sent for AWS
+	// when set, as the CLI's register_aws_cloud does, but only when it starts
+	// with the organization ID: the API refuses any other value here, and
+	// sending one would fail a create that works without it (ModifyPlan warns
+	// instead). The API cannot change it after create.
 	if strings.ToUpper(provider) == "AWS" {
-		if externalID, known := awsConfigExternalID(ctx, plan.AWSConfig); known && externalID != "" {
+		if externalID, ok := cloudLevelExternalID(ctx, plan.AWSConfig); ok {
 			createReq.ExternalID = &externalID
 		}
 	}
@@ -1182,7 +1184,7 @@ func (r *CloudResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 				lookup = r.findCloudByName
 			}
 			resp.Diagnostics.Append(validateEmbeddedCreateConfig(ctx, &config, lookup)...)
-			resp.Diagnostics.Append(validateCreateExternalID(ctx, &config, lookup)...)
+			resp.Diagnostics.Append(warnCreateExternalIDNotRecorded(ctx, &config)...)
 		}
 		return
 	}

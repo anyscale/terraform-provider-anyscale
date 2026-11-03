@@ -1,0 +1,3 @@
+```release-note:changed
+resource/anyscale_cloud: Creating an AWS cloud whose `aws_config.external_id` does not start with your organization ID now warns at plan: the value is not recorded on the cloud itself, so services on that cloud cannot reach their load balancer. The create itself behaves as before.
+```

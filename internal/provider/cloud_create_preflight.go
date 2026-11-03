@@ -8,6 +8,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
@@ -151,17 +152,6 @@ func validateEmbeddedCreateConfig(ctx context.Context, data *CloudResourceModel,
 	if !bad {
 		return diags
 	}
-	return failUnlessAdopting(ctx, data, lookup, summary, detail)
-}
-
-// failUnlessAdopting returns the error summary/detail for a create that would
-// POST a new cloud, and nothing when Create would adopt an existing cloud of the
-// same name instead (adopting sends no create request). The name lookup runs
-// only here, so a valid config costs no API call. A failed or ambiguous lookup
-// fails the plan with the error Create would raise; an unknown name or an
-// unconfigured client skips the check.
-func failUnlessAdopting(ctx context.Context, data *CloudResourceModel, lookup cloudNameLookup, summary, detail string) diag.Diagnostics {
-	var diags diag.Diagnostics
 	if data.Name.IsUnknown() || lookup == nil {
 		return diags
 	}
@@ -186,21 +176,36 @@ func failUnlessAdopting(ctx context.Context, data *CloudResourceModel, lookup cl
 // backend/server/api/base/models/clouds.py).
 const cloudExternalIDPrefix = "org_"
 
-// validateCreateExternalID fails a create plan whose aws_config.external_id the
-// create request would carry but the API would refuse. The cloud record's own
-// external_id is what the services load balancer assumes the control-plane role
-// with, so Create sends it; the API rejects a value that does not start with
-// the organization ID. Existing clouds are not checked: nothing re-sends it.
-func validateCreateExternalID(ctx context.Context, data *CloudResourceModel, lookup cloudNameLookup) diag.Diagnostics {
+// cloudLevelExternalID returns the aws_config.external_id that Create sends as
+// the cloud's own external_id: set only when it is known, non-empty, and starts
+// with the organization ID, since the API refuses any other value there.
+func cloudLevelExternalID(ctx context.Context, awsConfig types.Object) (string, bool) {
+	externalID, known := awsConfigExternalID(ctx, awsConfig)
+	if !known || !strings.HasPrefix(externalID, cloudExternalIDPrefix) {
+		return "", false
+	}
+	return externalID, true
+}
+
+// warnCreateExternalIDNotRecorded warns on a create plan whose
+// aws_config.external_id Create will not send as the cloud's own external_id
+// because it does not start with the organization ID. The services load
+// balancer assumes the control-plane role with the cloud's external_id, so
+// services on that cloud cannot run. Clusters are unaffected, and the create
+// itself behaves as before.
+func warnCreateExternalIDNotRecorded(ctx context.Context, data *CloudResourceModel) diag.Diagnostics {
+	var diags diag.Diagnostics
 	externalID, known := awsConfigExternalID(ctx, data.AWSConfig)
 	if !known || externalID == "" || strings.HasPrefix(externalID, cloudExternalIDPrefix) {
-		return nil
+		return diags
 	}
-	return failUnlessAdopting(ctx, data, lookup, "Invalid aws_config.external_id",
-		fmt.Sprintf("aws_config.external_id %q must start with your organization ID (for example %q). "+
-			"Anyscale records it on the cloud itself, and services use it to reach their load balancer, "+
-			"so the API refuses to create a cloud with any other value. Use the external ID from your "+
-			"control-plane role's trust policy, which follows the same rule.", externalID, "org_abcd-1234"))
+	diags.AddAttributeWarning(path.Root("aws_config").AtName("external_id"),
+		"External ID Not Recorded On The Cloud",
+		fmt.Sprintf("aws_config.external_id %q does not start with your organization ID, so it is not recorded "+
+			"on the cloud itself (the API accepts only values like %q there). Clusters still work, but services "+
+			"on a new cloud cannot reach their load balancer. Use an external ID that starts with your organization "+
+			"ID, in both this setting and the control-plane role's trust policy.", externalID, "org_abcd-1234"))
+	return diags
 }
 
 // awsConfigExternalID returns aws_config.external_id. known is false when the

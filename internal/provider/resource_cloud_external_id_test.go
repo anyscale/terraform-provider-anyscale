@@ -12,7 +12,11 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 // createBodyServer answers the adopt lookup with no match and records the body
@@ -86,6 +90,16 @@ func TestCloudResourceCreate_SendsCloudLevelExternalID(t *testing.T) {
 			wantID: externalID,
 		},
 		{
+			// The API refuses a non-org_ cloud-level external_id; sending one would fail a
+			// create that works without it.
+			name: "AWS VM with a non-org_ external_id omits it",
+			plan: func(t *testing.T) CloudResourceModel {
+				p := preflightPlan(t, "tfacc-extid", "AWS", "VM", "us-east-1")
+				p.AWSConfig = awsConfigWithExternalID(t, "my-external-id")
+				return p
+			},
+		},
+		{
 			name: "AWS VM without external_id omits it",
 			plan: func(t *testing.T) CloudResourceModel {
 				p := preflightPlan(t, "tfacc-extid", "AWS", "VM", "us-east-1")
@@ -145,10 +159,9 @@ func TestCloudResourceCreate_SendsCloudLevelExternalID(t *testing.T) {
 	}
 }
 
-// TestValidateCreateExternalID covers the create-time plan check. POST
-// /api/v2/clouds refuses a cloud-level external_id that does not start with the
-// organization ID, so a create that would send one fails at plan instead.
-func TestValidateCreateExternalID(t *testing.T) {
+// TestWarnCreateExternalIDNotRecorded covers the create-time plan warning for
+// an aws_config.external_id that Create will not record on the cloud.
+func TestWarnCreateExternalIDNotRecorded(t *testing.T) {
 	ctx := context.Background()
 	planWith := func(t *testing.T, externalID types.String) CloudResourceModel {
 		p := preflightPlan(t, "tfacc-extid", "AWS", "VM", "us-east-1")
@@ -160,43 +173,69 @@ func TestValidateCreateExternalID(t *testing.T) {
 		return p
 	}
 
-	t.Run("non-org_ value is an error", func(t *testing.T) {
+	t.Run("non-org_ value is a warning, not an error", func(t *testing.T) {
 		p := planWith(t, types.StringValue("my-external-id"))
-		diags := validateCreateExternalID(ctx, &p, noCloudNamed)
-		if !diagsContainSummary(diags, "Invalid aws_config.external_id") {
-			t.Fatalf("want an external_id error, got: %v", diags)
+		diags := warnCreateExternalIDNotRecorded(ctx, &p)
+		if diags.HasError() {
+			t.Fatalf("want no error, got: %v", diags)
 		}
-		if detail := diags[0].Detail(); !strings.Contains(detail, "must start with your organization ID") {
-			t.Errorf("detail %q does not state the rule", detail)
+		if diags.WarningsCount() != 1 || diags[0].Summary() != "External ID Not Recorded On The Cloud" {
+			t.Fatalf("want one external ID warning, got: %v", diags)
 		}
-	})
-
-	t.Run("control: org_ value passes", func(t *testing.T) {
-		p := planWith(t, types.StringValue("org_abcd-1234"))
-		if diags := validateCreateExternalID(ctx, &p, noCloudNamed); len(diags) != 0 {
-			t.Fatalf("an org_ external_id must pass, got: %v", diags)
+		if detail := diags[0].Detail(); !strings.Contains(detail, "services on a new cloud cannot reach their load balancer") {
+			t.Errorf("detail %q does not state the consequence", detail)
 		}
 	})
 
-	t.Run("control: unset passes", func(t *testing.T) {
-		p := planWith(t, types.StringNull())
-		if diags := validateCreateExternalID(ctx, &p, noCloudNamed); len(diags) != 0 {
-			t.Fatalf("an unset external_id must pass, got: %v", diags)
-		}
-	})
+	for name, v := range map[string]types.String{
+		"org_ value":  types.StringValue("org_abcd-1234"),
+		"unset":       types.StringNull(),
+		"unknown":     types.StringUnknown(),
+		"empty value": types.StringValue(""),
+	} {
+		t.Run("control: "+name+" has no warning", func(t *testing.T) {
+			p := planWith(t, v)
+			if diags := warnCreateExternalIDNotRecorded(ctx, &p); len(diags) != 0 {
+				t.Fatalf("want no diagnostics, got: %v", diags)
+			}
+		})
+	}
+}
 
-	t.Run("control: unknown is skipped", func(t *testing.T) {
-		p := planWith(t, types.StringUnknown())
-		if diags := validateCreateExternalID(ctx, &p, noCloudNamed); len(diags) != 0 {
-			t.Fatalf("an unknown external_id must not error at plan time, got: %v", diags)
-		}
-	})
+// TestCloudResourceModifyPlan_WarnsOnNonOrgExternalID proves ModifyPlan itself
+// surfaces the warning on a create plan, not only the helper.
+func TestCloudResourceModifyPlan_WarnsOnNonOrgExternalID(t *testing.T) {
+	ctx := context.Background()
+	r := &CloudResource{}
+	var schemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
 
-	t.Run("control: adopting an existing cloud sends no create, so passes", func(t *testing.T) {
-		p := planWith(t, types.StringValue("my-external-id"))
-		existing := func(context.Context, string) (string, error) { return "cld_existing", nil }
-		if diags := validateCreateExternalID(ctx, &p, existing); len(diags) != 0 {
-			t.Fatalf("an adopt must not be refused, got: %v", diags)
+	run := func(t *testing.T, externalID string) diag.Diagnostics {
+		p := preflightPlan(t, "tfacc-extid", "AWS", "VM", "us-east-1")
+		p.AWSConfig = awsConfigWithExternalID(t, externalID)
+		plan := tfsdk.Plan{Schema: schemaResp.Schema}
+		if d := plan.Set(ctx, &p); d.HasError() {
+			t.Fatalf("plan fixture: %v", d)
 		}
-	})
+		req := resource.ModifyPlanRequest{
+			Plan:   plan,
+			Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: plan.Raw},
+			State:  tfsdk.State{Schema: schemaResp.Schema, Raw: tftypes.NewValue(schemaResp.Schema.Type().TerraformType(ctx), nil)},
+		}
+		resp := &resource.ModifyPlanResponse{Plan: plan}
+		r.ModifyPlan(ctx, req, resp)
+		return resp.Diagnostics
+	}
+
+	diags := run(t, "my-external-id")
+	if diags.HasError() {
+		t.Fatalf("want no error, got: %v", diags)
+	}
+	if !diagsContainSummary(diags, "External ID Not Recorded On The Cloud") {
+		t.Fatalf("create plan with a non-org_ external_id: want the warning, got: %v", diags)
+	}
+
+	if diags := run(t, "org_abcd-1234"); diagsContainSummary(diags, "External ID Not Recorded On The Cloud") {
+		t.Errorf("control: an org_ external_id must not warn, got: %v", diags)
+	}
 }
