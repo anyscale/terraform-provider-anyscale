@@ -1425,14 +1425,16 @@ func (r *CloudResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 		)
 	}
 
-	tornDown, err := tearDownCloudLoadBalancers(ctx, r.client, cloudID)
+	markedDeleting, err := tearDownCloudLoadBalancers(ctx, r.client, cloudID)
 	if err != nil {
 		detail := err.Error()
 		if errors.Is(err, errCloudLBTeardownTimeout) {
 			detail = fmt.Sprintf("%s (timeouts.delete = %s). Raise timeouts.delete and run terraform destroy again.", detail, deleteTimeout)
+		} else {
+			detail += ". Run terraform destroy again once the error above is resolved."
 		}
-		if tornDown {
-			detail += " The cloud is marked DELETING, which cannot be undone."
+		if markedDeleting {
+			detail += " The cloud is already marked DELETING, which cannot be undone."
 		}
 		resp.Diagnostics.AddError("Cloud Load Balancer Teardown Failed",
 			fmt.Sprintf("Cloud %s was not deleted: %s", cloudID, detail))
@@ -1457,14 +1459,17 @@ func (r *CloudResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 		if readBack != nil {
 			state = "reading it back to tell whether it is gone failed: " + extractAPIErrorDetail(readBack)
 		}
-		resp.Diagnostics.AddError("Cloud Delete Timed Out",
-			fmt.Sprintf("Deleting cloud %s did not finish within timeouts.delete (%s), and %s. "+
-				"Raise timeouts.delete and run terraform destroy again.", cloudID, deleteTimeout, state))
+		detail := fmt.Sprintf("Deleting cloud %s did not finish within timeouts.delete (%s), and %s. "+
+			"Raise timeouts.delete and run terraform destroy again.", cloudID, deleteTimeout, state)
+		if markedDeleting {
+			detail += " The cloud is already marked DELETING, which cannot be undone."
+		}
+		resp.Diagnostics.AddError("Cloud Delete Timed Out", detail)
 		return
 	}
 	if err != nil {
 		tflog.Error(ctx, "Failed to delete cloud", map[string]any{"error": err.Error()})
-		addCloudDeleteError(&resp.Diagnostics, cloudID, tornDown, err)
+		addCloudDeleteError(&resp.Diagnostics, cloudID, markedDeleting, err)
 		return
 	}
 

@@ -34,7 +34,7 @@ type cloudLBResourceResponse struct {
 var errCloudLBTeardownTimeout = errors.New("the cloud's service load balancers were not torn down in time")
 
 // cloudNeedsLBTeardown reports whether Delete must tear down the cloud's
-// service load balancers first, as the CLI's delete_cloud does. Anyscale
+// service load balancers first. Anyscale
 // manages those load balancers only for an AWS or GCP VM cloud. A cloud with
 // no resource has none, and the teardown endpoint fails for it.
 func cloudNeedsLBTeardown(resources []CloudDeploymentResult) bool {
@@ -59,13 +59,13 @@ func cloudNeedsLBTeardown(resources []CloudDeploymentResult) bool {
 // tearDownCloudLoadBalancers removes the cloud's service load balancers before
 // the cloud is deleted. PUT /clouds/{id}/state?state=DELETING runs the
 // backend's load balancer teardown, with the cloud's own role, and marks the
-// cloud DELETING; POST get_lb_resource then reports when they are gone.
-// Deleting the cloud without this leaves the load balancer, its target groups
-// and its certificate behind in the customer's account.
+// cloud DELETING; POST get_lb_resource then reports when they are gone. The
+// CLI's delete_cloud does the same before its DELETE.
 //
-// DELETING cannot be undone: if the DELETE that follows fails, the cloud stays
-// DELETING. ran reports whether the state change was made, for that message.
-func tearDownCloudLoadBalancers(ctx context.Context, client *Client, cloudID string) (ran bool, err error) {
+// DELETING cannot be undone. markedDeleting reports whether the state change
+// was made, including when the wait for the teardown then fails, so a caller
+// can say the cloud is left DELETING.
+func tearDownCloudLoadBalancers(ctx context.Context, client *Client, cloudID string) (markedDeleting bool, err error) {
 	resources, err := listCloudResources(ctx, client, cloudID)
 	if err != nil {
 		if isGoneOrForbidden(err) {
@@ -137,17 +137,18 @@ func lbTeardownTimeout(lastErr error) error {
 	return fmt.Errorf("%w; the last check failed: %s", errCloudLBTeardownTimeout, extractAPIErrorDetail(lastErr))
 }
 
-// addCloudDeleteError reports a failed cloud DELETE. After the load balancer
-// teardown, the cloud is DELETING for good, so the message says what that
-// leaves and how to finish.
-func addCloudDeleteError(diags *diag.Diagnostics, cloudID string, tornDown bool, err error) {
+// addCloudDeleteError reports a DELETE that failed after a completed load
+// balancer teardown (markedDeleting) or with none needed. After the teardown
+// the cloud is DELETING for good, so the message says what that leaves and how
+// to finish.
+func addCloudDeleteError(diags *diag.Diagnostics, cloudID string, markedDeleting bool, err error) {
 	AddAPIError(diags, "delete cloud "+cloudID, err)
-	if !tornDown {
+	if !markedDeleting {
 		return
 	}
 	extra := "The cloud's service load balancers were already removed and the cloud is marked DELETING, which cannot be undone."
 	if isHTTPStatus(err, http.StatusConflict) {
-		extra += " Terminate the clusters named above, then run terraform destroy again."
+		extra += " Terminate any clusters named above or still running in the cloud, then run terraform destroy again."
 	} else {
 		extra += " Run terraform destroy again to finish deleting it."
 	}

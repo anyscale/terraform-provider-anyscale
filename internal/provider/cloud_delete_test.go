@@ -226,7 +226,7 @@ func TestCloudResourceDelete_ConflictAfterTeardownExplainsDeletingState(t *testi
 	for _, d := range diags {
 		all += d.Detail() + "\n"
 	}
-	for _, want := range []string{"(HTTP 409): Cloud has active clusters: ses_abc", "Terminate the clusters named above"} {
+	for _, want := range []string{"(HTTP 409): Cloud has active clusters: ses_abc", "Terminate any clusters named above or still running in the cloud"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("diagnostics %q missing %q", all, want)
 		}
