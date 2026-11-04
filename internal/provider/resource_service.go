@@ -1033,6 +1033,14 @@ func (r *ServiceResource) Create(ctx context.Context, req resource.CreateRequest
 		refreshServiceTagsIntoModel(ctx, r.client, finalService.ID, &plan.Tags)
 		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	}
+	var heldErr *serviceErrorHeldError
+	if errors.As(err, &heldErr) {
+		// The service is in state, so this error taints it.
+		resp.Diagnostics.AddError("Service Failed to Start", fmt.Sprintf(
+			"Service %s has reported %s for %s while its version is RUNNING: %s. Fix the cause, then run terraform untaint on this resource; otherwise the next apply replaces the service.",
+			service.ID, heldErr.State, heldErr.Held, strings.TrimSuffix(heldErr.Detail, ".")))
+		return
+	}
 	if err != nil {
 		AddAPIError(&resp.Diagnostics, "wait for service rollout", err)
 		return
