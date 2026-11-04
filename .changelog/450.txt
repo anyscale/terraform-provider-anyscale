@@ -1,0 +1,3 @@
+```release-note:changed
+resource/anyscale_cloud: A create plan for an empty VM cloud that leaves `cloud_provider`, `region` or `credentials` unset now warns that the cloud will be recorded as AWS, in us-east-1, with a placeholder role, and that services on it cannot create load balancers. Set them to match the `anyscale_cloud_resource` you attach.
+```
