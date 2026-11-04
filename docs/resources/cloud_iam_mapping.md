@@ -93,7 +93,7 @@ resource "anyscale_cloud_iam_mapping" "production" {
 
 Required:
 
-- `selector` (String) A Kubernetes label-selector expression matched against the launching workload: equality (`workload-type=job`, `project!=my-project`), set-based (`workload-type in (job,service)`), or existence (`project`, `!project`); commas AND requirements. Keys: `workload-type` (`job`, `service`, `workspace`), `project`, `user`. An empty string matches every workload, so use it only as the last rule (first match wins). Validated at plan time with the API's grammar.
+- `selector` (String) A Kubernetes label-selector expression matched against the launching workload: equality (`workload-type=job`, `project!=my-project`), set-based (`workload-type in (job,service)`), or existence (`key`, `!key`); commas AND requirements. Keys: `workload-type` (`job`, `service`, `workspace`), `project`, `user`. An empty string matches every workload, so use it only as the last rule (first match wins). Validated at plan time with the API's grammar.
 - `value` (String) The cloud IAM identity this rule assigns when its selector matches. Meaning depends on the cloud: an AWS VM cloud expects an IAM **role name** with an identically-named instance profile (not an ARN), a GCP VM cloud expects a service account email, and a Kubernetes cloud (EKS/AKS/GKE) expects a Kubernetes service account name.
 
 
