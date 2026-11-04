@@ -288,12 +288,20 @@ deletes the cloud itself. If a detach fails, the delete still goes ahead and the
 delete then fails because a pool is still attached, detach it with the Anyscale CLI or console and
 apply again.
 
-For a cloud whose primary resource is an AWS or GCP VM, destroy first has Anyscale tear down the cloud's service load balancers, which can
-take several minutes, then deletes the cloud. `timeouts { delete }` (default `30m`) bounds the whole destroy.
-If the teardown fails or does not finish in time, the cloud is not deleted: fix what the error names (or raise
-`timeouts.delete`) and run `terraform destroy` again. Once the teardown has started the cloud is marked
-`DELETING`, which cannot be undone, so a destroy that fails afterwards must be re-run to finish. If the error
-says clusters are still running, terminate them first. A cloud with no cloud resource, or whose primary resource is Kubernetes, skips the teardown.
+For a cloud whose primary resource is an AWS or GCP VM, deleting the cloud starts with Anyscale tearing down its
+service load balancers, which can take several minutes. For an all-in-one cloud this runs when `anyscale_cloud` is
+destroyed. In the split pattern it runs when the primary `anyscale_cloud_resource` is destroyed, before the IAM and
+network it depends on. `timeouts { delete }` (default `30m`) on each resource bounds its own part. If the teardown
+fails or does not finish in time, the cloud is not deleted: fix what the error names (or raise `timeouts.delete`)
+and run `terraform destroy` again. Once the teardown has started the cloud is marked `DELETING`, which cannot be
+undone, so a destroy that fails afterwards must be re-run to finish. If the error says clusters are still running,
+terminate them first. A cloud with no cloud resource, or whose primary resource is Kubernetes, skips the teardown.
+
+Destroying a primary `anyscale_cloud_resource` therefore starts deleting its cloud. A change that would replace a
+primary resource fails at plan time; replace the cloud instead (`terraform apply -replace=anyscale_cloud.<name>`).
+Terraform cannot catch these, and each one starts the teardown: removing the resource's block, renaming it without
+a `moved` block, `-replace` or taint on the resource, and `destroy -target`. To rename a primary resource, add a
+`moved` block.
 
 If the teardown times out because the control-plane role or its policies were already destroyed, Anyscale cannot
 confirm it and a longer timeout will not help. Delete the cloud's load balancer, target groups and ACM certificate in
