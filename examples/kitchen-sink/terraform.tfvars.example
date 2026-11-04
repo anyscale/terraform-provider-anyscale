@@ -58,5 +58,5 @@ customer_ingress_cidr_ranges = "203.0.113.0/24,198.51.100.42/32"
 # user_group_member_emails = ["member@example.com"]
 # enable_role_binding      = true # converted (role-binding) organizations only
 
-# --- System Cluster: destroy does not stop it; see README.md ---------------------------------------
+# --- System Cluster: destroying the cloud terminates it; see README.md ----------------------------
 # enable_system_cluster = true
