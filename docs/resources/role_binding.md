@@ -4,14 +4,14 @@ page_title: "anyscale_role_binding Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
   ~> Beta. Role bindings are enabled per organization by Anyscale while customers migrate; contact support@anyscale.com mailto:support@anyscale.com to enable them. Breaking schema changes get a deprecation first and a changelog entry. See the RBAC guide ../guides/rbac.md#role-bindings-beta.
-  Grants one role to one user group or user on an organization, cloud or project. Access granted this way is not visible to anyscale_cloud_access; see the RBAC guide ../guides/rbac.md. A binding cannot be edited, so changing any argument replaces it. Requires an organization converted to role bindings ../guides/rbac.md#organization-access-mode.
+  Grants one role to one user group or user on an organization, cloud or project. Access granted this way is not visible to anyscale_cloud_access; see the RBAC guide ../guides/rbac.md. A binding cannot be edited, so changing any argument replaces it. Don't manage one scope with both this resource and anyscale role-binding policy apply: a policy apply revokes this resource's bindings, and the next apply re-creates them. Requires an organization converted to role bindings ../guides/rbac.md#organization-access-mode.
 ---
 
 # anyscale_role_binding (Resource)
 
 ~> **Beta.** Role bindings are enabled per organization by Anyscale while customers migrate; contact [support@anyscale.com](mailto:support@anyscale.com) to enable them. Breaking schema changes get a deprecation first and a changelog entry. See the [RBAC guide](../guides/rbac.md#role-bindings-beta).
 
-Grants one role to one user group or user on an organization, cloud or project. Access granted this way is not visible to `anyscale_cloud_access`; see the [RBAC guide](../guides/rbac.md). A binding cannot be edited, so changing any argument replaces it. Requires an organization [converted to role bindings](../guides/rbac.md#organization-access-mode).
+Grants one role to one user group or user on an organization, cloud or project. Access granted this way is not visible to `anyscale_cloud_access`; see the [RBAC guide](../guides/rbac.md). A binding cannot be edited, so changing any argument replaces it. Don't manage one scope with both this resource and `anyscale role-binding policy apply`: a policy apply revokes this resource's bindings, and the next apply re-creates them. Requires an organization [converted to role bindings](../guides/rbac.md#organization-access-mode).
 
 ## Example Usage
 

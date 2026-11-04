@@ -142,6 +142,7 @@ func (r *RoleBindingResource) Schema(ctx context.Context, req resource.SchemaReq
 			"Grants one role to one user group or user on an organization, cloud or project. " +
 			"Access granted this way is not visible to `anyscale_cloud_access`; see the [RBAC guide](../guides/rbac.md). " +
 			"A binding cannot be edited, so changing any argument replaces it. " +
+			"Don't manage one scope with both this resource and `anyscale role-binding policy apply`: a policy apply revokes this resource's bindings, and the next apply re-creates them. " +
 			"Requires an organization [converted to role bindings](../guides/rbac.md#organization-access-mode).",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
