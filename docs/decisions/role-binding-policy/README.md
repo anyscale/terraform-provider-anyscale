@@ -25,7 +25,7 @@ Converted organizations only. Requires role bindings to be enabled.
 | `GET /api/v2/role_bindings/{organization\|cloud\|project}/{id}/policy/generate` | Read | measured |
 | `PUT .../policy` | Create, Update, Delete | measured |
 | `PUT .../policy?dry_run=true` | plan-time checks | measured |
-| `GET /api/v2/role_bindings/{rb_id}` | resolve a binding named in a refusal | measured |
+| `GET /api/v2/role_bindings/{rb_id}` | resolve a frozen binding named in a 409 | measured (lags ~5s after create) |
 | `GET /api/v2/userinfo/` | the caller's user id | measured |
 | `GET /api/v2/roles/?count=1` | tell "role bindings off" from other 404s | measured |
 
@@ -121,9 +121,11 @@ are known (check each value; never `Plan.Raw.IsFullyKnown()`, which is false for
 Computed attribute). Then:
 
 1. `PUT ...?dry_run=true` with the planned policy.
-2. A refusal becomes a plan **error** carrying the server's text. For the own-binding 403, also GET
-   the named `rb_` and print the exact entry to add (`role id` → `user_ids = ["usr_..."]`). For a
-   404, report the unknown role or group, never "role bindings are disabled".
+2. A refusal becomes a plan **error** carrying the server's text. For the own-binding 403, find the
+   caller's direct bindings in `generate` (user principal = the `userinfo` id) and print the exact
+   entry to add (`role id` → `user_ids = ["usr_..."]`). Do not GET the named `rb_`: on a scope
+   created seconds earlier that GET answers 403 (see consistency, below). For a 404, report the
+   unknown role or group, never "role bindings are disabled".
 3. On **create**, a non-empty `removed` becomes a plan **warning** naming each grant the first apply
    revokes (principal type, principal id, role id).
 4. On update, no warning: the plan diff already shows every change.
@@ -151,8 +153,13 @@ org (409), and the plan shows the rest before apply.
 **Import.** `<scope_type>/<scope_id>`, `scope_type` in `organization|cloud|project`. Read fills
 `roles`. A config naming exactly the scope's current bindings plans no-op.
 
-**Timeouts / consistency.** The API is synchronous and `generate` reads the database the PUT writes.
-No `timeouts{}` block, no settle wait.
+**Timeouts / consistency.** The API is synchronous and `generate` reads the database the PUT writes,
+behind a manage-IAM check on the scope that is visible at once. No `timeouts{}` block, no settle
+wait. The exception is `GET /api/v2/role_bindings/{rb_id}`: it checks the binding's own permission
+in SpiceDB, which lags a new binding by about 5s (measured: 403 "You may not read role binding
+'rb_..'." at +1s to +3s, 200 at +5s). The same text is returned for a revoked id. The policy
+resource uses that GET only for a frozen binding, which is never new; use the shared bounded
+by-id retry there anyway.
 
 ## Data source `anyscale_role_binding_policy`
 
