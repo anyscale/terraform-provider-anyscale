@@ -178,7 +178,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			"cloud_provider": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
-				MarkdownDescription: "Cloud provider: AWS, GCP, or AZURE. Inferred from whichever of aws_config/gcp_config/azure_config is set; otherwise (an empty cloud, or only kubernetes_config) it defaults to AWS, so set it explicitly for GKE or AKS. AZURE supports K8S only (AKS); azure_config with any other compute_stack is a plan-time error. GENERIC is not yet supported.",
+				MarkdownDescription: "Cloud provider: AWS, GCP, or AZURE. Inferred from whichever of aws_config/gcp_config/azure_config is set. An empty cloud, or one with only kubernetes_config, must set it to match the anyscale_cloud_resource you attach: it otherwise defaults to AWS and cannot be changed later, and on an empty VM cloud services then fail. It will become required for an empty cloud. AZURE supports K8S only (AKS); azure_config with any other compute_stack is a plan-time error. GENERIC is not yet supported.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 					stringplanmodifier.UseStateForUnknown(),
@@ -1187,6 +1187,7 @@ func (r *CloudResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 			}
 			resp.Diagnostics.Append(validateEmbeddedCreateConfig(ctx, &config, lookup)...)
 			resp.Diagnostics.Append(warnCreateExternalIDNotRecorded(ctx, &config)...)
+			resp.Diagnostics.Append(warnEmptyCloudDefaults(&config)...)
 		}
 		return
 	}
