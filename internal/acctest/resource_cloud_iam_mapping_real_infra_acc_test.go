@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
@@ -378,6 +379,99 @@ data "anyscale_cloud_iam_mapping" "test" {
 				}
 			}
 			return nil
+		},
+	})
+}
+
+// TestAccCloudIAMMappingResource_RealCloud_SelectorGrammar applies one rule
+// per selector form the docs describe (set-based in/notin, inequality,
+// existence, non-existence, an AND of two requirements, and an empty
+// catch-all last), then checks three things against the real API: state
+// keeps every selector byte-for-byte, an independent GET returns them
+// byte-for-byte with the empty selector's key absent, and a re-plan is empty.
+// A selector the backend normalized (spacing, ordering) would surface as a
+// mismatch in the GET check or a diff in the empty-plan step.
+//
+// Run: TF_ACC=1 ANYSCALE_TEST_REAL_INFRA=1 ANYSCALE_TEST_IAM_MAPPING_CLOUD_ID=<dedicated cloud> go test ./internal/acctest -run '^TestAccCloudIAMMappingResource_RealCloud_SelectorGrammar$' -v -count=1
+func TestAccCloudIAMMappingResource_RealCloud_SelectorGrammar(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	cloudID, cloudResourceID := requireRealIAMMappingTestCloud(t)
+
+	cloudProvider, computeStack := realIAMMappingBaseSpec(t, cloudID, cloudResourceID)
+	putRealCloudDeploymentConfig(t, cloudID, cloudResourceID, map[string]any{
+		"cloud_provider": cloudProvider,
+		"compute_stack":  computeStack,
+	})
+
+	selectors := []string{
+		"workload-type in (job, service)",
+		"workload-type notin (workspace)",
+		"project!=tfacc-iammap-grammar",
+		"user",
+		"!user",
+		"workload-type=job,project=tfacc-iammap-grammar",
+		"",
+	}
+	var rules strings.Builder
+	for i, s := range selectors {
+		fmt.Fprintf(&rules, "    { selector = %q, value = %q },\n", s, fmt.Sprintf("tfacc-iammap-grammar-role-%d", i))
+	}
+	config := fmt.Sprintf(`
+resource "anyscale_cloud_iam_mapping" "test" {
+  cloud_id          = %[1]q
+  cloud_resource_id = %[2]q
+
+  rules = [
+%[3]s  ]
+  fallback_rule = "CLOUD_DEFAULT"
+}
+`, cloudID, cloudResourceID, rules.String())
+
+	stateChecks := []resource.TestCheckFunc{
+		resource.TestCheckResourceAttr("anyscale_cloud_iam_mapping.test", "rules.#", fmt.Sprint(len(selectors))),
+	}
+	for i, s := range selectors {
+		stateChecks = append(stateChecks,
+			resource.TestCheckResourceAttr("anyscale_cloud_iam_mapping.test", fmt.Sprintf("rules.%d.selector", i), s))
+	}
+
+	realAPIRoundTrips := func(_ *terraform.State) error {
+		current := getRealCloudDeploymentConfig(t, cloudID, cloudResourceID)
+		mapping, _ := current["dataplane_iam_mapping"].(map[string]any)
+		got, _ := mapping["rules"].([]any)
+		if len(got) != len(selectors) {
+			return fmt.Errorf("real GET returned %d rules, want %d: %v", len(got), len(selectors), got)
+		}
+		for i, want := range selectors {
+			rule, _ := got[i].(map[string]any)
+			sel, present := rule["selector"]
+			if want == "" {
+				if present {
+					return fmt.Errorf("rule %d: want no selector key for the empty selector, got %q", i, sel)
+				}
+				continue
+			}
+			if sel != want {
+				return fmt.Errorf("rule %d: real GET selector = %q, want %q byte-for-byte", i, sel, want)
+			}
+		}
+		return nil
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check:  resource.ComposeAggregateTestCheckFunc(append(stateChecks, realAPIRoundTrips)...),
+			},
+			{
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+			},
 		},
 	})
 }

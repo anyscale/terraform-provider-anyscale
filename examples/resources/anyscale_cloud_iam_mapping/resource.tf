@@ -25,6 +25,12 @@ resource "anyscale_cloud_iam_mapping" "production" {
       selector = "user=ci-bot@example.com"
       value    = "ci-bot-role"
     },
+    {
+      # Catches the jobs and services no rule above matched
+      # (first match wins).
+      selector = "workload-type in (job,service)"
+      value    = "batch-role"
+    },
   ]
 
   # Required whenever rules is non-empty: what happens when nothing
