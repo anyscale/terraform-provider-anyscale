@@ -256,7 +256,7 @@ func warnEmptyCloudDefaults(config *CloudResourceModel) diag.Diagnostics {
 		"This empty cloud does not set %s. Anyscale keeps these values on the cloud, and changing any of them "+
 			"later replaces the cloud. Services on this cloud cannot create load balancers, because Anyscale "+
 			"creates them with the cloud's own provider, region and credentials; clusters are unaffected. Set them "+
-			"to match the anyscale_cloud_resource you attach. See \"Credentials handling\" in the provider's "+
+			"to match the anyscale_cloud_resource you attach. See the split pattern section of the provider's "+
 			"Cloud Resources guide.",
 		strings.Join(unset, ", ")))
 	return diags
