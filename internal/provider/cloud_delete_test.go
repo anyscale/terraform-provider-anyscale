@@ -21,6 +21,7 @@ type cloudDeleteMock struct {
 	mu         sync.Mutex
 	calls      []string
 	resources  string // JSON array for GET .../resources
+	resStatus  int    // GET .../resources status; 0 = 200
 	lbPending  int    // get_lb_resource answers is_terminated=false this many times
 	lbNever    bool   // get_lb_resource never answers true
 	delStatus  int    // DELETE status; 0 = 204
@@ -45,6 +46,11 @@ func (m *cloudDeleteMock) server(t *testing.T) *httptest.Server {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/machine_pools/":
 			_, _ = fmt.Fprint(w, `{"result": {"machine_pools": []}}`)
 		case r.Method == http.MethodGet && r.URL.Path == cloud+"/resources":
+			if m.resStatus != 0 {
+				w.WriteHeader(m.resStatus)
+				_, _ = fmt.Fprint(w, `{"error": {"detail": "Cloud resources for Anyscale-hosted clouds can not be fetched."}}`)
+				return
+			}
 			_, _ = fmt.Fprintf(w, `{"results": %s, "metadata": {"next_paging_token": null}}`, m.resources)
 		case r.Method == http.MethodPut && r.URL.Path == cloud+"/state":
 			if got := r.URL.Query().Get("state"); got != "DELETING" {
@@ -335,4 +341,31 @@ func TestCloudResourceDelete_DroppedConnectionDuringCheckIsRetried(t *testing.T)
 	if diags := runCloudDelete(t, m, ""); diags.HasError() {
 		t.Fatalf("a dropped connection must not fail the destroy, got: %v", diags)
 	}
+}
+
+// An Anyscale-hosted cloud's resource listing answers 400: it has no load
+// balancer in the customer's account, so destroy goes straight to the DELETE.
+// Any other listing failure still stops the destroy.
+func TestCloudResourceDelete_HostedCloudSkipsTeardown(t *testing.T) {
+	m := &cloudDeleteMock{resStatus: http.StatusBadRequest}
+	if diags := runCloudDelete(t, m, ""); diags.HasError() {
+		t.Fatalf("a hosted cloud must delete without a teardown, got: %v", diags)
+	}
+	want := []string{"GET /api/v2/clouds/cld_del/resources", "DELETE /api/v2/clouds/cld_del"}
+	if got := m.teardownCalls(); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("calls = %v, want %v", got, want)
+	}
+
+	t.Run("control: another listing failure stops the destroy", func(t *testing.T) {
+		m := &cloudDeleteMock{resStatus: http.StatusInternalServerError}
+		diags := runCloudDelete(t, m, "")
+		if !diagsContainSummary(diags, "Cloud Load Balancer Teardown Failed") {
+			t.Fatalf("want a teardown error, got: %v", diags)
+		}
+		for _, c := range m.teardownCalls() {
+			if strings.HasPrefix(c, "DELETE ") {
+				t.Fatalf("deleted although the listing failed: %v", m.teardownCalls())
+			}
+		}
+	})
 }

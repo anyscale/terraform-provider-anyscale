@@ -59,6 +59,13 @@ func subnetFormsServer(t *testing.T, cloudID string) *httptest.Server {
 	mux.HandleFunc("/api/v2/machine_pools/", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, `{"result": {"machine_pools": []}}`)
 	})
+	// Destroy tears down the cloud's service load balancers before the DELETE.
+	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/state", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/get_lb_resource", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `{"result": {"is_terminated": true}}`)
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		w.WriteHeader(http.StatusNotFound)

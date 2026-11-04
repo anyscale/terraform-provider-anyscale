@@ -72,6 +72,11 @@ func tearDownCloudLoadBalancers(ctx context.Context, client *Client, cloudID str
 			// Already gone, or no longer readable: the DELETE decides.
 			return false, nil
 		}
+		if isHostedCloudResourcesError(err) {
+			// An Anyscale-hosted cloud has no resources in the customer's
+			// account, so there is no load balancer of theirs to tear down.
+			return false, nil
+		}
 		return false, err
 	}
 	if !cloudNeedsLBTeardown(resources) {
