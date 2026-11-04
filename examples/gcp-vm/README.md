@@ -28,8 +28,8 @@ in place of Filestore and Memorystore), see [`aws-vm`](../aws-vm/).
   is created unless you turn it on
 - An empty `anyscale_cloud` resource (`anyscale_cloud.primary`): `name`, `is_private_cloud`,
   `auto_add_user`, `cloud_provider = "GCP"`, `region`, and `credentials` (a JSON object built from the
-  module's workload identity provider, project, and service account outputs, so the cloud depends on
-  the module), plus the cloud-level `lineage_tracking_enabled` / `aggregated_logs_enabled`
+  module's workload identity provider, project, and service account outputs, and a `depends_on` on the whole module, so the
+  module outlives the cloud), plus the cloud-level `lineage_tracking_enabled` / `aggregated_logs_enabled`
   toggles (both hardcoded `true` in this example). No `gcp_config`, `object_storage`, or `file_storage`
   block lives on the cloud itself - following the multi-resource pattern's rule that
   `compute_stack` and the provider config blocks belong on the attached resource, not the parent

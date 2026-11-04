@@ -4,6 +4,11 @@
 
 # Step 1: Create empty cloud shell
 resource "anyscale_cloud" "primary" {
+  # Keep the whole module, including its IAM bindings, until the cloud is
+  # destroyed: Anyscale needs them to tear down the cloud's load
+  # balancers. The credentials below only order the outputs they read.
+  depends_on = [module.google_anyscale_v2]
+
   name = var.cloud_name
 
   # Set the cloud's provider, region and credentials to match the cloud
