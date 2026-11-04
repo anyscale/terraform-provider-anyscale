@@ -236,6 +236,22 @@ func (m *roleBindingMockServer) revoke(id string) {
 	delete(m.bindings, id)
 }
 
+// regrant revokes a binding and grants the same principal, role and resource
+// again under a new ID with this origin, as a role-binding policy apply does
+// (observed on a real API: origin "declarative"). It returns the new ID.
+func (m *roleBindingMockServer) regrant(id, origin string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	old, ok := m.bindings[id]
+	if !ok {
+		m.t.Fatalf("mock: regrant of unknown binding %s", id)
+	}
+	delete(m.bindings, id)
+	b := m.insert(old.PrincipalType, old.PrincipalID, old.RoleID, old.ResourceType, old.ResourceID)
+	b.Origin = &origin
+	return b.ID
+}
+
 func (m *roleBindingMockServer) bindingExists(id string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()

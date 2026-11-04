@@ -330,7 +330,7 @@ func (r *RoleBindingResource) Read(ctx context.Context, req resource.ReadRequest
 	bindingID := state.ID.ValueString()
 	resourceType, resourceID := state.scope()
 	principalType, principalID := state.principal()
-	binding, err := findRoleBindingForPrincipal(ctx, r.client, resourceType, resourceID, principalType, principalID, bindingID)
+	bindings, err := listRoleBindingsForPrincipal(ctx, r.client, resourceType, resourceID, principalType, principalID)
 	if err != nil {
 		if isRoleBindingsDisabled(err) {
 			if r.roleBindingsOnAfterNotFound(ctx, &resp.Diagnostics, "read role binding", err, roleBindingsDisabledReadOutcome) {
@@ -351,10 +351,15 @@ func (r *RoleBindingResource) Read(ctx context.Context, req resource.ReadRequest
 		AddAPIError(&resp.Diagnostics, "read role binding", err)
 		return
 	}
+	binding, byID := matchRoleBinding(bindings, bindingID, state.RoleID.ValueString(), resourceType, resourceID)
 	if binding == nil {
 		// Revoked outside Terraform, or the principal no longer exists.
 		tflog.Warn(ctx, "Role binding not found, removing from state", map[string]any{"role_binding_id": bindingID})
 		resp.State.RemoveResource(ctx)
+		return
+	}
+	if !byID {
+		r.adoptRegrantedBinding(ctx, resp, &state, binding.ID)
 		return
 	}
 
@@ -362,6 +367,40 @@ func (r *RoleBindingResource) Read(ctx context.Context, req resource.ReadRequest
 	// carries are refreshed.
 	state.Origin = types.StringPointerValue(binding.Origin)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+// adoptRegrantedBinding moves state to newID: the same grant, revoked and
+// re-granted outside Terraform under a new ID (as a role-binding policy apply
+// does). Without this, refresh would drop the binding and the next apply would
+// fail creating a duplicate. The listing lacks created_by and created_at, so
+// the binding is read in full. A GET refused or not found means it was revoked
+// again in between, so it is removed from state like any revoked binding.
+func (r *RoleBindingResource) adoptRegrantedBinding(ctx context.Context, resp *resource.ReadResponse, state *RoleBindingResourceModel, newID string) {
+	oldID := state.ID.ValueString()
+	binding, err := getRoleBinding(ctx, r.client, newID)
+	if err != nil {
+		if isHTTPStatus(err, http.StatusForbidden) || isHTTPStatus(err, http.StatusNotFound) {
+			tflog.Warn(ctx, "Re-granted role binding is no longer readable, removing from state",
+				map[string]any{"role_binding_id": oldID, "new_role_binding_id": newID, "detail": extractAPIErrorDetail(err)})
+			resp.State.RemoveResource(ctx)
+			return
+		}
+		AddAPIError(&resp.Diagnostics, "read re-granted role binding", err)
+		return
+	}
+
+	tflog.Warn(ctx, "Role binding was re-granted outside Terraform under a new ID; tracking the new ID",
+		map[string]any{"role_binding_id": oldID, "new_role_binding_id": newID})
+	if binding.Origin != nil && *binding.Origin != roleBindingOriginImperative {
+		resourceType, _ := state.scope()
+		resp.Diagnostics.AddWarning("Role Binding Now Stated by a Role-Binding Policy",
+			fmt.Sprintf("Role binding %q was revoked and re-granted outside Terraform as %q (origin %q), and Terraform now tracks the new ID. "+
+				"A role-binding policy on this %s states this grant, so managing it with both anyscale_role_binding and `anyscale role-binding policy apply` "+
+				"makes each revoke what the other grants. Manage the grants on this %s one way.",
+				oldID, newID, *binding.Origin, resourceType, resourceType))
+	}
+	state.setFromAPI(binding)
+	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
 }
 
 func (r *RoleBindingResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {

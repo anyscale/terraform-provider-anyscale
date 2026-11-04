@@ -155,6 +155,45 @@ func TestAccRoleBindingResource_RevokedOutOfBandIsRecreated(t *testing.T) {
 	})
 }
 
+// Re-granted out of band under a new ID, as a role-binding policy apply does:
+// refresh tracks the new ID instead of dropping the binding, so the plan is
+// empty and nothing is created (a create would 409 as a duplicate).
+func TestAccRoleBindingResource_RegrantedOutOfBandIsAdopted(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newRBMock(t)
+	var first, regranted, second string
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             rbDestroyed(m),
+		Steps: []resource.TestStep{
+			{Config: rbConfig(m, rbRole), Check: rbCaptureID(&first)},
+			{
+				PreConfig: func() { regranted = m.regrant(first, "declarative"); m.takeWrites() },
+				Config:    rbConfig(m, rbRole),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue("anyscale_role_binding.test", tfjsonpath.New("origin"), knownvalue.StringExact("declarative")),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					rbCaptureID(&second),
+					rbExpectBindings(m, 1),
+					func(*terraform.State) error {
+						if second != regranted {
+							return fmt.Errorf("state id = %q, want the re-granted %q (was %q)", second, regranted, first)
+						}
+						if w := m.takeWrites(); len(w) != 0 {
+							return fmt.Errorf("expected no writes, got %q", w)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
 // Group deleted out of band, which cascades its bindings. Source does not
 // settle whether the listing then answers with an empty page or a 404, so both
 // are pinned: refresh removes the binding and sends no DELETE. In the 404 case
