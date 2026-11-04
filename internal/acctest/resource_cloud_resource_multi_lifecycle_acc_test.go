@@ -149,6 +149,11 @@ func newMultiResourceMockServer(t *testing.T, cloudID string) (*httptest.Server,
 			w.WriteHeader(http.StatusOK)
 			_, _ = fmt.Fprintf(w, `{"result": %s}`, m.cloudJSON())
 		case http.MethodDelete:
+			// Deleting the cloud removes its resources with it.
+			m.mu.Lock()
+			m.order = nil
+			m.byName = make(map[string]*multiResourceMockEntry)
+			m.mu.Unlock()
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			t.Errorf("unexpected method %s on /api/v2/clouds/%s", r.Method, cloudID)
@@ -228,6 +233,13 @@ func newMultiResourceMockServer(t *testing.T, cloudID string) (*httptest.Server,
 	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/remove_resource", func(w http.ResponseWriter, r *http.Request) {
 		name := r.URL.Query().Get("cloud_resource_name")
 		m.mu.Lock()
+		if len(m.order) > 0 && m.order[0] == name {
+			// Real backend: the primary resource cannot be removed on its own.
+			m.mu.Unlock()
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprintf(w, `{"error": {"detail": "Cloud resource %s is the primary resource and cannot be removed."}}`, name)
+			return
+		}
 		delete(m.byName, name)
 		for i, n := range m.order {
 			if n == name {
@@ -237,6 +249,16 @@ func newMultiResourceMockServer(t *testing.T, cloudID string) (*httptest.Server,
 		}
 		m.mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
+	})
+
+	// Destroying a primary resource tears down the cloud's service load
+	// balancers: PUT state=DELETING, then get_lb_resource until terminated.
+	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/state", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/get_lb_resource", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"result": {"is_terminated": true}}`)
 	})
 
 	server := httptest.NewServer(mux)

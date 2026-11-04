@@ -1,0 +1,11 @@
+```release-note:changed
+resource/anyscale_cloud_resource: Destroying a cloud's primary resource on an AWS or GCP VM cloud now tears down the cloud's service load balancers and marks the cloud `DELETING`, which cannot be undone. In the split pattern this runs while the cloud's IAM role still exists, so `terraform destroy` no longer times out with the cloud stuck `DELETING` and its load balancer blocking the VPC delete.
+```
+
+```release-note:added
+resource/anyscale_cloud_resource: `timeouts { delete }` (default `30m`) bounds that teardown.
+```
+
+```release-note:changed
+resource/anyscale_cloud_resource: A change that would replace a cloud's primary resource now fails at plan time, before anything is destroyed. Replace the cloud instead.
+```

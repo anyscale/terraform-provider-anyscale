@@ -142,6 +142,30 @@ func lbTeardownTimeout(lastErr error) error {
 	return fmt.Errorf("%w; the last check failed: %s", errCloudLBTeardownTimeout, extractAPIErrorDetail(lastErr))
 }
 
+// addCloudLBTeardownError reports a failed tearDownCloudLoadBalancers. prefix says what was not
+// destroyed; stateRmTarget names what to remove from state in the role-gone recovery.
+func addCloudLBTeardownError(diags *diag.Diagnostics, prefix, stateRmTarget, cloudID string, deleteTimeout time.Duration, markedDeleting bool, err error) {
+	detail := err.Error()
+	if errors.Is(err, errCloudLBTeardownTimeout) {
+		// The provider cannot tell a slow teardown from one that can never finish, so the
+		// message covers both. Anyscale tears the load balancers down with the cloud's
+		// control-plane role; once that role or its policies are destroyed, get_lb_resource
+		// never reports them gone, even after they are removed by hand.
+		detail = fmt.Sprintf("%s (timeouts.delete = %s). Anyscale removes them with the cloud's control-plane IAM role. "+
+			"If that role or its policies were already destroyed, a longer timeout will not help. "+
+			"In that case, first delete the cloud's load balancer (its name contains the cloud ID), target groups and ACM certificate in AWS. "+
+			"Then run terraform state rm on %s. Then delete the cloud with anyscale cloud delete --cloud-id %s, which runs the same check "+
+			"for up to 15 minutes before offering to delete the cloud anyway. Otherwise, raise timeouts.delete and run terraform destroy again. "+
+			"See \"Deleting a cloud\" in the provider's Cloud Resources guide.", detail, deleteTimeout, stateRmTarget, cloudID)
+	} else {
+		detail += ". Run terraform destroy again once the error above is resolved."
+	}
+	if markedDeleting {
+		detail += " The cloud is already marked DELETING, which cannot be undone."
+	}
+	diags.AddError("Cloud Load Balancer Teardown Failed", fmt.Sprintf("%s: %s", prefix, detail))
+}
+
 // addCloudDeleteError reports a DELETE that failed after a completed load
 // balancer teardown (markedDeleting) or with none needed. After the teardown
 // the cloud is DELETING for good, so the message says what that leaves and how

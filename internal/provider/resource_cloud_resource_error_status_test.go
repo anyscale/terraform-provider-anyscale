@@ -66,21 +66,39 @@ func newRemoveResourceServer(t *testing.T, cloudID string, status int, body stri
 }
 
 // The backend refuses to remove a cloud's primary resource with a 400
-// (clouds_resource.py remove_resource). That resource's lifecycle belongs to
-// the cloud, so Delete must treat it as the same no-op as the is_default
-// branch - not fail destroy.
-func TestCloudResourceDelete_PrimaryResource400IsNoOp(t *testing.T) {
+// (clouds_resource.py remove_resource). That is reached when is_default in
+// state is stale (e.g. destroy -refresh=false), so Delete must take the same
+// path as the is_default branch: tear down the cloud's load balancers, then
+// leave the resource to be deleted with its cloud - not fail destroy.
+func TestCloudResourceDelete_PrimaryResource400TakesPrimaryPath(t *testing.T) {
 	const cloudID = "cld_primary400"
-	var calls atomic.Int32
-	server := newRemoveResourceServer(t, cloudID, http.StatusBadRequest,
-		`{"error": {"detail": "Cloud resource main is the primary resource and cannot be removed without deleting the cloud."}}`, &calls)
+	var removeCalls, listCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/v2/clouds/"+cloudID+"/remove_resource":
+			removeCalls.Add(1)
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprint(w, `{"error": {"detail": "Cloud resource main is the primary resource and cannot be removed without deleting the cloud."}}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/clouds/"+cloudID+"/resources":
+			// No resources: the teardown has nothing to do and returns without a PUT.
+			listCalls.Add(1)
+			_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"next_paging_token": null}}`)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
 
 	diags := runCloudResourceDelete(t, server.URL, cloudID+":main")
 	if diags.HasError() {
-		t.Fatalf("Delete returned errors for the primary-resource 400, want a no-op: %v", diags)
+		t.Fatalf("Delete returned errors for the primary-resource 400: %v", diags)
 	}
-	if got := calls.Load(); got != 1 {
+	if got := removeCalls.Load(); got != 1 {
 		t.Fatalf("remove_resource calls = %d, want 1 (the stale-is_default path must reach the API)", got)
+	}
+	if got := listCalls.Load(); got == 0 {
+		t.Fatal("the primary-resource 400 did not reach the load balancer teardown")
 	}
 }
 
