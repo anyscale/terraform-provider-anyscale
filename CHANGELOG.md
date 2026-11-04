@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.35.0] - 2026-11-04
+
+### Added
+
+- resource/anyscale_cloud: `timeouts { delete }` (default `30m`) bounds a cloud destroy, including the load balancer teardown.
+
+### Changed
+
+- resource/anyscale_cloud: The `external_id` description now states the rule to follow (match the role's trust policy, start with your organization ID), and several attribute descriptions on `anyscale_cloud` and `anyscale_cloud_resource` are shorter.
+- provider: The cloud resources guide now explains that `anyscale_cloud` and `anyscale_cloud_resource` should `depends_on` their AWS IAM module so the role's policies are destroyed last; otherwise instances can be left running and block VPC deletion.
+- provider: The cloud resources guide now describes what destroying an AWS or GCP VM cloud does (load balancer teardown, `timeouts { delete }`, and re-running destroy after a failure).
+
+### Fixed
+
+- resource/anyscale_cloud: Destroying an AWS or GCP VM cloud now tears down its service load balancer, target groups and certificate first, instead of leaving them in your account where they block deleting the VPC. This can make a cloud destroy take several minutes. If a destroy then fails, the cloud is left marked for deletion: fix what the error names and run destroy again.
+
 ## [0.34.1] - 2026-11-03
 
 ### Changed
@@ -1309,7 +1325,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.34.1...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.35.0...HEAD
+[0.35.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.35.0
 [0.34.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.34.1
 [0.34.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.34.0
 [0.33.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.33.0

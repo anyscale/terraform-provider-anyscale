@@ -1,3 +1,0 @@
-```release-note:changed
-provider: The cloud resources guide now explains that `anyscale_cloud` and `anyscale_cloud_resource` should `depends_on` their AWS IAM module so the role's policies are destroyed last; otherwise instances can be left running and block VPC deletion.
-```
