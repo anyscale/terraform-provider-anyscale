@@ -373,19 +373,16 @@ func (r *RoleBindingResource) Read(ctx context.Context, req resource.ReadRequest
 // re-granted outside Terraform under a new ID (as a role-binding policy apply
 // does). Without this, refresh would drop the binding and the next apply would
 // fail creating a duplicate. The listing lacks created_by and created_at, so
-// the binding is read in full. A GET refused or not found means it was revoked
-// again in between, so it is removed from state like any revoked binding.
+// the binding is read in full. The listing decides that the grant exists; a
+// re-granted binding is new, so its by-ID read can 403 until its permission
+// propagates and is retried. If it still fails, state is left unchanged.
 func (r *RoleBindingResource) adoptRegrantedBinding(ctx context.Context, resp *resource.ReadResponse, state *RoleBindingResourceModel, newID string) {
 	oldID := state.ID.ValueString()
-	binding, err := getRoleBinding(ctx, r.client, newID)
+	binding, err := getRoleBindingWithRetry(ctx, r.client, newID)
 	if err != nil {
-		if isHTTPStatus(err, http.StatusForbidden) || isHTTPStatus(err, http.StatusNotFound) {
-			tflog.Warn(ctx, "Re-granted role binding is no longer readable, removing from state",
-				map[string]any{"role_binding_id": oldID, "new_role_binding_id": newID, "detail": extractAPIErrorDetail(err)})
-			resp.State.RemoveResource(ctx)
-			return
-		}
-		AddAPIError(&resp.Diagnostics, "read re-granted role binding", err)
+		resp.Diagnostics.AddError("Could Not Read Re-granted Role Binding",
+			fmt.Sprintf("Role binding %q was revoked and re-granted outside Terraform as %q, but reading %q failed: %s "+
+				"Terraform state was not changed; run the plan again.", oldID, newID, newID, extractAPIErrorDetail(err)))
 		return
 	}
 
@@ -417,7 +414,21 @@ func (r *RoleBindingResource) Delete(ctx context.Context, req resource.DeleteReq
 	}
 
 	bindingID := state.ID.ValueString()
-	err := deleteRoleBinding(ctx, r.client, bindingID)
+	resourceType, resourceID := state.scope()
+	principalType, principalID := state.principal()
+	// A binding granted in the last few minutes can 403 here until its
+	// permission propagates. The same 403 means "already revoked", so retry
+	// only while the binding is recent and the listing still shows it.
+	recent := isRecentlyCreated(state.CreatedAt.ValueString(), roleBindingByIDRecentWindow)
+	_, err := retryRoleBindingByID(ctx, bindingID, func() (struct{}, error) {
+		return struct{}{}, deleteRoleBinding(ctx, r.client, bindingID)
+	}, func() bool {
+		if !recent {
+			return false
+		}
+		listed, listErr := findRoleBindingForPrincipal(ctx, r.client, resourceType, resourceID, principalType, principalID, bindingID)
+		return listErr == nil && listed != nil
+	})
 	if err == nil {
 		tflog.Info(ctx, "Role binding deleted", map[string]any{"role_binding_id": bindingID})
 		return
@@ -447,8 +458,6 @@ func (r *RoleBindingResource) Delete(ctx context.Context, req resource.DeleteReq
 
 	// A revoked binding answers 403; the listing tells that from a real
 	// refusal.
-	resourceType, resourceID := state.scope()
-	principalType, principalID := state.principal()
 	binding, listErr := findRoleBindingForPrincipal(ctx, r.client, resourceType, resourceID, principalType, principalID, bindingID)
 	switch {
 	case listErr != nil && isRoleBindingsDisabled(listErr):
@@ -563,7 +572,9 @@ func (r *RoleBindingResource) ImportState(ctx context.Context, req resource.Impo
 			return
 		}
 	}
-	binding, err := getRoleBinding(ctx, r.client, bindingID)
+	// A binding granted moments ago can 403 here until its permission
+	// propagates, and nothing on an import ID says how old it is.
+	binding, err := getRoleBindingWithRetry(ctx, r.client, bindingID)
 	if err != nil {
 		switch {
 		case isRoleBindingsDisabled(err):

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -35,10 +36,12 @@ type regrantServer struct {
 	mu sync.Mutex
 	// summaries is what the principal listing on regrantCloud returns.
 	summaries []map[string]any
-	// getStatus, when non-zero, is what GET /role_bindings/{id} answers.
-	getStatus int
-	origin    string
-	gets      []string
+	// getStatus, when non-zero, is what GET /role_bindings/{id} answers for
+	// the first getFailures GETs (every GET when getFailures is 0).
+	getStatus   int
+	getFailures int
+	origin      string
+	gets        []string
 }
 
 func (s *regrantServer) handler(t *testing.T) http.HandlerFunc {
@@ -56,7 +59,7 @@ func (s *regrantServer) handler(t *testing.T) http.HandlerFunc {
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v2/role_bindings/rb_"):
 			id := strings.TrimPrefix(r.URL.Path, "/api/v2/role_bindings/")
 			s.gets = append(s.gets, id)
-			if s.getStatus != 0 {
+			if s.getStatus != 0 && (s.getFailures == 0 || len(s.gets) <= s.getFailures) {
 				w.WriteHeader(s.getStatus)
 				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"detail": "You may not read role binding '" + id + "'."}})
 				return
@@ -170,24 +173,61 @@ func TestRoleBindingRead_SameIDNeedsNoGet(t *testing.T) {
 	}
 }
 
-func TestRoleBindingRead_RegrantRevokedAgainIsRemoved(t *testing.T) {
-	for _, status := range []int{http.StatusForbidden, http.StatusNotFound} {
-		s := &regrantServer{getStatus: status, summaries: []map[string]any{regrantSummary(regrantNewID, regrantCloud, "declarative")}}
-		resp, _ := runRegrantRead(t, s)
-		if resp.Diagnostics.HasError() {
-			t.Fatalf("GET %d: unexpected error: %v", status, resp.Diagnostics)
-		}
-		if !resp.State.Raw.IsNull() {
-			t.Errorf("GET %d: binding kept in state; want it removed", status)
-		}
+// fastRoleBindingRetry shrinks the by-ID retry schedule for a test.
+func fastRoleBindingRetry(t *testing.T) {
+	t.Helper()
+	i, m, w := roleBindingByIDRetryInitialInterval, roleBindingByIDRetryMaxInterval, roleBindingByIDRetryMaxWait
+	roleBindingByIDRetryInitialInterval, roleBindingByIDRetryMaxInterval, roleBindingByIDRetryMaxWait = time.Millisecond, 2*time.Millisecond, 10*time.Millisecond
+	t.Cleanup(func() {
+		roleBindingByIDRetryInitialInterval, roleBindingByIDRetryMaxInterval, roleBindingByIDRetryMaxWait = i, m, w
+	})
+}
+
+// A re-granted binding is new, and a new binding answers its by-ID GET with
+// 403 for a few seconds (measured). The listing already shows it, so the GET
+// is retried and the new ID adopted.
+func TestRoleBindingRead_RegrantNotYetReadableIsRetried(t *testing.T) {
+	fastRoleBindingRetry(t)
+	s := &regrantServer{origin: "declarative", getStatus: http.StatusForbidden, getFailures: 2,
+		summaries: []map[string]any{regrantSummary(regrantNewID, regrantCloud, "declarative")}}
+	resp, gets := runRegrantRead(t, s)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected error: %v", resp.Diagnostics)
+	}
+	if resp.State.Raw.IsNull() {
+		t.Fatal("binding was removed from state; want the re-granted ID adopted after retrying")
+	}
+	if got := regrantStateString(t, resp, "id"); got != regrantNewID {
+		t.Errorf("id = %q, want %q", got, regrantNewID)
+	}
+	if len(gets) != 3 {
+		t.Errorf("GETs = %d, want 3 (two 403s, then 200)", len(gets))
 	}
 }
 
-func TestRoleBindingRead_RegrantGetFailureErrors(t *testing.T) {
-	s := &regrantServer{getStatus: http.StatusInternalServerError, summaries: []map[string]any{regrantSummary(regrantNewID, regrantCloud, "declarative")}}
-	resp, _ := runRegrantRead(t, s)
-	if !resp.Diagnostics.HasError() {
-		t.Fatal("want an error when the re-granted binding cannot be read for a reason other than revocation")
+// The listing shows the grant, so a by-ID read that keeps failing never
+// removes it: Read errors and leaves state as it was.
+func TestRoleBindingRead_RegrantUnreadableErrorsAndKeepsState(t *testing.T) {
+	fastRoleBindingRetry(t)
+	for _, status := range []int{http.StatusForbidden, http.StatusNotFound, http.StatusInternalServerError} {
+		s := &regrantServer{getStatus: status, summaries: []map[string]any{regrantSummary(regrantNewID, regrantCloud, "declarative")}}
+		resp, gets := runRegrantRead(t, s)
+		if !resp.Diagnostics.HasError() {
+			t.Errorf("GET %d: want an error", status)
+		}
+		if resp.State.Raw.IsNull() {
+			t.Errorf("GET %d: binding removed from state; want state kept", status)
+			continue
+		}
+		if got := regrantStateString(t, resp, "id"); got != regrantOldID {
+			t.Errorf("GET %d: id = %q, want the unchanged %q", status, got, regrantOldID)
+		}
+		if status == http.StatusForbidden && len(gets) < 2 {
+			t.Errorf("GET 403: %d GETs, want the propagation 403 retried", len(gets))
+		}
+		if status != http.StatusForbidden && len(gets) != 1 {
+			t.Errorf("GET %d: %d GETs, want no retry", status, len(gets))
+		}
 	}
 }
 
