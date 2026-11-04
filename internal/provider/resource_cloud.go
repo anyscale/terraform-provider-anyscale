@@ -1429,7 +1429,7 @@ func (r *CloudResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 	markedDeleting, err := tearDownCloudLoadBalancers(ctx, r.client, cloudID)
 	if err != nil {
 		addCloudLBTeardownError(&resp.Diagnostics, fmt.Sprintf("Cloud %s was not deleted", cloudID),
-			"this cloud", cloudID, deleteTimeout, markedDeleting, err)
+			"this cloud", cloudID, state.CloudProvider.ValueString(), deleteTimeout, markedDeleting, err)
 		return
 	}
 
