@@ -248,17 +248,20 @@ common case is a VM cloud with underivable credentials, not "any all-in-one clou
 This case doesn't warn for the empty-cloud pattern, but the placeholder is not replaced when an
 `anyscale_cloud_resource` is attached: Anyscale uses the cloud's own credentials to create and tear down
 its service load balancers. On AWS, set `credentials` yourself (see
-[Split pattern on AWS](#split-pattern-on-aws)).
+[Split pattern](#split-pattern-an-empty-cloud-plus-a-cloud-resource)).
 
-## Split pattern on AWS
+## Split pattern: an empty cloud plus a cloud resource
 
-Give the empty `anyscale_cloud` the control-plane role's ARN in `credentials`, plus `cloud_provider = "AWS"` and
-`region`. Without them the cloud keeps its placeholder role and region, so a service on the cloud fails to create
-its load balancer (`USER_ERROR_FAILURE`, `AssumeRole` denied). The role does not exist when the cloud is created, so
-give the IAM module a fixed role name and build the ARN from it. Leave the external ID unset: the trust policy and
-Anyscale both then use the cloud ID. A custom external ID (it must start with your org ID, `org_...`) needs the
-all-in-one pattern, with `aws_config.external_id` on `anyscale_cloud`: the empty cloud cannot record one. See
-`examples/aws-vm-basic-resource`.
+On any provider, the empty `anyscale_cloud` needs `cloud_provider`, `region` and `credentials` that match the
+`anyscale_cloud_resource` you attach. Left unset, the cloud is recorded as AWS in `us-east-1` with a placeholder
+role, and Anyscale uses those cloud-level values to create and tear down the cloud's service load balancers, so a
+service on the cloud fails (`USER_ERROR_FAILURE`, `AssumeRole` denied).
+
+**AWS:** set `cloud_provider = "AWS"`, the cloud's `region`, and `credentials` to the control-plane role's ARN. The
+role does not exist when the cloud is created, so give the IAM module a fixed role name and build the ARN from it.
+Leave the external ID unset: the trust policy and Anyscale both then use the cloud ID. A custom external ID (it must
+start with your org ID, `org_...`) needs the all-in-one pattern, with `aws_config.external_id` on `anyscale_cloud`:
+the empty cloud cannot record one. See `examples/aws-vm-basic-resource`.
 
 ## Deleting a cloud
 
