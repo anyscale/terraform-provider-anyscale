@@ -263,6 +263,12 @@ Leave the external ID unset: the trust policy and Anyscale both then use the clo
 start with your org ID, `org_...`) needs the all-in-one pattern, with `aws_config.external_id` on `anyscale_cloud`:
 the empty cloud cannot record one. See `examples/aws-vm-basic-resource`.
 
+**GCP:** set `cloud_provider = "GCP"`, the cloud's `region`, and `credentials` to a JSON object with `provider_id` (the
+workload identity provider), `project_id` and `service_account_email`, built from the Google module's outputs. The
+module then must not take the cloud ID, so the cloud can read its outputs without a cycle, and the cloud should
+`depends_on` the module so its IAM bindings outlive the cloud. A service leaves its runtime package in the cloud's
+bucket; empty the bucket before `terraform destroy`. See `examples/gcp-vm`.
+
 ## Deleting a cloud
 
 Destroy order matters for the AWS IAM your cloud uses. Anyscale stops a cloud's clusters, and the instances behind
