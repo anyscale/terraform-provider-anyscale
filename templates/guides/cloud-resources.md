@@ -248,7 +248,17 @@ common case is a VM cloud with underivable credentials, not "any all-in-one clou
 This case doesn't warn for the empty-cloud pattern, but the placeholder is not replaced when an
 `anyscale_cloud_resource` is attached: Anyscale uses the cloud's own credentials to create and tear down
 its service load balancers. On AWS, set `credentials` yourself (see
-[Deleting a cloud](#deleting-a-cloud)).
+[Split pattern on AWS](#split-pattern-on-aws)).
+
+## Split pattern on AWS
+
+Give the empty `anyscale_cloud` the control-plane role's ARN in `credentials`, plus `cloud_provider = "AWS"` and
+`region`. Without them the cloud keeps its placeholder role and region, so a service on the cloud fails to create
+its load balancer (`USER_ERROR_FAILURE`, `AssumeRole` denied). The role does not exist when the cloud is created, so
+give the IAM module a fixed role name and build the ARN from it. Leave the external ID unset: the trust policy and
+Anyscale both then use the cloud ID. A custom external ID (it must start with your org ID, `org_...`) needs the
+all-in-one pattern, with `aws_config.external_id` on `anyscale_cloud`: the empty cloud cannot record one. See
+`examples/aws-vm-basic-resource`.
 
 ## Deleting a cloud
 
@@ -268,12 +278,6 @@ resource "anyscale_cloud" "this" {
   depends_on = [module.anyscale_iam_roles]
 }
 ```
-
-**Split pattern on AWS.** Give the empty `anyscale_cloud` the control-plane role's ARN in `credentials`, plus
-`cloud_provider = "AWS"` and `region`. Without them the cloud keeps its placeholder role and region, so a
-service on the cloud fails to create its load balancer (`USER_ERROR_FAILURE`, `AssumeRole` denied). The role does not exist when the cloud is created, so give the IAM module a fixed
-role name and build the ARN from it. Leave the external ID unset: the trust policy and Anyscale both then use the
-cloud ID. See `examples/aws-vm-basic-resource`.
 
 Deleting an `anyscale_cloud` resource first attempts to detach any machine pools attached to it, then
 deletes the cloud itself. If a detach fails, the delete still goes ahead and the apply reports a warning
