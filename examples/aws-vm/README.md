@@ -30,10 +30,11 @@ names.
 - An S3 bucket for Anyscale object storage (`anyscale_s3_force_destroy = true` by default, so
   `terraform destroy` isn't blocked by a non-empty bucket in this example)
 - Two IAM roles: a control-plane role Anyscale's control plane assumes cross-account (trust policy
-  scoped to `anyscale_org_id` + `anyscale_external_id`), and a data-plane role attached to the Ray
+  scoped to the cloud ID as the external ID), and a data-plane role attached to the Ray
   cluster nodes themselves
-- An empty `anyscale_cloud.primary` shell - just `name` (`var.cloud_name`), `is_private_cloud`, and
-  `auto_add_user`, plus `lineage_tracking_enabled` and `aggregated_logs_enabled` hardcoded to
+- An empty `anyscale_cloud.primary` shell - `name` (`var.cloud_name`), `is_private_cloud`,
+  `auto_add_user`, `cloud_provider`, `region`, and `credentials` (the control-plane role's ARN, built
+  from a fixed role name so the cloud can name it before the module creates it), plus `lineage_tracking_enabled` and `aggregated_logs_enabled` hardcoded to
   `true` (fixed in this example, not exposed as variables). It deliberately has no `aws_config`,
   `object_storage`, or `file_storage` block of its own - that's what makes it "empty," and it's why
   the `is_empty_cloud` output below reads `true`
@@ -66,13 +67,9 @@ names.
   # then reference data.anyscale_organization.current.id as anyscale_org_id
   ```
 
-`aws_region`, `customer_ingress_cidr_ranges`, `anyscale_external_id`, and `anyscale_org_id` all
+`aws_region`, `customer_ingress_cidr_ranges`, and `anyscale_org_id` all
 have no default and must be supplied - copy [`terraform.tfvars.example`](./terraform.tfvars.example)
 to `terraform.tfvars` (already gitignored) and edit it, or pass them with `-var`.
-`anyscale_external_id` is your own
-choice of string; it just has to match between the IAM trust policy this example creates and
-whatever Anyscale stores for the cloud, which this example handles for you automatically since
-both come from the same variable.
 
 ## Running the example
 
@@ -120,7 +117,6 @@ infrastructure a plain `terraform apply` creates.
 | `aws_region` | AWS region for all resources | *(required, no default)* |
 | `customer_ingress_cidr_ranges` | CIDR block allowed through the security group on 443 | *(required, no default)* |
 | `anyscale_org_id` | Your Anyscale organization ID (`org_...`) | *(required, no default)* |
-| `anyscale_external_id` | External ID for the IAM trust policy - your own choice of string | *(required, no default)* |
 | `cloud_name` | Name of the Anyscale cloud shell (and its attached cloud resource) | `tf-aws-vm-test` |
 | `is_private_cloud` | Whether the cloud shell and its attached resource are private | `false` |
 | `auto_add_user` | Whether to automatically add org users to the cloud | `true` |
@@ -158,9 +154,7 @@ if the module's current release has genuinely diverged from what this example ex
 `anyscale_organization` data source shown under Prerequisites above instead of guessing or
 copy-pasting a truncated value.
 
-**IAM trust policy errors on `terraform apply`** - double check `anyscale_external_id` hasn't
-changed between applies. It's baked into the IAM trust policy the module creates, and a value that
-drifts from what Anyscale already has on record for this cloud will fail the trust relationship.
+**IAM trust policy errors on `terraform apply`** - the module's trust policy uses the cloud ID as the external ID. This example leaves the module's `anyscale_external_id` unset; if you add one, the module prepends your org ID to it, and the cloud must be registered with the same combined value.
 
 **`efs_id` or `memorydb_cluster_id` output as `null`** - expected unless you explicitly set
 `enable_efs = true` / `enable_memorydb = true`. Both default to `false`, so a plain `terraform

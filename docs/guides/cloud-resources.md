@@ -245,21 +245,33 @@ this fallback, the provider warns ("Placeholder Credentials Generated") so it is
 practice, an all-in-one Kubernetes cloud only reaches this if it omits `anyscale_operator_iam_identity`
 (needed for the Operator to authenticate at all, so a well-formed configuration always sets it); the
 common case is a VM cloud with underivable credentials, not "any all-in-one cloud" unconditionally.
-This case doesn't warn for the empty-cloud pattern, since a placeholder there is the expected,
-intentional starting point — real credentials arrive later with whatever `anyscale_cloud_resource` gets
-attached.
+This case doesn't warn for the empty-cloud pattern, but the placeholder is not replaced when an
+`anyscale_cloud_resource` is attached: Anyscale uses the cloud's own credentials to create and tear down
+its service load balancers. On AWS, set `credentials` yourself (see
+[Split pattern](#split-pattern-an-empty-cloud-plus-a-cloud-resource)).
+
+## Split pattern: an empty cloud plus a cloud resource
+
+Set `cloud_provider`, `region` and `credentials` on the empty `anyscale_cloud` to match the `anyscale_cloud_resource`
+you attach. Left unset, the cloud is recorded as AWS in `us-east-1` with a placeholder role, and services on it
+fail to create their load balancer.
+
+**AWS:** `credentials` is the control-plane role's ARN. The role does not exist yet when the cloud is created, so give
+the IAM module a fixed role name and build the ARN from it. Leave the external ID unset (it then defaults to the cloud
+ID); a custom `org_...` external ID needs the all-in-one pattern, because the empty cloud cannot record one. See
+`examples/aws-vm-basic-resource`.
+
+**GCP:** `credentials` is a JSON object with `provider_id` (the workload identity provider), `project_id` and
+`service_account_email`, built from the Google module's outputs. Don't pass the cloud ID to the module (the cloud
+reads its outputs), and add `depends_on = [module...]` to the cloud so the module outlives it. See `examples/gcp-vm`.
 
 ## Deleting a cloud
 
-Destroy order matters for the AWS IAM your cloud uses. Anyscale stops a cloud's clusters, and the instances behind
-a service, with the cloud's control-plane role, so that role's policies must still exist while they stop.
-Referencing the role's ARN in the cloud only orders the role itself: Terraform may remove the role's
-policy attachments in parallel, Anyscale's `ec2:TerminateInstances` call is then denied, and the instances keep
-running and block deleting the VPC. Make the resource that registers the IAM role, `anyscale_cloud` or `anyscale_cloud_resource`,
-`depends_on` the IAM module or the policy attachments, so Terraform destroys the IAM only after the
-cloud and everything that depends on it. If the IAM module itself takes the empty cloud's ID (the
-split pattern), that cloud cannot depend on the module without a cycle, so put the `depends_on` on
-`anyscale_cloud_resource` only.
+Anyscale stops a cloud's clusters and tears down its load balancers with the cloud's control-plane role, so the
+role and its policy attachments must outlive the cloud. A role ARN reference orders only the role, not its policies,
+so instances and load balancers can be left running and block the VPC delete. Make the resource that registers the role (`anyscale_cloud` or
+`anyscale_cloud_resource`) `depends_on` the IAM module. If the module takes the empty cloud's ID (the AWS split pattern), the cloud cannot depend on it without a
+cycle, so put the `depends_on` on `anyscale_cloud_resource` only.
 
 ```terraform
 resource "anyscale_cloud" "this" {
@@ -274,12 +286,21 @@ deletes the cloud itself. If a detach fails, the delete still goes ahead and the
 delete then fails because a pool is still attached, detach it with the Anyscale CLI or console and
 apply again.
 
-For a cloud whose primary resource is an AWS or GCP VM, destroy first has Anyscale tear down the cloud's service load balancers, which can
-take several minutes, then deletes the cloud. `timeouts { delete }` (default `30m`) bounds the whole destroy.
-If the teardown fails or does not finish in time, the cloud is not deleted: fix what the error names (or raise
-`timeouts.delete`) and run `terraform destroy` again. Once the teardown has started the cloud is marked
-`DELETING`, which cannot be undone, so a destroy that fails afterwards must be re-run to finish. If the error
-says clusters are still running, terminate them first. A cloud with no cloud resource, or whose primary resource is Kubernetes, skips the teardown.
+For a cloud whose primary resource is an AWS or GCP VM, Anyscale first tears down the cloud's service load
+balancers, which takes several minutes. This runs when `anyscale_cloud` is destroyed or, in the split pattern, when the
+primary `anyscale_cloud_resource` is. `timeouts { delete }` (default `30m`) bounds each. If the teardown fails or times
+out, fix what the error names (or raise `timeouts.delete`) and run `terraform destroy` again. The cloud is already
+marked `DELETING`, which cannot be undone. If the error says clusters are still running, terminate them first.
+Kubernetes primaries and clouds with no resource skip the teardown.
+
+So destroying a primary `anyscale_cloud_resource` deletes its cloud. A change that would replace one fails at plan
+time; replace the cloud instead (`terraform apply -replace=anyscale_cloud.<name>`). Terraform cannot catch removing
+the block, renaming it without a `moved` block, `-replace` or taint on it, or `destroy -target`: each starts the
+teardown.
+
+If the teardown times out because the control-plane role or its policies were already destroyed, a longer timeout
+will not help. Delete the cloud's load balancer, target groups and ACM certificate in AWS, run `terraform state rm`
+on the cloud, then `anyscale cloud delete --cloud-id <cloud ID>`.
 
 ## Importing an existing cloud
 

@@ -3,8 +3,17 @@
 # Uses multi-resource cloud pattern: empty cloud + cloud_resource
 
 # Step 1: Create empty cloud shell
+data "aws_caller_identity" "current" {}
+
 resource "anyscale_cloud" "primary" {
   name = var.cloud_name
+
+  # Name the control-plane role and region up front. Without them the
+  # empty cloud gets a placeholder role, and Anyscale cannot create or
+  # tear down the cloud's service load balancers.
+  cloud_provider = "AWS"
+  region         = var.aws_region
+  credentials    = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.access_role_name}"
 
   is_private_cloud = var.is_private_cloud
   auto_add_user    = var.auto_add_user

@@ -31,10 +31,12 @@ second `anyscale_cloud_resource` alongside `primary`.
 - An S3 bucket for Anyscale object storage (`anyscale_s3_force_destroy = true` by default, so
   `terraform destroy` doesn't get blocked by a non-empty bucket in this example)
 - Two IAM roles: a control-plane role Anyscale's control plane assumes cross-account (trust policy
-  scoped to `anyscale_org_id` + `anyscale_external_id`), and a data-plane role attached to the Ray
+  scoped to the cloud ID as the external ID), and a data-plane role attached to the Ray
   cluster nodes themselves
-- An `anyscale_cloud` resource with nothing but `name` and `auto_add_user` set - no `compute_stack`,
-  no `aws_config`, not even `is_private_cloud` - deliberately empty, since a multi-resource cloud
+- An `anyscale_cloud` resource with `name`, `auto_add_user`, `cloud_provider`, `region`, and
+  `credentials` (the control-plane role's ARN, built from a fixed role name so the cloud can name it
+  before the module creates it) - no `compute_stack`, no `aws_config`, not even `is_private_cloud` -
+  otherwise deliberately empty, since a multi-resource cloud
   derives its compute stack from whichever resource ends up attached to it rather than declaring one
   on the parent
 - A separate `anyscale_cloud_resource` (`compute_stack = "VM"`) attached to that cloud via
@@ -44,9 +46,10 @@ second `anyscale_cloud_resource` alongside `primary`.
   `object_storage` block for the S3 bucket - no `file_storage` block, since EFS isn't wired up
   anywhere in this scenario, not even as an optional toggle
 - On top of the cloud: three `anyscale_compute_config` variants (`basic`, `advanced` - showing
-  custom resources, labels, and advanced instance config, and `simple`), all targeting
-  `anyscale_cloud.primary.id` with no `cloud_resource` set, so each resolves to the cloud's one
-  (and only) attached deployment
+  custom resources, labels, and advanced instance config, and `simple`), all taking
+  `cloud_id` from `anyscale_cloud_resource.primary` (so Terraform creates them only after the cloud has a
+  resource) with no `cloud_resource` set, so each resolves to the cloud's one (and only) attached
+  deployment
 
 Unlike [aws-vm-basic](../aws-vm-basic/), this example creates no `anyscale_project` resources or
 project data source lookups - just the cloud, its one resource deployment, and the three compute
@@ -67,13 +70,9 @@ configs above.
   # then reference data.anyscale_organization.current.id as anyscale_org_id
   ```
 
-`aws_region`, `customer_ingress_cidr_ranges`, `anyscale_external_id`, and `anyscale_org_id` all
+`aws_region`, `customer_ingress_cidr_ranges`, and `anyscale_org_id` all
 have no default and must be supplied - copy [`terraform.tfvars.example`](./terraform.tfvars.example)
 to `terraform.tfvars` (already gitignored) and edit it, or pass them with `-var`.
-`anyscale_external_id` is your own
-choice of string; it just has to match between the IAM trust policy this example creates and
-whatever Anyscale stores for the cloud, which this example handles for you automatically since
-both come from the same variable.
 
 ## Running the example
 
@@ -109,7 +108,6 @@ themselves, so the ongoing cost is the VPC/NAT/S3 infrastructure itself, not com
 | `aws_region` | AWS region for all resources | *(required, no default)* |
 | `customer_ingress_cidr_ranges` | CIDR block allowed through the security group on 443 | *(required, no default)* |
 | `anyscale_org_id` | Your Anyscale organization ID (`org_...`) | *(required, no default)* |
-| `anyscale_external_id` | External ID for the IAM trust policy - your own choice of string | *(required, no default)* |
 | `cloud_name` | Name of both the Anyscale cloud and its attached cloud resource | `tf-aws-basic-test` |
 | `is_private_cloud` | Whether the cloud resource is private | `false` |
 | `auto_add_user` | Whether to automatically add users to the cloud | `false` (`aws-vm`'s equivalent default is `true` - a deliberate per-scenario difference, not a copy error) |

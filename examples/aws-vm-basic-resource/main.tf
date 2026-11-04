@@ -1,9 +1,18 @@
 # AWS Basic Test Scenario - Resource Based
 # No EFS, No MemoryDB - Minimal AWS cloud configuration
 
+data "aws_caller_identity" "current" {}
+
 resource "anyscale_cloud" "primary" {
   # Common Fields
   name = var.cloud_name
+
+  # Name the control-plane role and region up front. Without them the
+  # empty cloud gets a placeholder role, and Anyscale cannot create or
+  # tear down the cloud's service load balancers.
+  cloud_provider = "AWS"
+  region         = var.aws_region
+  credentials    = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.access_role_name}"
   # No file_storage block - EFS disabled
   auto_add_user = var.auto_add_user
 }
