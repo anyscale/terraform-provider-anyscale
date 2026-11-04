@@ -178,7 +178,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			"cloud_provider": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
-				MarkdownDescription: "Cloud provider: AWS, GCP, or AZURE. Inferred from whichever of aws_config/gcp_config/azure_config is set. An empty cloud, or one with only kubernetes_config, must set it to match the anyscale_cloud_resource you attach: it otherwise defaults to AWS, changing it later replaces the cloud, and on an empty VM cloud services then fail. Set it explicitly; a future release will require it for an empty cloud. AZURE supports K8S only (AKS); azure_config with any other compute_stack is a plan-time error. GENERIC is not yet supported.",
+				MarkdownDescription: "Cloud provider: AWS, GCP, or AZURE. Inferred from whichever of aws_config/gcp_config/azure_config is set. An empty cloud, or one with only kubernetes_config, must set it to match the anyscale_cloud_resource you attach: it otherwise defaults to AWS, changing it later replaces the cloud, and on an empty VM cloud services then fail. AZURE supports K8S only (AKS); azure_config with any other compute_stack is a plan-time error. GENERIC is not yet supported.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 					stringplanmodifier.UseStateForUnknown(),
