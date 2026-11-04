@@ -1,0 +1,3 @@
+```release-note:fixed
+resource/anyscale_cloud: When a destroy times out waiting for the cloud's service load balancers to be torn down, the error now explains that a longer timeout cannot help if the cloud's IAM role was already destroyed, and gives the recovery for that case (delete the load balancer resources in AWS, `terraform state rm`, then `anyscale cloud delete`).
+```
