@@ -226,8 +226,8 @@ func awsConfigExternalID(ctx context.Context, awsConfig types.Object) (externalI
 
 // warnEmptyCloudDefaults warns, on create, about an empty VM cloud that leaves cloud_provider,
 // region or credentials unset. Create then records the cloud as AWS, in us-east-1, with a
-// placeholder control-plane role, and the cloud keeps those values: provider and credentials
-// cannot be changed later. Anyscale creates a service's load balancer with the cloud's own
+// placeholder control-plane role, and the cloud keeps those values: changing any of them later
+// replaces the cloud. Anyscale creates a service's load balancer with the cloud's own
 // provider, region and role, not the attached anyscale_cloud_resource's, so services on such a
 // cloud fail while clusters work. Only null config values count as unset: an unknown value is
 // one the practitioner set.
@@ -253,10 +253,11 @@ func warnEmptyCloudDefaults(config *CloudResourceModel) diag.Diagnostics {
 		return diags
 	}
 	diags.AddWarning("Empty Cloud Uses Placeholder Settings", fmt.Sprintf(
-		"This empty cloud does not set %s. Anyscale keeps these values on the cloud, and cloud_provider and "+
-			"credentials cannot be changed after it is created. Services on this cloud cannot create load "+
-			"balancers, because Anyscale creates them with the cloud's own provider, region and credentials; "+
-			"clusters are unaffected. Set them to match the anyscale_cloud_resource you attach.",
+		"This empty cloud does not set %s. Anyscale keeps these values on the cloud, and changing any of them "+
+			"later replaces the cloud. Services on this cloud cannot create load balancers, because Anyscale "+
+			"creates them with the cloud's own provider, region and credentials; clusters are unaffected. Set them "+
+			"to match the anyscale_cloud_resource you attach. See \"Credentials handling\" in the provider's "+
+			"Cloud Resources guide.",
 		strings.Join(unset, ", ")))
 	return diags
 }
