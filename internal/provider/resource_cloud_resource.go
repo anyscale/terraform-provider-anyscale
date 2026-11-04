@@ -169,7 +169,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 		// v2: status removed (duplicated operator_status; see
 		// statusDeprecationMessage) - see the same file's v1->v2 UpgradeState.
 		Version:             2,
-		MarkdownDescription: "Manages an Anyscale Cloud Resource deployment, which attaches infrastructure configuration to an existing Anyscale Cloud. A cloud's primary resource cannot be replaced: a change that would replace it fails at plan time, and destroying it (including removing its block, renaming it without a `moved` block, `-replace`, taint or `destroy -target`) tears down the cloud's service load balancers and marks the cloud `DELETING`, which cannot be undone. See [Deleting a cloud](../guides/cloud-resources.md#deleting-a-cloud).",
+		MarkdownDescription: "Manages an Anyscale Cloud Resource deployment, which attaches infrastructure configuration to an existing Anyscale Cloud. A cloud's primary resource cannot be replaced: a change that would replace it fails at plan time. On an AWS or GCP VM cloud, destroying the primary resource tears down the cloud's service load balancers and marks the cloud `DELETING`, which cannot be undone. See [Deleting a cloud](../guides/cloud-resources.md#deleting-a-cloud).",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{

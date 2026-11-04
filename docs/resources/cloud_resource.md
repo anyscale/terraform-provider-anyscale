@@ -3,12 +3,12 @@
 page_title: "anyscale_cloud_resource Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Manages an Anyscale Cloud Resource deployment, which attaches infrastructure configuration to an existing Anyscale Cloud. A cloud's primary resource cannot be replaced: a change that would replace it fails at plan time, and destroying it (including removing its block, renaming it without a moved block, -replace, taint or destroy -target) tears down the cloud's service load balancers and marks the cloud DELETING, which cannot be undone. See Deleting a cloud ../guides/cloud-resources.md#deleting-a-cloud.
+  Manages an Anyscale Cloud Resource deployment, which attaches infrastructure configuration to an existing Anyscale Cloud. A cloud's primary resource cannot be replaced: a change that would replace it fails at plan time. On an AWS or GCP VM cloud, destroying the primary resource tears down the cloud's service load balancers and marks the cloud DELETING, which cannot be undone. See Deleting a cloud ../guides/cloud-resources.md#deleting-a-cloud.
 ---
 
 # anyscale_cloud_resource (Resource)
 
-Manages an Anyscale Cloud Resource deployment, which attaches infrastructure configuration to an existing Anyscale Cloud. A cloud's primary resource cannot be replaced: a change that would replace it fails at plan time, and destroying it (including removing its block, renaming it without a `moved` block, `-replace`, taint or `destroy -target`) tears down the cloud's service load balancers and marks the cloud `DELETING`, which cannot be undone. See [Deleting a cloud](../guides/cloud-resources.md#deleting-a-cloud).
+Manages an Anyscale Cloud Resource deployment, which attaches infrastructure configuration to an existing Anyscale Cloud. A cloud's primary resource cannot be replaced: a change that would replace it fails at plan time. On an AWS or GCP VM cloud, destroying the primary resource tears down the cloud's service load balancers and marks the cloud `DELETING`, which cannot be undone. See [Deleting a cloud](../guides/cloud-resources.md#deleting-a-cloud).
 
 ## Example Usage
 
