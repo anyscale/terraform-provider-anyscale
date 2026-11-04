@@ -245,9 +245,10 @@ this fallback, the provider warns ("Placeholder Credentials Generated") so it is
 practice, an all-in-one Kubernetes cloud only reaches this if it omits `anyscale_operator_iam_identity`
 (needed for the Operator to authenticate at all, so a well-formed configuration always sets it); the
 common case is a VM cloud with underivable credentials, not "any all-in-one cloud" unconditionally.
-This case doesn't warn for the empty-cloud pattern, since a placeholder there is the expected,
-intentional starting point — real credentials arrive later with whatever `anyscale_cloud_resource` gets
-attached.
+This case doesn't warn for the empty-cloud pattern, but the placeholder is not replaced when an
+`anyscale_cloud_resource` is attached: Anyscale uses the cloud's own credentials to create and tear down
+its service load balancers. On AWS, set `credentials` yourself (see
+[Deleting a cloud](#deleting-a-cloud)).
 
 ## Deleting a cloud
 
@@ -268,6 +269,12 @@ resource "anyscale_cloud" "this" {
 }
 ```
 
+**Split pattern on AWS.** Give the empty `anyscale_cloud` the control-plane role's ARN in `credentials`, plus
+`cloud_provider = "AWS"` and `region`. Without them the cloud keeps its placeholder role and region, so a
+service on the cloud fails to create its load balancer (`USER_ERROR_FAILURE`, `AssumeRole` denied). The role does not exist when the cloud is created, so give the IAM module a fixed
+role name and build the ARN from it. Leave the external ID unset: the trust policy and Anyscale both then use the
+cloud ID. See `examples/aws-vm-basic-resource`.
+
 Deleting an `anyscale_cloud` resource first attempts to detach any machine pools attached to it, then
 deletes the cloud itself. If a detach fails, the delete still goes ahead and the apply reports a warning
 (naming the pool if one failed to detach, or saying the machine pools could not be listed); if the
@@ -280,6 +287,10 @@ If the teardown fails or does not finish in time, the cloud is not deleted: fix 
 `timeouts.delete`) and run `terraform destroy` again. Once the teardown has started the cloud is marked
 `DELETING`, which cannot be undone, so a destroy that fails afterwards must be re-run to finish. If the error
 says clusters are still running, terminate them first. A cloud with no cloud resource, or whose primary resource is Kubernetes, skips the teardown.
+
+If the teardown times out because the control-plane role or its policies were already destroyed, Anyscale cannot
+confirm it and a longer timeout will not help. Delete the cloud's load balancer, target groups and ACM certificate in
+AWS, run `terraform state rm` on the cloud, then run `anyscale cloud delete --cloud-id <cloud ID>`.
 
 ## Importing an existing cloud
 

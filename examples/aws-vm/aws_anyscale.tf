@@ -2,6 +2,11 @@
 # Consolidated example with optional EFS and MemoryDB
 
 locals {
+  # Fixed, per-deployment role name (common_prefix is at most 30
+  # characters, well inside IAM's 64). anyscale_cloud.credentials names
+  # this role by ARN before the module creates it.
+  access_role_name = "${trimsuffix(coalesce(var.common_prefix, var.cloud_name), "-")}-access"
+
   full_tags = merge(tomap({
     anyscale-cloud-id           = anyscale_cloud.primary.id,
     anyscale-deploy-environment = var.anyscale_deploy_env
@@ -14,10 +19,13 @@ module "aws_anyscale_v2" {
   source = "anyscale/anyscale-cloudfoundation-modules/aws"
   tags   = local.full_tags
 
-  anyscale_deploy_env  = var.anyscale_deploy_env
-  anyscale_cloud_id    = anyscale_cloud.primary.id
-  anyscale_org_id      = var.anyscale_org_id
-  anyscale_external_id = var.anyscale_external_id
+  anyscale_deploy_env = var.anyscale_deploy_env
+  anyscale_cloud_id   = anyscale_cloud.primary.id
+  anyscale_org_id     = var.anyscale_org_id
+
+  # A fixed role name lets anyscale_cloud.credentials name the role before
+  # the module creates it. See main.tf.
+  anyscale_iam_access_role_name = local.access_role_name
 
   # VPC Configuration
   anyscale_vpc_cidr_block     = var.vpc_cidr_block
