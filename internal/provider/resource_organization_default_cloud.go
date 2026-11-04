@@ -103,7 +103,9 @@ func setOrganizationDefaultCloud(ctx context.Context, client *Client, cloudID st
 	path := fmt.Sprintf("/api/v2/organizations/update_default_cloud?cloud_id=%s", cloudID)
 	tflog.Debug(ctx, "POST "+path)
 	if _, err := DoRequestRaw(ctx, client, "POST", path, nil, http.StatusNoContent); err != nil {
-		return fmt.Errorf("set organization default cloud: %w", err)
+		// Unwrapped: both callers report this through AddAPIError with the op "set
+		// organization default cloud", so a wrap here repeats it on transport errors.
+		return err
 	}
 	return nil
 }
