@@ -62,14 +62,9 @@ jobs:
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           predicate-quantifier: every
-          filters: |
-            requiresFullAcctest:
-              - '**'
-              - '!docs/**'
-              - '!examples/**'
-              - '!**/*.md'
-              - '!.changelog/**'
-              - '!templates/**'
+          # The path list lives in a file because release.yml's acceptance-test
+          # gate must classify "docs-only" with the exact same rules.
+          filters: .github/docs-only-filter.yml
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -90,6 +85,10 @@ jobs:
           fi
           git checkout -- CHANGELOG.md
           rm -f "$SCRATCH_FRAGMENT"
+
+      - name: Release gate self-test
+        if: matrix.shard == 'lint-and-unit'
+        run: .github/scripts/release-acctest-gate.sh --self-test
 
       - name: Setup Terraform
         # Pinned >= 1.15.0: that release fixed how `terraform init` handles a
