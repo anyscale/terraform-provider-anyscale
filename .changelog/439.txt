@@ -1,0 +1,7 @@
+```release-note:fixed
+resource/anyscale_cloud: Destroying an AWS or GCP VM cloud now tears down its service load balancer, target groups and certificate first, instead of leaving them in your account where they block deleting the VPC. This can make a cloud destroy take several minutes. If a destroy then fails, the cloud is left marked for deletion: fix what the error names and run destroy again.
+```
+
+```release-note:added
+resource/anyscale_cloud: `timeouts { delete }` (default `30m`) bounds a cloud destroy, including the load balancer teardown.
+```

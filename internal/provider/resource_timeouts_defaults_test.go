@@ -30,6 +30,7 @@ func TestPR2TimeoutDefaults_MatchLockedSpec(t *testing.T) {
 		{"service create/update/delete (defaultServiceRolloutTimeout)", defaultServiceRolloutTimeout, 60 * time.Minute},
 		{"system_cluster create (defaultSystemClusterCreateTimeout)", defaultSystemClusterCreateTimeout, 20 * time.Minute},
 		{"container_image_build create/update (defaultBuildTimeout)", defaultBuildTimeout, 30 * time.Minute},
+		{"cloud delete (defaultCloudDeleteTimeout)", defaultCloudDeleteTimeout, 30 * time.Minute},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

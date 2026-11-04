@@ -208,8 +208,12 @@ func TestForbiddenDelete_ReadBack(t *testing.T) {
 			forbiddenPath: "/api/v2/clouds/cld_x",
 			readBackPath:  "/api/v2/clouds/cld_x",
 			existsBody:    `{"result": {"id": "cld_x"}}`,
-			ok:            map[string]string{"GET /api/v2/machine_pools/": `{"result": {"machine_pools": []}}`},
-			kind:          "Cloud", id: "cld_x",
+			ok: map[string]string{
+				"GET /api/v2/machine_pools/": `{"result": {"machine_pools": []}}`,
+				// No resources: Delete skips the load balancer teardown.
+				"GET /api/v2/clouds/cld_x/resources": `{"results": [], "metadata": {"next_paging_token": null}}`,
+			},
+			kind: "Cloud", id: "cld_x",
 		},
 		{
 			name:          "anyscale_cloud_resource",

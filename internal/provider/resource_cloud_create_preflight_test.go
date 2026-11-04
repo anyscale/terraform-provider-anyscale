@@ -66,7 +66,7 @@ func preflightPlan(t *testing.T, name, provider, computeStack, region string) Cl
 		FileStorage:            types.ObjectNull(fileStorageAttrTypes()),
 		IsEmptyCloud:           types.BoolUnknown(),
 		CloudResourceID:        types.StringUnknown(),
-		Timeouts:               timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType})},
+		Timeouts:               timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType, "delete": types.StringType})},
 	}
 	if computeStack != "" {
 		plan.ComputeStack = types.StringValue(computeStack)
@@ -354,6 +354,9 @@ func TestCloudResourceDelete_FailedMachinePoolDetachWarns(t *testing.T) {
 			case r.Method == http.MethodPost && r.URL.Path == "/api/v2/machine_pools/detach":
 				w.WriteHeader(detachStatus)
 				_, _ = fmt.Fprint(w, `{"result": {}}`)
+			case r.Method == http.MethodGet && r.URL.Path == "/api/v2/clouds/"+cloudID+"/resources":
+				// No resources: Delete skips the load balancer teardown.
+				_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"next_paging_token": null}}`)
 			case r.Method == http.MethodDelete && r.URL.Path == "/api/v2/clouds/"+cloudID:
 				deleteCalls.Add(1)
 				w.WriteHeader(http.StatusNoContent)
@@ -405,6 +408,9 @@ func TestCloudResourceDelete_FailedMachinePoolDetachWarns(t *testing.T) {
 			switch {
 			case r.Method == http.MethodGet && r.URL.Path == "/api/v2/machine_pools/":
 				w.WriteHeader(http.StatusInternalServerError)
+			case r.Method == http.MethodGet && r.URL.Path == "/api/v2/clouds/"+cloudID+"/resources":
+				// No resources: Delete skips the load balancer teardown.
+				_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"next_paging_token": null}}`)
 			case r.Method == http.MethodDelete && r.URL.Path == "/api/v2/clouds/"+cloudID:
 				deleteCalls.Add(1)
 				w.WriteHeader(http.StatusNoContent)

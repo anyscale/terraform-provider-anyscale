@@ -239,3 +239,31 @@ func TestCloudResourceModifyPlan_WarnsOnNonOrgExternalID(t *testing.T) {
 		t.Errorf("control: an org_ external_id must not warn, got: %v", diags)
 	}
 }
+
+// TestCloudResourceModifyPlan_NoExternalIDWarningOnUpdate is the control for
+// the warning above: a plan for an existing cloud never warns, since nothing
+// re-sends external_id after create.
+func TestCloudResourceModifyPlan_NoExternalIDWarningOnUpdate(t *testing.T) {
+	ctx := context.Background()
+	r := &CloudResource{}
+	var schemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+
+	p := preflightPlan(t, "tfacc-extid", "AWS", "VM", "us-east-1")
+	p.ID = types.StringValue("cld_existing")
+	p.AWSConfig = awsConfigWithExternalID(t, "my-external-id")
+	plan := tfsdk.Plan{Schema: schemaResp.Schema}
+	if d := plan.Set(ctx, &p); d.HasError() {
+		t.Fatalf("plan fixture: %v", d)
+	}
+	req := resource.ModifyPlanRequest{
+		Plan:   plan,
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: plan.Raw},
+		State:  tfsdk.State{Schema: schemaResp.Schema, Raw: plan.Raw},
+	}
+	resp := &resource.ModifyPlanResponse{Plan: plan}
+	r.ModifyPlan(ctx, req, resp)
+	if diagsContainSummary(resp.Diagnostics, "External ID Not Recorded On The Cloud") {
+		t.Fatalf("an update plan must not warn about external_id, got: %v", resp.Diagnostics)
+	}
+}
