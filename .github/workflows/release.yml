@@ -42,6 +42,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write
+      actions: read # release acceptance-test gate reads CI job/step results
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -70,6 +71,28 @@ jobs:
             exit 1
           fi
           echo "==> $TAG is a valid version tag on main ($GITHUB_SHA)"
+
+      # Also before signing. The tag commit is the docs-only changelog commit,
+      # so CI skips its real-infra acceptance steps; this proves the tagged tree
+      # equals a tree whose acceptance tests actually ran green. See the header
+      # of the script for the exact rule. Fails closed; there is no override.
+      - name: Verify acceptance tests covered this tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          prev="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname \
+            | grep -Ev -- '-' | grep -vxF -- "$TAG" \
+            | while read -r t; do
+                if git merge-base --is-ancestor "$t" "$GITHUB_SHA"; then echo "$t"; break; fi
+              done)"
+          if [ -z "$prev" ]; then
+            echo "::error::No previous stable release tag is an ancestor of $GITHUB_SHA; the acceptance-test gate has no range to check."
+            exit 1
+          fi
+          echo "==> previous release: $prev"
+          .github/scripts/release-acctest-gate.sh "$GITHUB_SHA" "$prev"
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0

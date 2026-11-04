@@ -1,0 +1,19 @@
+# Single source of truth for "this diff cannot change provider behavior".
+#
+# Read by two consumers that must never disagree:
+#   - ci.yml (dorny/paths-filter, predicate-quantifier: every) decides
+#     whether the real-infra acceptance-test steps run or skip.
+#   - .github/scripts/release-acctest-gate.sh decides whether a tag's tree
+#     differs from the last commit whose acceptance tests actually ran.
+#
+# requiresFullAcctest is true when EVERY changed file matches '**' and none
+# matches a '!' exclusion. The release gate parses the '!' lines below with a
+# deliberately small grammar: '**' wildcards only, one pattern per line, quoted.
+# Keep to that grammar (the gate's --self-test fails otherwise).
+requiresFullAcctest:
+  - '**'
+  - '!docs/**'
+  - '!examples/**'
+  - '!**/*.md'
+  - '!.changelog/**'
+  - '!templates/**'

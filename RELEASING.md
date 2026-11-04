@@ -113,7 +113,7 @@ it. Pushing the tag is what triggers the automated release.
 
 ## CI safety gates
 
-Two checks make it hard to reach a release in a broken state:
+Three checks make it hard to reach a release in a broken state:
 
 - **`changelog-gate`** (required on `main`) — fails a PR that has neither a `.changelog/<PR#>.txt`
   fragment nor the `skip-changelog` label. This is what keeps `CHANGELOG.md` complete without anyone
@@ -122,6 +122,14 @@ Two checks make it hard to reach a release in a broken state:
   check`), builds a snapshot (no publish, no signing), asserts the Registry manifest is present with
   protocol 6.0, and checks that fragments parse. This surfaces a broken release config on a PR rather
   than after a tag is already public.
+- **Acceptance-test gate** (first step of `release.yml`, before signing) — the tag commit is the
+  docs-only changelog commit, so CI skips its real-infra acceptance steps. The gate walks back from
+  the tag to the previous release for the newest commit whose `Acceptance Tests - Data Sources` and
+  `Acceptance Tests - Resources` steps both ran and passed (step results, not job results), then
+  requires every file changed since to be docs-only per `.github/docs-only-filter.yml` (the same list
+  CI uses to skip). No such commit, or a code change after it, fails the release; there is no
+  override. Fix: let CI finish on the newest code-changing commit, then re-tag. Script:
+  `.github/scripts/release-acctest-gate.sh`.
 
 ---
 
