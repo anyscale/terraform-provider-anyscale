@@ -168,6 +168,15 @@ already exist.
 relative to the rest of this example's infrastructure. Check the instance's status in the GCP
 console before assuming `apply` is stuck.
 
+**`terraform destroy` fails deleting the storage bucket after you ran a service** - a service leaves its
+runtime package in the cloud's bucket, and the Google module does not delete a non-empty bucket. Empty the
+bucket first, then destroy again. The bucket name is `object_storage.bucket_name` in
+`terraform state show anyscale_cloud_resource.primary`:
+
+```bash
+gcloud storage rm --recursive "gs://<bucket-name>/**"
+```
+
 **A second `anyscale_cloud_resource`, or one re-applied after lost state, fails with a `409`** -
 the multi-resource cloud pattern this example uses has a few sharp edges worth knowing before you
 adapt it elsewhere: `name` only has to be unique per cloud but is required with no default, a
