@@ -150,7 +150,7 @@ variable "enable_role_binding" {
 }
 
 variable "enable_system_cluster" {
-  description = "Enable and start Cloud B's System Cluster. Off by default: destroy does not stop it, so its instance keeps running and blocks the VPC's teardown until you stop it or terminate the instance."
+  description = "Enable and start Cloud B's System Cluster. Off by default because it starts an instance. Destroying the cloud terminates it; destroying only the System Cluster resource does not."
   type        = bool
   default     = false
 }

@@ -101,7 +101,7 @@ implicit extra one.
 
 | Variable | Enables | Needs |
 | --- | --- | --- |
-| `enable_system_cluster` | `anyscale_system_cluster` (Cloud B) and its data source | Nothing extra, but destroying it only removes it from state and deleting the cloud leaves its instance running: stop or terminate it first |
+| `enable_system_cluster` | `anyscale_system_cluster` (Cloud B) and its data source | Nothing extra. Destroying the cloud terminates the System Cluster; destroying only `anyscale_system_cluster` does not stop it |
 | `org_user_email` | `anyscale_organization_user` and its data source | An existing member's email (a non-member gets a real invitation) |
 | `enable_user_groups` | `anyscale_user_group`, `anyscale_user_group_members`, and the `anyscale_user_group` / `anyscale_user_groups` data sources | User groups enabled for your org (org-wide objects behind a feature flag) |
 | `user_group_member_emails` | Group membership | Each email must be an accepted org member |
