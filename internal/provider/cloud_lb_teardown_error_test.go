@@ -31,7 +31,7 @@ func TestAddCloudLBTeardownError_RecoveryNamesProviderResources(t *testing.T) {
 				t.Fatal("want an error")
 			}
 			d := diags.Errors()[0].Detail()
-			for _, w := range append(tc.want, "terraform state rm on this cloud", "anyscale cloud delete --cloud-id cld_x", "marked DELETING") {
+			for _, w := range append(tc.want, "terraform state rm on this cloud", "anyscale cloud delete --cloud-id cld_x", "contact Anyscale support with the cloud ID", "marked DELETING") {
 				if !strings.Contains(d, w) {
 					t.Errorf("detail %q does not contain %q", d, w)
 				}

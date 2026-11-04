@@ -164,7 +164,8 @@ func addCloudLBTeardownError(diags *diag.Diagnostics, prefix, stateRmTarget, clo
 			"If that identity or its permissions were already removed, a longer timeout will not help. "+
 			"In that case, first delete the cloud's %s. "+
 			"Then run terraform state rm on %s. Then delete the cloud with anyscale cloud delete --cloud-id %s, which runs the same check "+
-			"for up to 15 minutes before offering to delete the cloud anyway. Otherwise, raise timeouts.delete and run terraform destroy again. "+
+			"for up to 15 minutes before offering to delete the cloud anyway. Otherwise, raise timeouts.delete and run terraform destroy again; "+
+			"if the teardown still does not finish, follow the steps above and contact Anyscale support with the cloud ID. "+
 			"See \"Deleting a cloud\" in the provider's Cloud Resources guide.", detail, deleteTimeout, identity, leftovers, stateRmTarget, cloudID)
 	} else {
 		detail += ". Run terraform destroy again once the error above is resolved."
