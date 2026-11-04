@@ -205,8 +205,21 @@ func TestCloudResourceDelete_LoadBalancerTeardownTimeoutSkipsDelete(t *testing.T
 	if !diagsContainSummary(diags, "Cloud Load Balancer Teardown Failed") {
 		t.Fatalf("want a teardown error, got: %v", diags)
 	}
-	if d := diags[0].Detail(); !strings.Contains(d, "timeouts.delete = 300ms") || !strings.Contains(d, "marked DELETING") {
+	d := diags[0].Detail()
+	if !strings.Contains(d, "timeouts.delete = 300ms") || !strings.Contains(d, "marked DELETING") {
 		t.Errorf("detail %q should name the timeout and the DELETING state", d)
+	}
+	// A longer timeout cannot help once the cloud's IAM role is gone, so the error must also
+	// give the recovery that works then, not only "raise timeouts.delete".
+	for _, want := range []string{
+		"If that role or its policies were already destroyed, a longer timeout will not help.",
+		"terraform state rm",
+		"anyscale cloud delete --cloud-id cld_del",
+		"raise timeouts.delete",
+	} {
+		if !strings.Contains(d, want) {
+			t.Errorf("detail %q does not contain %q", d, want)
+		}
 	}
 	for _, c := range m.teardownCalls() {
 		if strings.HasPrefix(c, "DELETE ") {
