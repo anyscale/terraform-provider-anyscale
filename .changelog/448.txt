@@ -7,5 +7,5 @@ resource/anyscale_cloud_resource: `timeouts { delete }` (default `30m`) bounds t
 ```
 
 ```release-note:changed
-resource/anyscale_cloud_resource: A change that would replace a cloud's primary resource now fails at plan time instead of starting to delete the cloud. Replace the cloud instead.
+resource/anyscale_cloud_resource: A change that would replace a cloud's primary resource now fails at plan time, before anything is destroyed. Replace the cloud instead.
 ```
