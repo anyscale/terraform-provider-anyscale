@@ -49,6 +49,62 @@ var serviceContinueStates = map[string]bool{
 // (container_image_helpers.go), not waitForCloudReady's internally-hardcoded backoff.
 const defaultServiceRolloutPollInterval = 10 * time.Second
 
+// serviceUnconfirmedErrorHold is how long a RUNNING wait tolerates a service-level error state
+// that no component confirms (see serviceErrorConfirmed) before failing. The backend reports
+// some failures only at the service level: a load balancer permission error leaves
+// current_state USER_ERROR_FAILURE with the version RUNNING and no checklist, so without this
+// bound the wait runs until its timeout (60m by default). The backend holds a cleared error for
+// about 30s (3 probes at a 10s tick) before reporting the recovery, so 5m leaves a wide margin
+// for a transient error to clear.
+const serviceUnconfirmedErrorHold = 5 * time.Minute
+
+// serviceErrorHeldError reports a service that stayed in an unconfirmed error state for
+// serviceUnconfirmedErrorHold while its versions were RUNNING. Create matches it to add a
+// recovery hint, since a failed Create leaves the service tainted.
+type serviceErrorHeldError struct {
+	State  string
+	Held   time.Duration
+	Detail string
+}
+
+func (e *serviceErrorHeldError) Error() string {
+	return fmt.Sprintf("service has reported %s for %s while its version is RUNNING: %s", e.State, e.Held, e.Detail)
+}
+
+// serviceVersionsRunning reports whether the service has a primary version and every reported
+// version (primary, and canary when present) is RUNNING.
+func serviceVersionsRunning(service *ServiceResult) bool {
+	if service.PrimaryVersion == nil || service.PrimaryVersion.CurrentState != serviceStateRunning {
+		return false
+	}
+	return service.CanaryVersion == nil || service.CanaryVersion.CurrentState == serviceStateRunning
+}
+
+// serviceEventsResponse is GET /api/v2/services-v2/{id}/events.
+type serviceEventsResponse struct {
+	Results []struct {
+		Message string `json:"message"`
+	} `json:"results"`
+}
+
+// latestServiceErrorEvent returns the message of the service's newest ERROR-level event, or ""
+// when there is none or the request fails. Called only on the failure path, so a failure here
+// must not replace the error being reported.
+func latestServiceErrorEvent(ctx context.Context, client *Client, serviceID string) string {
+	path := fmt.Sprintf("/api/v2/services-v2/%s/events?level=ERROR&count=1", url.PathEscape(serviceID))
+	resp, err := DoRequestAndParse[serviceEventsResponse](ctx, client, "GET", path, nil, http.StatusOK)
+	if err != nil {
+		tflog.Warn(ctx, "Could not read service events for the failure detail", map[string]any{
+			"service_id": serviceID, "error": err.Error(),
+		})
+		return ""
+	}
+	if len(resp.Results) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(resp.Results[0].Message)
+}
+
 // evaluateServiceState classifies a service's current_state against the wait loop's target
 // (serviceStateRunning for Create/Update, serviceStateTerminated for Delete). done=true means
 // stop polling. err is set only when target is RUNNING and current_state is a terminal failure
@@ -179,7 +235,7 @@ func waitForServiceState(ctx context.Context, client *Client, serviceID, target 
 // exit path's shape (a GET error is uniformly nil-service, rather than papered over with a
 // last-observed fallback).
 func waitForServiceStateWithTiming(ctx context.Context, client *Client, serviceID, target string, timeout, interval time.Duration) (*ServiceResult, error) {
-	return pollServiceState(ctx, client, serviceID, target, timeout, interval, nil)
+	return pollServiceState(ctx, client, serviceID, target, timeout, interval, nil, time.Now, serviceUnconfirmedErrorHold)
 }
 
 // waitForServiceRollout waits for a deploy to settle at RUNNING, passing every polled service to
@@ -189,11 +245,17 @@ func waitForServiceStateWithTiming(ctx context.Context, client *Client, serviceI
 // version primary while the service can still pass through UNHEALTHY, which would otherwise end
 // the wait with a generic error).
 func waitForServiceRollout(ctx context.Context, client *Client, serviceID string, timeout time.Duration, observe func(*ServiceResult) bool) (*ServiceResult, error) {
-	return pollServiceState(ctx, client, serviceID, serviceStateRunning, timeout, defaultServiceRolloutPollInterval, observe)
+	return pollServiceState(ctx, client, serviceID, serviceStateRunning, timeout, defaultServiceRolloutPollInterval, observe, time.Now, serviceUnconfirmedErrorHold)
 }
 
-func pollServiceState(ctx context.Context, client *Client, serviceID, target string, timeout, interval time.Duration, observe func(*ServiceResult) bool) (*ServiceResult, error) {
-	deadline := time.Now().Add(timeout)
+// pollServiceState is the wait loop behind waitForServiceState and waitForServiceRollout. now
+// and errorHold are parameters so tests can drive the unconfirmed-error bound without waiting
+// minutes; production passes time.Now and serviceUnconfirmedErrorHold.
+func pollServiceState(ctx context.Context, client *Client, serviceID, target string, timeout, interval time.Duration, observe func(*ServiceResult) bool, now func() time.Time, errorHold time.Duration) (*ServiceResult, error) {
+	deadline := now().Add(timeout)
+	// errorSince is when the current unbroken run of unconfirmed error observations began;
+	// zero when the last observation was not one.
+	var errorSince time.Time
 
 	for {
 		service, err := getServiceByID(ctx, client, serviceID)
@@ -212,9 +274,31 @@ func pollServiceState(ctx context.Context, client *Client, serviceID, target str
 			return service, nil
 		}
 
-		if done, evalErr := evaluateServiceState(service, target); done {
+		done, evalErr := evaluateServiceState(service, target)
+		if done {
 			return service, evalErr
-		} else if !serviceContinueStates[service.CurrentState] && service.CurrentState != target &&
+		}
+		// Reached only when evaluateServiceState keeps waiting, so an error state here is one
+		// no component confirmed. Bound how long it may hold while the versions run, for a
+		// RUNNING wait only: a TERMINATED wait ignores service health.
+		if target == serviceStateRunning && serviceErrorStates[service.CurrentState] && serviceVersionsRunning(service) {
+			if errorSince.IsZero() {
+				errorSince = now()
+			} else if held := now().Sub(errorSince); held >= errorHold {
+				detail := latestServiceErrorEvent(ctx, client, serviceID)
+				if detail == "" {
+					detail = "the cause is in the service's events (Events tab in the Anyscale console)"
+				}
+				return service, &serviceErrorHeldError{
+					State:  service.CurrentState,
+					Held:   held.Round(time.Second),
+					Detail: detail,
+				}
+			}
+		} else {
+			errorSince = time.Time{}
+		}
+		if !serviceContinueStates[service.CurrentState] && service.CurrentState != target &&
 			!serviceErrorStates[service.CurrentState] {
 			// An unrecognized current_state continues polling rather
 			// than hard-erroring - a backend adding a new benign transitional state must not
@@ -230,7 +314,7 @@ func pollServiceState(ctx context.Context, client *Client, serviceID, target str
 			})
 		}
 
-		if time.Now().After(deadline) {
+		if now().After(deadline) {
 			// Carry the last-reported failure reason: a wait that ends here because an error
 			// state was not terminal (Delete, or an error no component confirmed) would
 			// otherwise report only the state name.

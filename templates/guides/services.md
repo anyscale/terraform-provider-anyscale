@@ -277,7 +277,9 @@ Terraform. Set `grpc_service_names` and `env_vars` to match before the first app
 ## Timeouts
 
 `timeouts` defaults to `60m` for `create`, `update` and `delete`. Anyscale sets no deadline on a
-rollout, so this is the only limit. When it expires the apply fails but the rollout continues on
+rollout, so this is the only limit, with one exception: a create or update fails after 5 minutes
+if the service reports an error state that whole time while its version is running, quoting the
+service's newest error event. When a timeout expires the apply fails but the rollout continues on
 Anyscale and is settled on the next refresh (see [Failed rollouts](#failed-rollouts)).
 
 ## Import
