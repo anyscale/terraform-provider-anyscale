@@ -1,3 +1,0 @@
-```release-note:changed
-provider: The cloud resources guide now describes what destroying an AWS or GCP VM cloud does (load balancer teardown, `timeouts { delete }`, and re-running destroy after a failure).
-```
