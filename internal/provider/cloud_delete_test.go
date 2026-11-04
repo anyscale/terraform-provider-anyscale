@@ -32,6 +32,9 @@ type cloudDeleteMock struct {
 	lbStatus   int  // get_lb_resource status; 0 = 200
 	lbFailOnce int  // the first get_lb_resource call answers this status
 	lbDropOnce bool // the first get_lb_resource call drops the connection
+
+	removeStatus int    // DELETE .../remove_resource status; 0 = 204
+	removeBody   string // DELETE .../remove_resource body when removeStatus is set
 }
 
 func (m *cloudDeleteMock) server(t *testing.T) *httptest.Server {
@@ -90,6 +93,13 @@ func (m *cloudDeleteMock) server(t *testing.T) *httptest.Server {
 			m.lbPending--
 			m.mu.Unlock()
 			_, _ = fmt.Fprintf(w, `{"result": {"is_terminated": %t}}`, done)
+		case r.Method == http.MethodDelete && r.URL.Path == cloud+"/remove_resource":
+			if m.removeStatus != 0 {
+				w.WriteHeader(m.removeStatus)
+				_, _ = fmt.Fprint(w, m.removeBody)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && r.URL.Path == cloud:
 			status := m.getStatus
 			if status == 0 {

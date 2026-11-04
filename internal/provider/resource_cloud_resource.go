@@ -169,7 +169,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 		// v2: status removed (duplicated operator_status; see
 		// statusDeprecationMessage) - see the same file's v1->v2 UpgradeState.
 		Version:             2,
-		MarkdownDescription: "Manages an Anyscale Cloud Resource deployment. This attaches infrastructure configuration to an existing Anyscale Cloud.",
+		MarkdownDescription: "Manages an Anyscale Cloud Resource deployment, which attaches infrastructure configuration to an existing Anyscale Cloud. A cloud's primary resource cannot be replaced: a change that would replace it fails at plan time, and destroying it (including removing its block, renaming it without a `moved` block, `-replace`, taint or `destroy -target`) tears down the cloud's service load balancers and marks the cloud `DELETING`, which cannot be undone. See [Deleting a cloud](../guides/cloud-resources.md#deleting-a-cloud).",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -185,7 +185,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 				Required:            true,
 				MarkdownDescription: "The cloud ID to attach this resource to. To reference a cloud by name instead of by id, look it up with the [`anyscale_cloud` data source](../data-sources/cloud.md) (`cloud_id = data.anyscale_cloud.example.id`).",
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					guardPrimaryString(stringplanmodifier.RequiresReplace()),
 				},
 			},
 
@@ -194,7 +194,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 				Required:            true,
 				MarkdownDescription: "The name of the cloud resource. Must be a non-empty string, distinct among resources on the same cloud. Part of the resource's identity - used in the `cloud_id:name` import ID - so changing it requires replacing the resource. If Terraform state is lost, re-applying does not recover the existing resource: a configuration with the same name fails with a duplicate-name error. Use `terraform import` to recover state instead.",
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					guardPrimaryString(stringplanmodifier.RequiresReplace()),
 				},
 				Validators: []validator.String{
 					stringvalidator.LengthAtLeast(1),
@@ -207,7 +207,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 				Computed:            true,
 				MarkdownDescription: "Cloud provider: AWS, GCP, or AZURE. Required for K8S compute_stack when aws_config/gcp_config/azure_config is not provided. Inferred from aws_config/gcp_config/azure_config if not specified. AWS and GCP support both VM and K8S compute stacks; AZURE supports K8S only (AKS) - Anyscale does not support Azure VM clouds, and setting azure_config with any other compute_stack is a plan-time error. GENERIC is not yet supported by this provider.",
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					guardPrimaryString(stringplanmodifier.RequiresReplace()),
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
@@ -217,7 +217,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 				Computed:            true,
 				MarkdownDescription: "Compute stack type: VM or K8S. When omitted, this reflects the compute stack of the cloud's primary resource as reported by the API (typically VM).",
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					guardPrimaryString(stringplanmodifier.RequiresReplace()),
 					stringplanmodifier.UseStateForUnknown(),
 				},
 				Validators: []validator.String{
@@ -230,7 +230,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 				Computed:            true,
 				MarkdownDescription: "The region for this cloud resource. Inferred from the cloud/provider configuration when not specified. For AWS, Anyscale does not support the China or GovCloud partitions.",
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					guardPrimaryString(stringplanmodifier.RequiresReplace()),
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
@@ -241,7 +241,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 				Default:             booldefault.StaticBool(false),
 				MarkdownDescription: "Whether to register this specific resource deployment as private - the same concept as `is_private_cloud` on the `anyscale_cloud` resource (see its schema description for the full explanation of what \"private\" does and does not mean), scoped to this one resource rather than the cloud as a whole. This is a self-asserted flag: setting `true` does not itself verify, configure, or provision any VPN or PrivateLink connectivity - arranging that separately remains your own responsibility. Changing this value after creation requires replacement.",
 				PlanModifiers: []planmodifier.Bool{
-					boolplanmodifier.RequiresReplace(),
+					guardPrimaryBool(boolplanmodifier.RequiresReplace()),
 				},
 			},
 
@@ -296,7 +296,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						Optional:            true,
 						MarkdownDescription: "The VPC ID where Anyscale resources will be deployed.",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
+							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 					},
 					"subnet_ids": schema.ListAttribute{
@@ -304,7 +304,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						Optional:            true,
 						MarkdownDescription: "List of subnet IDs for Anyscale resources. Use this OR `subnet_ids_to_az`; if both are set, `subnet_ids_to_az` is used and this is ignored. VM compute only: EKS networking comes from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time.",
 						PlanModifiers: []planmodifier.List{
-							awsSubnetIDsRequiresReplaceUnlessEquivalent{},
+							guardPrimaryList(awsSubnetIDsRequiresReplaceUnlessEquivalent{}),
 						},
 					},
 					"subnet_ids_to_az": schema.MapAttribute{
@@ -312,7 +312,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						Optional:            true,
 						MarkdownDescription: "Map of subnet ID to availability zone (e.g., {\"subnet-123\": \"us-east-2a\"}). Preferred over `subnet_ids`, which is ignored when both are set. VM compute only: EKS networking comes from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time.",
 						PlanModifiers: []planmodifier.Map{
-							awsSubnetIDsToAZRequiresReplaceUnlessEquivalent{},
+							guardPrimaryMap(awsSubnetIDsToAZRequiresReplaceUnlessEquivalent{}),
 						},
 					},
 					"security_group_ids": schema.ListAttribute{
@@ -320,42 +320,42 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						Optional:            true,
 						MarkdownDescription: "List of security group IDs for Anyscale resources. Missing the required rules causes the cluster to fail silently rather than erroring at plan or apply time - Anyscale needs at minimum an inbound rule for port 443 and a self-referencing rule allowing all traffic.",
 						PlanModifiers: []planmodifier.List{
-							listplanmodifier.RequiresReplace(),
+							guardPrimaryList(listplanmodifier.RequiresReplace()),
 						},
 					},
 					"controlplane_iam_role_arn": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "IAM role ARN for Anyscale control plane (cross-account access). See the [Anyscale AWS IAM documentation](https://docs.anyscale.com/iam/aws) for the trust policy and permissions this role needs.",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
+							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 					},
 					"dataplane_iam_role_arn": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "IAM role ARN for Anyscale data plane (cluster nodes). See the [Anyscale AWS IAM documentation](https://docs.anyscale.com/iam/aws) for the trust policy and permissions this role needs.",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
+							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 					},
 					"cluster_instance_profile_id": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "IAM instance profile ARN attached to Ray cluster nodes. Defaults to the instance profile with the same name as `dataplane_iam_role_arn` when unset - set this explicitly only if your IAM tooling generates a profile name that differs from the role name.",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
+							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 					},
 					"external_id": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "External ID for IAM role assumption (recommended for security). Anyscale's external IDs follow a fixed format: the organization ID, a hyphen, then a random string (e.g. `org_1234567890abcdef-1234567890abcdef`). See the [Anyscale AWS IAM documentation](https://docs.anyscale.com/iam/aws) for the full trust policy.",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
+							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 					},
 					"memorydb_cluster_name": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "MemoryDB cluster name for Ray GCS fault tolerance. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements.",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
+							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 					},
 					"memorydb_cluster_arn": schema.StringAttribute{
@@ -364,7 +364,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						MarkdownDescription: "MemoryDB cluster ARN. Derived from `memorydb_cluster_name` when unset (recorded at create, recovered at import); set it only to pin a value. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.UseStateForUnknown(),
-							stringplanmodifier.RequiresReplace(),
+							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 					},
 					"memorydb_cluster_endpoint": schema.StringAttribute{
@@ -373,7 +373,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						MarkdownDescription: "MemoryDB cluster endpoint address, formatted as `<name>.<random>.clustercfg.memorydb.<region>.amazonaws.com:6379`. Requires TLS: use a `rediss://` prefix. Derived from `memorydb_cluster_name` when unset, like `memorydb_cluster_arn`; set it only to pin a value. Conflicts with `kubernetes_config.redis_endpoint` (the backend rejects more than one GCS fault-tolerance store per cloud). See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.UseStateForUnknown(),
-							stringplanmodifier.RequiresReplace(),
+							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 					},
 				},
@@ -387,28 +387,28 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						Optional:            true,
 						MarkdownDescription: "The GCP project ID.",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
+							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 					},
 					"host_project_id": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "The host project ID for shared VPCs (optional).",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
+							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 					},
 					"provider_name": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "Workload Identity Federation provider name.",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
+							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 					},
 					"vpc_name": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "The VPC network name.",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
+							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 					},
 					"subnet_names": schema.ListAttribute{
@@ -416,21 +416,21 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						Optional:            true,
 						MarkdownDescription: "List of subnet names within the VPC for Anyscale resources. VM compute only: GKE networking comes from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time. More than one subnet is supported; Anyscale spreads instances across them.",
 						PlanModifiers: []planmodifier.List{
-							listplanmodifier.RequiresReplace(),
+							guardPrimaryList(listplanmodifier.RequiresReplace()),
 						},
 					},
 					"controlplane_service_account_email": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "Service account email for Anyscale control plane. See the [Anyscale Google Cloud IAM documentation](https://docs.anyscale.com/iam/google-cloud) for the roles this service account needs.",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
+							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 					},
 					"dataplane_service_account_email": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "Service account email for Ray cluster nodes. See the [Anyscale Google Cloud IAM documentation](https://docs.anyscale.com/iam/google-cloud) for the roles this service account needs.",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
+							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 					},
 					"firewall_policy_names": schema.ListAttribute{
@@ -438,14 +438,14 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						Optional:            true,
 						MarkdownDescription: "List of firewall policy names.",
 						PlanModifiers: []planmodifier.List{
-							listplanmodifier.RequiresReplace(),
+							guardPrimaryList(listplanmodifier.RequiresReplace()),
 						},
 					},
 					"memorystore_instance_name": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "Memorystore instance name for Ray GCS fault tolerance.",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
+							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 					},
 					"memorystore_endpoint": schema.StringAttribute{
@@ -454,7 +454,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						MarkdownDescription: "Memorystore endpoint address (no TLS, unlike AWS MemoryDB). Derived from `memorystore_instance_name` when unset. Conflicts with `kubernetes_config.redis_endpoint`: the backend rejects more than one GCS fault-tolerance backing store per cloud. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.UseStateForUnknown(),
-							stringplanmodifier.RequiresReplace(),
+							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 					},
 				},
@@ -468,7 +468,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						Optional:            true,
 						MarkdownDescription: "The Azure tenant ID (maps to the Anyscale API's AzureConfig.tenant_id, and the CLI's `--azure-tenant-id`).",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
+							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 					},
 				},
@@ -482,7 +482,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						Optional:            true,
 						MarkdownDescription: "The IAM identity for the Anyscale operator. AWS EKS: the ARN of an IAM role whose trust policy allows `pods.eks.amazonaws.com`, wired to the operator through an `aws_eks_pod_identity_association` (see the [Anyscale EKS IAM documentation](https://docs.anyscale.com/iam/eks)). A node group's IAM role will NOT work (it trusts `ec2.amazonaws.com`), and the provider cannot see trust policies, so a wrong role fails at runtime, not at `terraform plan`. GCP GKE: service account email (see the [Anyscale GKE IAM documentation](https://docs.anyscale.com/iam/gke)). Azure AKS: the managed identity's principal ID, not its client ID (the client ID belongs only in the operator's own values.yaml).",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
+							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 					},
 					"zones": schema.ListAttribute{
@@ -490,14 +490,14 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						Optional:            true,
 						MarkdownDescription: "List of availability zones for the Kubernetes cluster.",
 						PlanModifiers: []planmodifier.List{
-							listplanmodifier.RequiresReplace(),
+							guardPrimaryList(listplanmodifier.RequiresReplace()),
 						},
 					},
 					"redis_endpoint": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "Endpoint of a Redis service reachable from the data plane (e.g. `redis.ray-system.svc.cluster.local:6379`). Used for Ray GCS fault tolerance. Conflicts with `aws_config.memorydb_cluster_endpoint` and `gcp_config.memorystore_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud.",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
+							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 						Validators: []validator.String{
 							stringvalidator.ConflictsWith(
@@ -518,7 +518,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						MarkdownDescription: "The bucket name (e.g., my-bucket for S3, gs://my-bucket for GCS). A bare name and its scheme-prefixed form (s3://, gs://) are treated as the same bucket for plan purposes, so importing a cloud whose bucket was written without the prefix does not force replacement.",
 						PlanModifiers: []planmodifier.String{
 							bucketNameSemanticEqualPlanModifier{},
-							stringplanmodifier.RequiresReplace(),
+							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 					},
 					"region": schema.StringAttribute{
@@ -532,14 +532,14 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 							// with a separate RequiresReplace() does not work
 							// here. Do not add stringplanmodifier.RequiresReplace()
 							// alongside it.
-							regionSemanticEqualPlanModifier{},
+							guardPrimaryString(regionSemanticEqualPlanModifier{}),
 						},
 					},
 					"endpoint": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "Custom S3-compatible endpoint (for MinIO, etc.).",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
+							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 					},
 				},
@@ -612,6 +612,8 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 			"timeouts": timeouts.Block(ctx, timeouts.Opts{
 				Create:            true,
 				CreateDescription: "Maximum time to wait for a newly created cloud resource to become ready (e.g. `20m`, `1h`). Defaults to `30m`. Purely local to this provider - never sent to or read from the Anyscale API.",
+				Delete:            true,
+				DeleteDescription: "Maximum time for destroying a primary cloud resource, which tears down the cloud's service load balancers. Defaults to `30m`.",
 			}),
 		},
 	}
@@ -1017,9 +1019,32 @@ func (r *CloudResourceResource) Delete(ctx context.Context, req resource.DeleteR
 
 	tflog.Info(ctx, "Deleting Anyscale Cloud Resource", map[string]any{"cloud_id": cloudID, "name": resourceName})
 
-	// Check if this is the default/primary resource
+	// A primary resource cannot be removed on its own: it goes when the cloud is deleted.
+	// But the cloud's service load balancers are torn down with the cloud's control-plane
+	// role, and in the split pattern that role is destroyed before the anyscale_cloud (the IAM
+	// module takes the cloud ID), so that teardown has to happen here, while the role still
+	// exists. The primary depends on the role, so Terraform destroys it first.
+	tearDownForPrimary := func() {
+		deleteTimeout, timeoutDiags := state.Timeouts.Delete(ctx, defaultCloudDeleteTimeout)
+		resp.Diagnostics.Append(timeoutDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		teardownCtx, cancel := context.WithTimeout(ctx, deleteTimeout)
+		defer cancel()
+		markedDeleting, err := tearDownCloudLoadBalancers(teardownCtx, r.client, cloudID)
+		if err != nil {
+			addCloudLBTeardownError(&resp.Diagnostics,
+				fmt.Sprintf("Primary cloud resource %s was not destroyed", state.ID.ValueString()),
+				"this cloud resource and its anyscale_cloud", cloudID, deleteTimeout, markedDeleting, err)
+			return
+		}
+		tflog.Info(ctx, "Primary cloud resource: load balancers torn down; the resource is deleted with its cloud",
+			map[string]any{"cloud_id": cloudID, "name": resourceName, "marked_deleting": markedDeleting})
+	}
+
 	if state.IsDefault.ValueBool() {
-		tflog.Info(ctx, "Cloud resource is the primary resource - it will be deleted when the cloud is deleted", map[string]any{"name": resourceName})
+		tearDownForPrimary()
 		return
 	}
 
@@ -1052,13 +1077,13 @@ func (r *CloudResourceResource) Delete(ctx context.Context, req resource.DeleteR
 	}
 	if err != nil {
 		// The backend refuses to remove the primary resource with a 400. That
-		// resource's lifecycle belongs to the cloud, so this is the same no-op
+		// resource's lifecycle belongs to the cloud, so this takes the same path
 		// as the IsDefault branch above - reached when is_default in state is
 		// stale (e.g. destroy -refresh=false).
 		var statusErr *UnexpectedStatusError
 		if errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusBadRequest &&
 			strings.Contains(statusErr.Body, "is the primary resource and cannot be removed") {
-			tflog.Info(ctx, "Cloud resource is the primary resource - it will be deleted when the cloud is deleted", map[string]any{"name": resourceName})
+			tearDownForPrimary()
 			return
 		}
 

@@ -108,7 +108,7 @@ func (m cloudResourceResourceModelV1) toCloudResourceResourceModel() CloudResour
 		ReportedAt:       m.ReportedAt,
 		IsDefault:        m.IsDefault,
 		ID:               m.ID,
-		Timeouts:         timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType})},
+		Timeouts:         timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType, "delete": types.StringType})},
 	}
 }
 

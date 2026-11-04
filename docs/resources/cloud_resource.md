@@ -3,12 +3,12 @@
 page_title: "anyscale_cloud_resource Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Manages an Anyscale Cloud Resource deployment. This attaches infrastructure configuration to an existing Anyscale Cloud.
+  Manages an Anyscale Cloud Resource deployment, which attaches infrastructure configuration to an existing Anyscale Cloud. A cloud's primary resource cannot be replaced: a change that would replace it fails at plan time, and destroying it (including removing its block, renaming it without a moved block, -replace, taint or destroy -target) tears down the cloud's service load balancers and marks the cloud DELETING, which cannot be undone. See Deleting a cloud ../guides/cloud-resources.md#deleting-a-cloud.
 ---
 
 # anyscale_cloud_resource (Resource)
 
-Manages an Anyscale Cloud Resource deployment. This attaches infrastructure configuration to an existing Anyscale Cloud.
+Manages an Anyscale Cloud Resource deployment, which attaches infrastructure configuration to an existing Anyscale Cloud. A cloud's primary resource cannot be replaced: a change that would replace it fails at plan time, and destroying it (including removing its block, renaming it without a `moved` block, `-replace`, taint or `destroy -target`) tears down the cloud's service load balancers and marks the cloud `DELETING`, which cannot be undone. See [Deleting a cloud](../guides/cloud-resources.md#deleting-a-cloud).
 
 ## Example Usage
 
@@ -276,6 +276,7 @@ Optional:
 Optional:
 
 - `create` (String) Maximum time to wait for a newly created cloud resource to become ready (e.g. `20m`, `1h`). Defaults to `30m`. Purely local to this provider - never sent to or read from the Anyscale API.
+- `delete` (String) Maximum time for destroying a primary cloud resource, which tears down the cloud's service load balancers. Defaults to `30m`.
 
 ## Import
 

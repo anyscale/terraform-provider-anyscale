@@ -1427,26 +1427,8 @@ func (r *CloudResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 
 	markedDeleting, err := tearDownCloudLoadBalancers(ctx, r.client, cloudID)
 	if err != nil {
-		detail := err.Error()
-		if errors.Is(err, errCloudLBTeardownTimeout) {
-			// The provider cannot tell a slow teardown from one that can never finish, so the
-			// message covers both. Anyscale tears the load balancers down with the cloud's
-			// control-plane role; once that role or its policies are destroyed, get_lb_resource
-			// never reports them gone, even after they are removed by hand.
-			detail = fmt.Sprintf("%s (timeouts.delete = %s). Anyscale removes them with the cloud's control-plane IAM role. "+
-				"If that role or its policies were already destroyed, a longer timeout will not help. "+
-				"In that case, first delete the cloud's load balancer (its name contains the cloud ID), target groups and ACM certificate in AWS. "+
-				"Then run terraform state rm on this cloud. Then delete it with anyscale cloud delete --cloud-id %s, which runs the same check "+
-				"for up to 15 minutes before offering to delete the cloud anyway. Otherwise, raise timeouts.delete and run terraform destroy again. "+
-				"See \"Deleting a cloud\" in the provider's Cloud Resources guide.", detail, deleteTimeout, cloudID)
-		} else {
-			detail += ". Run terraform destroy again once the error above is resolved."
-		}
-		if markedDeleting {
-			detail += " The cloud is already marked DELETING, which cannot be undone."
-		}
-		resp.Diagnostics.AddError("Cloud Load Balancer Teardown Failed",
-			fmt.Sprintf("Cloud %s was not deleted: %s", cloudID, detail))
+		addCloudLBTeardownError(&resp.Diagnostics, fmt.Sprintf("Cloud %s was not deleted", cloudID),
+			"this cloud", cloudID, deleteTimeout, markedDeleting, err)
 		return
 	}
 
