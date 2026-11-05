@@ -226,6 +226,32 @@ func findRoleBindingForPrincipal(ctx context.Context, client *Client, resourceTy
 	return nil, nil
 }
 
+// roleBindingOriginImperative is the origin of a binding granted directly, as
+// opposed to one a role-binding policy states ("declarative").
+const roleBindingOriginImperative = "imperative"
+
+// matchRoleBinding picks, from a principal's bindings on one resource, the
+// binding with this ID, else the one granting roleID on that same resource.
+// byID reports which matched. A policy apply that revokes and re-grants a
+// binding gives the same grant a new ID, and the API keeps at most one live
+// binding per principal, role and resource, so a same-grant match is the
+// binding the ID used to name. The scope comparison is defensive: the
+// resource-scoped listing does not return bindings held on other resources.
+func matchRoleBinding(bindings []roleBindingSummary, roleBindingID, roleID, resourceType, resourceID string) (match *roleBindingSummary, byID bool) {
+	for i := range bindings {
+		if bindings[i].ID == roleBindingID {
+			return &bindings[i], true
+		}
+	}
+	for i := range bindings {
+		b := &bindings[i]
+		if b.RoleID == roleID && b.ResourceType == resourceType && b.ResourceID == resourceID {
+			return b, false
+		}
+	}
+	return nil, false
+}
+
 // listRolesByName returns the assignable roles whose name contains name: the
 // organization's own and the built-ins. The listing's name filter is a
 // substring match, so callers pick the exact match. Archived roles are not
