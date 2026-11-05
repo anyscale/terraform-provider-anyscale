@@ -48,6 +48,12 @@ type roleBindingPolicyBinding struct {
 	ResourceID    string  `json:"resource_id"`
 }
 
+// policyMixHint closes a warning listing grants a policy revokes but may not
+// have made. Neither resource can see the other's config, so it names the
+// hazard rather than detecting it.
+const policyMixHint = "If any of these is an anyscale_role_binding in any configuration, this scope is managed twice: " +
+	"remove one of the two before applying, or each apply revokes what the other grants."
+
 type roleBindingPolicyApplyResult struct {
 	Added   []roleBindingPolicyBinding `json:"added"`
 	Removed []roleBindingPolicyBinding `json:"removed"`

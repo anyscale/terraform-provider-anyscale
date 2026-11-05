@@ -278,8 +278,8 @@ func (r *RoleBindingPolicyResource) ModifyPlan(ctx context.Context, req resource
 	// On update the plan diff already shows every change.
 	if creating && len(result.Removed) > 0 {
 		resp.Diagnostics.AddWarning("Policy Revokes Existing Role Bindings",
-			fmt.Sprintf("Creating this policy takes over every direct binding on %s %s. The first apply revokes these, which roles does not name:\n%s",
-				scopeType, scopeID.ValueString(), describePolicyBindings(result.Removed)))
+			fmt.Sprintf("Creating this policy takes over every direct binding on %s %s, so the first apply revokes these, which roles does not name:\n%s\n\n%s",
+				scopeType, scopeID.ValueString(), describePolicyBindings(result.Removed), policyMixHint))
 	}
 }
 
