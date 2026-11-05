@@ -3,8 +3,8 @@
 # the scope that roles does not name is revoked, including the owner
 # binding Anyscale grants whoever created the project. Do not also
 # manage this scope with anyscale_role_binding.
-variable "project_id" {
-  description = "ID of an existing Anyscale project (prj_...)"
+variable "cloud_name" {
+  description = "Name of an existing Anyscale cloud"
   type        = string
 }
 
@@ -17,8 +17,18 @@ data "anyscale_role" "project_reader" {
   name = "Project reader"
 }
 
-# The identity Terraform runs as.
+data "anyscale_cloud" "this" {
+  name = var.cloud_name
+}
+
+# The identity Terraform runs as, which becomes the project's owner
+# when it creates the project below.
 data "anyscale_user" "me" {}
+
+resource "anyscale_project" "team" {
+  name     = "team-project"
+  cloud_id = data.anyscale_cloud.this.id
+}
 
 resource "anyscale_user_group" "analysts" {
   name = "analysts"
@@ -26,11 +36,13 @@ resource "anyscale_user_group" "analysts" {
 
 resource "anyscale_role_binding_policy" "project" {
   # exactly one of organization_id, cloud_id, project_id
-  project_id = var.project_id
+  project_id = anyscale_project.team.id
 
   roles = {
-    # Keep this identity's own owner binding: the API refuses to
-    # revoke it, and an identity cannot grant itself a role.
+    # Keep the owner binding this identity received by creating the
+    # project. The API refuses to revoke it. Do not copy this entry
+    # onto a project created by someone else: an identity cannot
+    # grant itself a role, so the apply fails with a 403.
     (data.anyscale_role.project_owner.id) = {
       user_ids = [data.anyscale_user.me.id]
     }

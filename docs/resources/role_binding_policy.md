@@ -4,14 +4,14 @@ page_title: "anyscale_role_binding_policy Resource - terraform-provider-anyscale
 subcategory: ""
 description: |-
   ~> Beta. Role bindings are enabled per organization by Anyscale while customers migrate; contact support@anyscale.com mailto:support@anyscale.com to enable them. Breaking schema changes get a deprecation first and a changelog entry. See the RBAC guide ../guides/rbac.md#role-bindings-beta.
-  Manages every direct role binding on one organization, cloud or project. Authoritative: an apply revokes any direct binding on the scope that roles does not name, including ones Anyscale grants itself, such as a project or cloud creator's owner binding. Bindings held on a parent scope are not affected. Never combine it with anyscale_role_binding or anyscale role-binding policy apply on the same scope: each revokes what the other grants. Destroy revokes every binding the API allows, keeping the provider identity's own and any frozen binding. Requires an organization converted to role bindings ../guides/rbac.md#organization-access-mode.
+  Manages every direct role binding on one organization, cloud or project. Authoritative: an apply revokes any direct binding on the scope that roles does not name, including ones Anyscale grants itself, such as a project or cloud creator's owner binding. Never combine it with anyscale_role_binding or anyscale role-binding policy apply on the same scope. Destroy, import and the first-apply behavior are in the RBAC guide ../guides/rbac.md#managing-every-grant-on-a-scope-anyscale_role_binding_policy. Requires an organization converted to role bindings ../guides/rbac.md#organization-access-mode.
 ---
 
 # anyscale_role_binding_policy (Resource)
 
 ~> **Beta.** Role bindings are enabled per organization by Anyscale while customers migrate; contact [support@anyscale.com](mailto:support@anyscale.com) to enable them. Breaking schema changes get a deprecation first and a changelog entry. See the [RBAC guide](../guides/rbac.md#role-bindings-beta).
 
-Manages every direct role binding on one organization, cloud or project. Authoritative: an apply revokes any direct binding on the scope that `roles` does not name, including ones Anyscale grants itself, such as a project or cloud creator's owner binding. Bindings held on a parent scope are not affected. Never combine it with `anyscale_role_binding` or `anyscale role-binding policy apply` on the same scope: each revokes what the other grants. Destroy revokes every binding the API allows, keeping the provider identity's own and any frozen binding. Requires an organization [converted to role bindings](../guides/rbac.md#organization-access-mode).
+Manages every direct role binding on one organization, cloud or project. Authoritative: an apply revokes any direct binding on the scope that `roles` does not name, including ones Anyscale grants itself, such as a project or cloud creator's owner binding. Never combine it with `anyscale_role_binding` or `anyscale role-binding policy apply` on the same scope. Destroy, import and the first-apply behavior are in the [RBAC guide](../guides/rbac.md#managing-every-grant-on-a-scope-anyscale_role_binding_policy). Requires an organization [converted to role bindings](../guides/rbac.md#organization-access-mode).
 
 ## Example Usage
 
@@ -21,8 +21,8 @@ Manages every direct role binding on one organization, cloud or project. Authori
 # the scope that roles does not name is revoked, including the owner
 # binding Anyscale grants whoever created the project. Do not also
 # manage this scope with anyscale_role_binding.
-variable "project_id" {
-  description = "ID of an existing Anyscale project (prj_...)"
+variable "cloud_name" {
+  description = "Name of an existing Anyscale cloud"
   type        = string
 }
 
@@ -35,8 +35,18 @@ data "anyscale_role" "project_reader" {
   name = "Project reader"
 }
 
-# The identity Terraform runs as.
+data "anyscale_cloud" "this" {
+  name = var.cloud_name
+}
+
+# The identity Terraform runs as, which becomes the project's owner
+# when it creates the project below.
 data "anyscale_user" "me" {}
+
+resource "anyscale_project" "team" {
+  name     = "team-project"
+  cloud_id = data.anyscale_cloud.this.id
+}
 
 resource "anyscale_user_group" "analysts" {
   name = "analysts"
@@ -44,11 +54,13 @@ resource "anyscale_user_group" "analysts" {
 
 resource "anyscale_role_binding_policy" "project" {
   # exactly one of organization_id, cloud_id, project_id
-  project_id = var.project_id
+  project_id = anyscale_project.team.id
 
   roles = {
-    # Keep this identity's own owner binding: the API refuses to
-    # revoke it, and an identity cannot grant itself a role.
+    # Keep the owner binding this identity received by creating the
+    # project. The API refuses to revoke it. Do not copy this entry
+    # onto a project created by someone else: an identity cannot
+    # grant itself a role, so the apply fails with a 403.
     (data.anyscale_role.project_owner.id) = {
       user_ids = [data.anyscale_user.me.id]
     }

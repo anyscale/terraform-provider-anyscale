@@ -132,9 +132,9 @@ func (r *RoleBindingPolicyResource) Schema(ctx context.Context, req resource.Sch
 	resp.Schema = schema.Schema{
 		MarkdownDescription: roleBindingsBetaBanner +
 			"Manages every direct role binding on one organization, cloud or project. Authoritative: an apply revokes any direct binding on the scope that `roles` does not name, " +
-			"including ones Anyscale grants itself, such as a project or cloud creator's owner binding. Bindings held on a parent scope are not affected. " +
-			"Never combine it with `anyscale_role_binding` or `anyscale role-binding policy apply` on the same scope: each revokes what the other grants. " +
-			"Destroy revokes every binding the API allows, keeping the provider identity's own and any frozen binding. " +
+			"including ones Anyscale grants itself, such as a project or cloud creator's owner binding. " +
+			"Never combine it with `anyscale_role_binding` or `anyscale role-binding policy apply` on the same scope. " +
+			"Destroy, import and the first-apply behavior are in the [RBAC guide](../guides/rbac.md#managing-every-grant-on-a-scope-anyscale_role_binding_policy). " +
 			"Requires an organization [converted to role bindings](../guides/rbac.md#organization-access-mode).",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
