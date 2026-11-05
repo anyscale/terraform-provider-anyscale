@@ -356,6 +356,11 @@ func (r *RoleBindingResource) Read(ctx context.Context, req resource.ReadRequest
 	if binding == nil {
 		// Revoked outside Terraform, or the principal no longer exists.
 		tflog.Warn(ctx, "Role binding not found, removing from state", map[string]any{"role_binding_id": bindingID})
+		resp.Diagnostics.AddWarning("Role Binding Revoked Outside Terraform",
+			fmt.Sprintf("Role binding %q (role %s to %s %s on %s %s) no longer exists: it was revoked outside Terraform, or the user or user group holding it was deleted. "+
+				"Terraform plans to re-create it. If a role-binding policy (anyscale_role_binding_policy or anyscale role-binding policy apply) manages this %s, "+
+				"manage its grants one way only, or each apply revokes what the other grants.",
+				bindingID, state.RoleID.ValueString(), principalType, principalID, resourceType, resourceID, resourceType))
 		resp.State.RemoveResource(ctx)
 		return
 	}

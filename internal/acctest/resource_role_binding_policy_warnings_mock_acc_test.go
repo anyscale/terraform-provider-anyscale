@@ -63,8 +63,10 @@ func TestAccRoleBindingPolicyResource_CreateTakeoverWarningCLI(t *testing.T) {
 
 	lines := pmRunOK(t, run, "plan", "-json")
 	pmExpectWarning(t, lines, "Policy Revokes Existing Role Bindings",
+		"which the roles map does not name:",
 		"role "+pmReader+" to user "+pmBob,
-		"role "+pmWriter+" to user_group "+pmGroupB)
+		"role "+pmWriter+" to user_group "+pmGroupB,
+		"is an anyscale_role_binding in any configuration, this scope is managed twice")
 	if real, dry := pmApplyBodies(t, m.takeRequests()); len(real) != 0 || len(dry) == 0 {
 		t.Errorf("plan made %d applies and %d dry runs, want 0 and at least 1", len(real), len(dry))
 	}
