@@ -362,8 +362,10 @@ access to a scope; use `anyscale_role_binding` when several owners share it.
 
 - **An apply revokes every direct binding the policy does not name**, including ones Anyscale grants
   itself, such as the owner binding a project or cloud creator receives. The first apply on a scope
-  that already has bindings is no exception. When all values are known at plan time, the plan warns and
-  names each grant a create would revoke; read it before you apply.
+  that already has bindings is no exception. When the scope ID and every role and principal are known
+  at plan time, the plan dry-runs the policy: a refusal an apply would report fails the plan instead,
+  and a create warns naming each grant the first apply revokes — read it before you apply. A policy
+  aimed at a project or cloud this same configuration creates is first checked at apply, not plan.
 - **Bindings on a parent scope are not part of the policy** and are never touched.
 - **Name your own binding.** Anyscale refuses a policy that revokes the identity Terraform runs as, so if
   that identity holds a direct binding on the scope, list it under its role (see the
