@@ -1,0 +1,3 @@
+```release-note:added
+resource/anyscale_role_binding_policy: The create plan's revoke warning now says a listed grant may belong to an `anyscale_role_binding` managing the same scope. `anyscale_role_binding` now warns when its binding was revoked outside Terraform.
+```
