@@ -3,5 +3,5 @@ resource/anyscale_role_binding: A binding revoked and re-granted outside Terrafo
 ```
 
 ```release-note:fixed
-resource/anyscale_role_binding: Refresh, destroy and import of a binding granted moments earlier no longer fail or drop it while its permission propagates (a 403 "You may not read role binding" for a few seconds). These calls now retry for up to 30 seconds.
+resource/anyscale_role_binding: Destroy and import of a binding granted moments earlier no longer fail while its permission propagates (a 403 "You may not read role binding" for a few seconds). These calls now retry for up to 30 seconds.
 ```
