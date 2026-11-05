@@ -1,0 +1,7 @@
+```release-note:new-resource
+resource/anyscale_role_binding_policy: (Beta) Manage every direct role binding on one organization, cloud or project, authoritatively: an apply revokes any direct binding on the scope that `roles` does not name. The plan checks the policy with the API and warns naming the grants a first apply revokes. Destroy keeps the provider identity's own and any frozen binding. Do not combine it with `anyscale_role_binding` or the CLI policy apply on one scope. Converted organizations only.
+```
+
+```release-note:new-data-source
+data-source/anyscale_role_binding_policy: (Beta) Read every direct role binding on one organization, cloud or project, in the resource's `roles` shape.
+```
