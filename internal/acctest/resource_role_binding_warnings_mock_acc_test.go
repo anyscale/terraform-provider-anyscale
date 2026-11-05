@@ -26,7 +26,7 @@ func TestAccRoleBindingResource_RevokedOutOfBandWarnsCLI(t *testing.T) {
 	}
 	pmExpectWarning(t, lines, "Role Binding Revoked Outside Terraform",
 		"role "+rbRole+" to user_group "+rbGroup+" on cloud "+rbCloud,
-		"Terraform plans to re-create it",
+		"or the user or user group holding it was deleted. Terraform plans to re-create it",
 		"(anyscale_role_binding_policy or anyscale role-binding policy apply) manages this cloud")
 	if !rbPlansCreate(out, "anyscale_role_binding.test") {
 		t.Errorf("plan does not create anyscale_role_binding.test:\n%s", out)
