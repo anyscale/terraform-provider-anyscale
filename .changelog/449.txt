@@ -1,3 +1,0 @@
-```release-note:changed
-provider: The cloud resources guide now documents the AWS split pattern (an empty cloud needs the control-plane role ARN, region and provider set, or its services cannot create load balancers) and the recovery when the IAM role is destroyed before the cloud; the `aws-vm` and `aws-vm-basic-resource` examples now set the control-plane role, region and provider on the empty cloud.
-```

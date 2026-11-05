@@ -1,7 +1,0 @@
-```release-note:fixed
-resource/anyscale_role_binding: A binding revoked and re-granted outside Terraform under a new ID, as `anyscale role-binding policy apply` does, is now tracked by its new ID on refresh instead of being dropped and re-created, which failed with "Role Binding Already Exists". Refresh warns when a role-binding policy now states the grant, since managing one scope both ways makes each revoke what the other grants.
-```
-
-```release-note:fixed
-resource/anyscale_role_binding: Destroy and import of a binding granted moments earlier no longer fail while its permission propagates (a 403 "You may not read role binding" for a few seconds). These calls now retry for up to 30 seconds.
-```
