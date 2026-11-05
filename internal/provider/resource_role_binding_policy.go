@@ -275,8 +275,19 @@ func (r *RoleBindingPolicyResource) ModifyPlan(ctx context.Context, req resource
 		addPolicyWriteError(ctx, r.client, &resp.Diagnostics, "check role binding policy", index, err, "")
 		return
 	}
-	// On update the plan diff already shows every change.
-	if creating && len(result.Removed) > 0 {
+	if !creating {
+		// The plan diff already shows the revokes the config asked for, which
+		// are the policy's own grants. A grant made outside it is likely
+		// someone else's, such as an anyscale_role_binding fighting this
+		// policy: refresh pulls it into state, so it plans as a revoke.
+		if outside := grantedOutsidePolicy(result.Removed); len(outside) > 0 {
+			resp.Diagnostics.AddWarning("Policy Revokes Role Bindings Granted Outside It",
+				fmt.Sprintf("This apply revokes these direct bindings on %s %s, which were made outside this policy:\n%s\n\n%s",
+					scopeType, scopeID.ValueString(), describePolicyBindings(outside), policyMixHint))
+		}
+		return
+	}
+	if len(result.Removed) > 0 {
 		resp.Diagnostics.AddWarning("Policy Revokes Existing Role Bindings",
 			fmt.Sprintf("Creating this policy takes over every direct binding on %s %s, so the first apply revokes these, which roles does not name:\n%s\n\n%s",
 				scopeType, scopeID.ValueString(), describePolicyBindings(result.Removed), policyMixHint))
@@ -312,6 +323,10 @@ func (r *RoleBindingPolicyResource) planDestroy(ctx context.Context, req resourc
 	detail := fmt.Sprintf("Destroying this policy revokes these direct bindings on %s %s:\n%s", scopeType, scopeID, revoked)
 	if len(kept) > 0 {
 		detail += "\n\nIt keeps these, which the API does not let Terraform revoke (the provider identity's own and any frozen binding):\n" + describePolicyBindings(kept)
+	}
+	if outside := grantedOutsidePolicy(result.Removed); len(outside) > 0 {
+		detail += "\n\nThese revoked grants were made outside this policy:\n" + describePolicyBindings(outside) +
+			"\nIf any of these is an anyscale_role_binding in any configuration, this scope is managed twice: destroying the policy revokes that resource's grant until its next apply re-creates it."
 	}
 	resp.Diagnostics.AddWarning("Destroy Revokes Role Bindings", detail)
 }

@@ -123,6 +123,14 @@ func (m *policyMockServer) seed(principalType, principalID, roleID, scopeType, s
 	return id
 }
 
+// seedOrigin grants a binding outside Terraform with this origin ("" for
+// none) and returns its id.
+func (m *policyMockServer) seedOrigin(principalType, principalID, roleID, scopeType, scopeID, origin string) string {
+	var id string
+	m.with(func() { id = m.insert(principalType, principalID, roleID, scopeType, scopeID, origin).ID })
+	return id
+}
+
 func (m *policyMockServer) seedFrozen(principalType, principalID, roleID, scopeType, scopeID string) string {
 	var id string
 	m.with(func() {
@@ -200,12 +208,18 @@ func (m *policyMockServer) insert(principalType, principalID, roleID, scopeType,
 	return b
 }
 
+// json renders a binding; an empty Origin is omitted, as the API omits a
+// binding's origin when it has none.
 func (b *policyMockBinding) json() map[string]any {
-	return map[string]any{
+	out := map[string]any{
 		"id": b.ID, "principal_type": b.PrincipalType, "principal_id": b.PrincipalID,
 		"role_id": b.RoleID, "resource_type": b.ResourceType, "resource_id": b.ResourceID,
-		"created_by": policyMockCaller, "created_at": "2026-11-04T12:00:00.000000+00:00", "origin": b.Origin,
+		"created_by": policyMockCaller, "created_at": "2026-11-04T12:00:00.000000+00:00",
 	}
+	if b.Origin != "" {
+		out["origin"] = b.Origin
+	}
+	return out
 }
 
 func (m *policyMockServer) reply(w http.ResponseWriter, status int, body any) {
