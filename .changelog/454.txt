@@ -1,0 +1,3 @@
+```release-note:changed
+provider: The RBAC guide no longer documents cloud membership, cloud role and project role — those grants are moving to role grants. The resource reference pages still document them.
+```
