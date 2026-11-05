@@ -21,7 +21,7 @@ Read this before writing configuration that spans more than one scope.
 | Organization membership | [`anyscale_organization_user`](../resources/organization_user.md) | Whether the user is under Terraform management. It cannot create a member - people join by invitation - but declaring it adopts an existing member with no API call. Destroying it removes nobody: it cancels only a still-pending invitation this resource itself sent. |
 | Organization role | [`anyscale_organization_user_role`](../resources/organization_user_role.md) | One user's `base_role` and `deny_roles` in the organization. Authoritative over that one user's role - not over who is a member. |
 | User groups (Beta) | [`anyscale_user_group`](../resources/user_group.md), [`anyscale_user_group_members`](../resources/user_group_members.md) | A group's name, and its **entire** member list. Not what the group may access - see role bindings, next row. See [User groups (Beta)](#user-groups-beta). |
-| Role grants (Beta) | [`anyscale_role_binding`](../resources/role_binding.md), [`anyscale_role`](../data-sources/role.md) data source | One role held by one user group or one user on one cloud, project, or the organization. **Converted organizations only** - see [Organization access mode](#organization-access-mode). See [Role bindings (Beta)](#role-bindings-beta). |
+| Role grants (Beta) | [`anyscale_role_binding`](../resources/role_binding.md), [`anyscale_role_binding_policy`](../resources/role_binding_policy.md), [`anyscale_role`](../data-sources/role.md) data source | One role held by one user group or one user on one cloud, project, or the organization (`anyscale_role_binding`), or every direct role binding on a scope (`anyscale_role_binding_policy`). **Converted organizations only** - see [Organization access mode](#organization-access-mode). See [Role bindings (Beta)](#role-bindings-beta). |
 
 `anyscale_organization_user_role` uses the word "authoritative" to mean: authoritative over the one row
 it manages, never over a whole population - see
@@ -352,6 +352,30 @@ group is never briefly without access.
 Bindings are **not authoritative**: Terraform manages only the bindings you declare, never the full set
 on a cloud, project, or organization. Declaring a binding that already exists fails with a conflict;
 `terraform import anyscale_role_binding.<name> <binding id>` to adopt it.
+
+### Managing every grant on a scope: `anyscale_role_binding_policy`
+
+`anyscale_role_binding_policy` is the authoritative alternative. It owns **every direct binding on one
+organization, cloud or project**, as a map from role ID to the users and user groups that hold it. It is
+the Terraform form of `anyscale role-binding policy generate` and `apply`. Use it when one team owns all
+access to a scope; use `anyscale_role_binding` when several owners share it.
+
+- **An apply revokes every direct binding the policy does not name**, including ones Anyscale grants
+  itself, such as the owner binding a project or cloud creator receives. The first apply on a scope
+  that already has bindings is no exception. When all values are known at plan time, the plan warns and
+  names each grant a create would revoke; read it before you apply.
+- **Bindings on a parent scope are not part of the policy** and are never touched.
+- **Name your own binding.** Anyscale refuses a policy that revokes the identity Terraform runs as, so if
+  that identity holds a direct binding on the scope, list it under its role (see the
+  [example](../resources/role_binding_policy.md#example-usage)). An identity cannot grant itself a role,
+  so one that reaches the scope through a group needs nothing named.
+- **Never manage one scope with this resource and `anyscale_role_binding` or a CLI `policy apply`.** Each
+  revokes or re-creates the other's bindings on every apply.
+- **Destroy revokes everything Anyscale allows.** It keeps the identity's own bindings and any frozen
+  binding, and warns naming what it kept; the destroy plan lists what it will revoke and keep. An
+  organization policy can hold owner groups, so read that plan before destroying one.
+- **Import** with `<scope_type>/<scope_id>`, for example `project/prj_...`.
+- Like `anyscale_role_binding`, it needs a [converted organization](#organization-access-mode).
 
 ### Directory-synced groups
 
