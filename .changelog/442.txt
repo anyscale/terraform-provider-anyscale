@@ -1,4 +1,0 @@
-```
-release-note:changed
-resource/anyscale_cloud_iam_mapping: document the full rule selector grammar (equality, set-based, existence, and that an empty selector matches every workload).
-```

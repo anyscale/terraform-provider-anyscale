@@ -1,3 +1,0 @@
-```release-note:fixed
-resource/anyscale_service: A create or update no longer waits until its timeout (60m by default) when the service reports an error state that no component confirms, such as a load balancer permission failure, while its version is running. The apply now fails after 5 minutes and quotes the service's newest error event.
-```

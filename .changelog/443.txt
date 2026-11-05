@@ -1,3 +1,0 @@
-```release-note:fixed
-resource/anyscale_organization_default_cloud: A connection or response-parsing error while setting the default cloud no longer repeats "set organization default cloud" in the error message.
-```

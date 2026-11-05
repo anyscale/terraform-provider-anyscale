@@ -1,7 +1,0 @@
-```release-note:fixed
-resource/anyscale_cloud: When a destroy times out waiting for the cloud's service load balancers, the recovery steps now name the cloud's own provider's resources (GCP: forwarding rule, target HTTPS proxy, URL map, backend service, health check, Certificate Manager certificate and map) instead of AWS resources, and point at Anyscale support if the teardown still does not finish.
-```
-
-```release-note:fixed
-resource/anyscale_cloud_resource: When destroying a primary resource times out waiting for the cloud's service load balancers, the recovery steps now name the cloud's own provider's resources instead of AWS resources, and point at Anyscale support if the teardown still does not finish.
-```
