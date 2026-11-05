@@ -366,7 +366,7 @@ func (r *RoleBindingPolicyResource) applyDestroyPolicy(ctx context.Context, diag
 			addPolicyWriteError(ctx, r.client, diags, op, index, err, outcome)
 			return nil, nil, nil, false
 		}
-		frozen, getErr := getRoleBinding(ctx, r.client, m[1])
+		frozen, getErr := getRoleBindingWithRetry(ctx, r.client, m[1])
 		if getErr != nil {
 			diags.AddError("Could Not Read Frozen Role Binding",
 				withOutcome(fmt.Sprintf("%s Reading %s, to keep it, failed: %s.", extractAPIErrorDetail(err), m[1], extractAPIErrorDetail(getErr)), outcome))

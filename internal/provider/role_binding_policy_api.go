@@ -357,7 +357,7 @@ func keepBindingHint(ctx context.Context, client *Client, detail string) string 
 	if m == nil {
 		return ""
 	}
-	b, err := getRoleBinding(ctx, client, m[1])
+	b, err := getRoleBindingWithRetry(ctx, client, m[1])
 	if err != nil {
 		return ""
 	}

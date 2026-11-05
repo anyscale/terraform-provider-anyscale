@@ -359,6 +359,32 @@ func TestAccRoleBindingPolicyResource_DryRunRefusals(t *testing.T) {
 	}
 }
 
+// A binding seconds old, such as the creator binding of a scope created in
+// the same apply, answers GET by id with 403 until its permission propagates.
+// The own-binding hint and the frozen lookup both read a binding by id, so
+// both retry: the hint still names the entry, and destroy still keeps the
+// frozen binding.
+func TestAccRoleBindingPolicyResource_ByIDLookupsRetryPropagation(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newPolicyMock(t)
+	m.setGetDenials(2)
+	frozen := pmFrozenRoles(m, 1)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy: pmExpectFacts(m, "project", pmProject,
+			pmFact(pmOwner, "user", policyMockCaller), pmFact(fmt.Sprintf("rol_frozen%020d", 1), "user", pmBob)),
+		Steps: []resource.TestStep{
+			{
+				Config:   pmConfig(m, "project_id", pmProject, pmRole(pmReader, nil, []string{pmGroupA})),
+				PlanOnly: true,
+				ExpectError: regexp.MustCompile(`(?s)would\s+revoke\s+your\s+own\s+role\s+binding.*` +
+					`"` + pmOwner + `"\s+=\s+\{\s+user_ids\s+=\s+\["` + policyMockCaller + `"\]`),
+			},
+			{Config: pmConfig(m, "project_id", pmProject, append(pmBase(), frozen...)...)},
+		},
+	})
+}
+
 // Criterion 5: with the scope unknown at plan, no dry run is made. The warning
 // is asserted in TestAccRoleBindingPolicyResource_UnknownScopeWarningCLI.
 func TestAccRoleBindingPolicyResource_UnknownScopeSkipsDryRun(t *testing.T) {

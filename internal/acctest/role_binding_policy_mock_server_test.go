@@ -46,6 +46,11 @@ type policyMockServer struct {
 	// generateStatus, when non-zero, is the status every generate answers
 	// with: a read-back failing after a successful apply.
 	generateStatus int
+	// getDenials is how many GETs of each rb_ id answer the propagation 403
+	// before it reads, as a just-granted binding does for a few seconds
+	// (measured); getCounts counts them per id.
+	getDenials int
+	getCounts  map[string]int
 	// requests records every request as "METHOD path?query body".
 	requests []string
 }
@@ -106,6 +111,7 @@ func (m *policyMockServer) setNoIAM(scopeType, id string, on bool) {
 func (m *policyMockServer) setFlagOff(on bool)     { m.with(func() { m.flagOff = on }) }
 func (m *policyMockServer) setUnconverted(on bool) { m.with(func() { m.unconverted = on }) }
 func (m *policyMockServer) setLockout(on bool)     { m.with(func() { m.lockout = on }) }
+func (m *policyMockServer) setGetDenials(n int)    { m.with(func() { m.getDenials = n }) }
 func (m *policyMockServer) setGenerateStatus(status int) {
 	m.with(func() { m.generateStatus = status })
 }
@@ -284,6 +290,14 @@ func (m *policyMockServer) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		m.serveApply(w, rest[0], rest[1], body, r.URL.Query().Get("dry_run") == "true")
 	case len(rest) == 1 && strings.HasPrefix(rest[0], "rb_") && r.Method == http.MethodGet:
+		if m.getCounts == nil {
+			m.getCounts = map[string]int{}
+		}
+		m.getCounts[rest[0]]++
+		if m.getCounts[rest[0]] <= m.getDenials {
+			m.fail(w, http.StatusForbidden, fmt.Sprintf("You may not read role binding '%s'.", rest[0]))
+			return
+		}
 		for _, b := range m.bindings {
 			if b.ID == rest[0] {
 				m.reply(w, http.StatusOK, map[string]any{"result": b.json()})
