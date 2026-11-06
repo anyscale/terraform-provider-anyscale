@@ -144,19 +144,29 @@ func lbTeardownTimeout(lastErr error) error {
 
 // addCloudLBTeardownError reports a failed tearDownCloudLoadBalancers. prefix says what was not
 // destroyed; stateRmTarget names what to remove from state in the role-gone recovery.
-func addCloudLBTeardownError(diags *diag.Diagnostics, prefix, stateRmTarget, cloudID string, deleteTimeout time.Duration, markedDeleting bool, err error) {
+func addCloudLBTeardownError(diags *diag.Diagnostics, prefix, stateRmTarget, cloudID, cloudProvider string, deleteTimeout time.Duration, markedDeleting bool, err error) {
 	detail := err.Error()
 	if errors.Is(err, errCloudLBTeardownTimeout) {
 		// The provider cannot tell a slow teardown from one that can never finish, so the
 		// message covers both. Anyscale tears the load balancers down with the cloud's
-		// control-plane role; once that role or its policies are destroyed, get_lb_resource
+		// control-plane identity; once it or its permissions are removed, get_lb_resource
 		// never reports them gone, even after they are removed by hand.
-		detail = fmt.Sprintf("%s (timeouts.delete = %s). Anyscale removes them with the cloud's control-plane IAM role. "+
-			"If that role or its policies were already destroyed, a longer timeout will not help. "+
-			"In that case, first delete the cloud's load balancer (its name contains the cloud ID), target groups and ACM certificate in AWS. "+
+		identity, leftovers := "IAM role or service account", "load balancer resources in your cloud account"
+		switch cloudProvider {
+		case "AWS":
+			identity = "IAM role"
+			leftovers = "load balancer (its name contains the cloud ID), target groups and ACM certificate in AWS"
+		case "GCP":
+			identity = "service account"
+			leftovers = "forwarding rule, target HTTPS proxy, URL map, backend service, health check, and Certificate Manager certificate and map in your GCP project"
+		}
+		detail = fmt.Sprintf("%s (timeouts.delete = %s). Anyscale removes them with the cloud's control-plane %s. "+
+			"If that identity or its permissions were already removed, a longer timeout will not help. "+
+			"In that case, first delete the cloud's %s. "+
 			"Then run terraform state rm on %s. Then delete the cloud with anyscale cloud delete --cloud-id %s, which runs the same check "+
-			"for up to 15 minutes before offering to delete the cloud anyway. Otherwise, raise timeouts.delete and run terraform destroy again. "+
-			"See \"Deleting a cloud\" in the provider's Cloud Resources guide.", detail, deleteTimeout, stateRmTarget, cloudID)
+			"for up to 15 minutes before offering to delete the cloud anyway. Otherwise, raise timeouts.delete and run terraform destroy again; "+
+			"if the teardown still does not finish, follow the steps above and contact Anyscale support with the cloud ID. "+
+			"See \"Deleting a cloud\" in the provider's Cloud Resources guide.", detail, deleteTimeout, identity, leftovers, stateRmTarget, cloudID)
 	} else {
 		detail += ". Run terraform destroy again once the error above is resolved."
 	}

@@ -331,7 +331,7 @@ func (r *RoleBindingResource) Read(ctx context.Context, req resource.ReadRequest
 	bindingID := state.ID.ValueString()
 	resourceType, resourceID := state.scope()
 	principalType, principalID := state.principal()
-	binding, err := findRoleBindingForPrincipal(ctx, r.client, resourceType, resourceID, principalType, principalID, bindingID)
+	bindings, err := listRoleBindingsForPrincipal(ctx, r.client, resourceType, resourceID, principalType, principalID)
 	if err != nil {
 		if isRoleBindingsDisabled(err) {
 			if r.roleBindingsOnAfterNotFound(ctx, &resp.Diagnostics, "read role binding", err, roleBindingsDisabledReadOutcome) {
@@ -352,10 +352,20 @@ func (r *RoleBindingResource) Read(ctx context.Context, req resource.ReadRequest
 		AddAPIError(&resp.Diagnostics, "read role binding", err)
 		return
 	}
+	binding, byID := matchRoleBinding(bindings, bindingID, state.RoleID.ValueString(), resourceType, resourceID)
 	if binding == nil {
 		// Revoked outside Terraform, or the principal no longer exists.
 		tflog.Warn(ctx, "Role binding not found, removing from state", map[string]any{"role_binding_id": bindingID})
+		resp.Diagnostics.AddWarning("Role Binding Revoked Outside Terraform",
+			fmt.Sprintf("Role binding %q (role %s to %s %s on %s %s) no longer exists: it was revoked outside Terraform, or the user or user group holding it was deleted. "+
+				"Terraform plans to re-create it. If a role-binding policy (anyscale_role_binding_policy or anyscale role-binding policy apply) manages this %s, "+
+				"manage its grants one way only, or each apply revokes what the other grants.",
+				bindingID, state.RoleID.ValueString(), principalType, principalID, resourceType, resourceID, resourceType))
 		resp.State.RemoveResource(ctx)
+		return
+	}
+	if !byID {
+		r.adoptRegrantedBinding(ctx, resp, &state, binding.ID)
 		return
 	}
 
@@ -363,6 +373,37 @@ func (r *RoleBindingResource) Read(ctx context.Context, req resource.ReadRequest
 	// carries are refreshed.
 	state.Origin = types.StringPointerValue(binding.Origin)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+// adoptRegrantedBinding moves state to newID: the same grant, revoked and
+// re-granted outside Terraform under a new ID (as a role-binding policy apply
+// does). Without this, refresh would drop the binding and the next apply would
+// fail creating a duplicate. The listing lacks created_by and created_at, so
+// the binding is read in full. The listing decides that the grant exists; a
+// re-granted binding is new, so its by-ID read can 403 until its permission
+// propagates and is retried. If it still fails, state is left unchanged.
+func (r *RoleBindingResource) adoptRegrantedBinding(ctx context.Context, resp *resource.ReadResponse, state *RoleBindingResourceModel, newID string) {
+	oldID := state.ID.ValueString()
+	binding, err := getRoleBindingWithRetry(ctx, r.client, newID)
+	if err != nil {
+		resp.Diagnostics.AddError("Could Not Read Re-granted Role Binding",
+			fmt.Sprintf("Role binding %q was revoked and re-granted outside Terraform as %q, but reading %q failed: %s "+
+				"Terraform state was not changed; run the plan again.", oldID, newID, newID, extractAPIErrorDetail(err)))
+		return
+	}
+
+	tflog.Warn(ctx, "Role binding was re-granted outside Terraform under a new ID; tracking the new ID",
+		map[string]any{"role_binding_id": oldID, "new_role_binding_id": newID})
+	if binding.Origin != nil && *binding.Origin != roleBindingOriginImperative {
+		resourceType, _ := state.scope()
+		resp.Diagnostics.AddWarning("Role Binding Now Stated by a Role-Binding Policy",
+			fmt.Sprintf("Role binding %q was revoked and re-granted outside Terraform as %q (origin %q), and Terraform now tracks the new ID. "+
+				"A role-binding policy on this %s states this grant, so managing it with both anyscale_role_binding and `anyscale role-binding policy apply` "+
+				"makes each revoke what the other grants. Manage the grants on this %s one way.",
+				oldID, newID, *binding.Origin, resourceType, resourceType))
+	}
+	state.setFromAPI(binding)
+	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
 }
 
 func (r *RoleBindingResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -379,7 +420,21 @@ func (r *RoleBindingResource) Delete(ctx context.Context, req resource.DeleteReq
 	}
 
 	bindingID := state.ID.ValueString()
-	err := deleteRoleBinding(ctx, r.client, bindingID)
+	resourceType, resourceID := state.scope()
+	principalType, principalID := state.principal()
+	// A binding granted in the last few minutes can 403 here until its
+	// permission propagates. The same 403 means "already revoked", so retry
+	// only while the binding is recent and the listing still shows it.
+	recent := isRecentlyCreated(state.CreatedAt.ValueString(), roleBindingByIDRecentWindow)
+	_, err := retryRoleBindingByID(ctx, bindingID, func() (struct{}, error) {
+		return struct{}{}, deleteRoleBinding(ctx, r.client, bindingID)
+	}, func() bool {
+		if !recent {
+			return false
+		}
+		listed, listErr := findRoleBindingForPrincipal(ctx, r.client, resourceType, resourceID, principalType, principalID, bindingID)
+		return listErr == nil && listed != nil
+	})
 	if err == nil {
 		tflog.Info(ctx, "Role binding deleted", map[string]any{"role_binding_id": bindingID})
 		return
@@ -409,8 +464,6 @@ func (r *RoleBindingResource) Delete(ctx context.Context, req resource.DeleteReq
 
 	// A revoked binding answers 403; the listing tells that from a real
 	// refusal.
-	resourceType, resourceID := state.scope()
-	principalType, principalID := state.principal()
 	binding, listErr := findRoleBindingForPrincipal(ctx, r.client, resourceType, resourceID, principalType, principalID, bindingID)
 	switch {
 	case listErr != nil && isRoleBindingsDisabled(listErr):
@@ -525,7 +578,9 @@ func (r *RoleBindingResource) ImportState(ctx context.Context, req resource.Impo
 			return
 		}
 	}
-	binding, err := getRoleBinding(ctx, r.client, bindingID)
+	// A binding granted moments ago can 403 here until its permission
+	// propagates, and nothing on an import ID says how old it is.
+	binding, err := getRoleBindingWithRetry(ctx, r.client, bindingID)
 	if err != nil {
 		switch {
 		case isRoleBindingsDisabled(err):

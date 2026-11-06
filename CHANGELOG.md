@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.36.1] - 2026-11-06
+
+### Added
+
+- resource/anyscale_role_binding_policy: The create plan's revoke warning now says a listed grant may belong to an `anyscale_role_binding` managing the same scope.
+- resource/anyscale_role_binding: Refresh now warns when the binding was revoked outside Terraform, and names the hazard of also managing its scope with a role-binding policy.
+- resource/anyscale_role_binding_policy: Update and destroy plans now warn when they revoke a role binding made outside the policy, such as one an `anyscale_role_binding` manages.
+
+## [0.36.0] - 2026-11-05
+
+### New Resources
+
+- resource/anyscale_role_binding_policy: (Beta) Manage every direct role binding on one organization, cloud or project, authoritatively: an apply revokes any direct binding on the scope that `roles` does not name. The plan checks the policy with the API and warns naming the grants a first apply revokes. Destroy keeps the provider identity's own and any frozen binding. Do not combine it with `anyscale_role_binding` or the CLI policy apply on one scope. Converted organizations only.
+
+### New Data Sources
+
+- data-source/anyscale_role_binding_policy: (Beta) Read every direct role binding on one organization, cloud or project, in the resource's `roles` shape.
+
+### Added
+
+- resource/anyscale_cloud_resource: `timeouts { delete }` (default `30m`) bounds that teardown.
+
+### Changed
+
+- resource/anyscale_cloud_iam_mapping: document the full rule selector grammar (equality, set-based, existence, and that an empty selector matches every workload).
+- resource/anyscale_cloud_resource: Destroying a cloud's primary resource on an AWS or GCP VM cloud now tears down the cloud's service load balancers and marks the cloud `DELETING`, which cannot be undone. In the split pattern this runs while the cloud's IAM role still exists, so `terraform destroy` no longer times out with the cloud stuck `DELETING` and its load balancer blocking the VPC delete.
+- resource/anyscale_cloud_resource: A change that would replace a cloud's primary resource now fails at plan time, before anything is destroyed. Replace the cloud instead.
+- provider: The cloud resources guide now documents the AWS split pattern (an empty cloud needs the control-plane role ARN, region and provider set, or its services cannot create load balancers) and the recovery when the IAM role is destroyed before the cloud; the `aws-vm` and `aws-vm-basic-resource` examples now set the control-plane role, region and provider on the empty cloud.
+- resource/anyscale_cloud: A create plan for an empty VM cloud that leaves `cloud_provider`, `region` or `credentials` unset now warns that the cloud will be recorded as AWS, in us-east-1, with a placeholder role, and that services on it cannot create load balancers. Set them to match the `anyscale_cloud_resource` you attach.
+- provider: The RBAC guide no longer documents cloud membership, cloud role and project role — those grants are moving to role grants. The resource reference pages still document them.
+
+### Fixed
+
+- resource/anyscale_organization_default_cloud: A connection or response-parsing error while setting the default cloud no longer repeats "set organization default cloud" in the error message.
+- resource/anyscale_service: A create or update no longer waits until its timeout (60m by default) when the service reports an error state that no component confirms, such as a load balancer permission failure, while its version is running. The apply now fails after 5 minutes and quotes the service's newest error event.
+- resource/anyscale_cloud: When a destroy times out waiting for the cloud's service load balancers to be torn down, the error now explains that a longer timeout will not help if the cloud's control-plane IAM role or service account was already removed. In that case it names the provider's own load balancer resources to delete by hand (AWS: the cloud's load balancer, its target groups and its ACM certificate; GCP: the forwarding rule, target HTTPS proxy, URL map, backend service, health check and Certificate Manager certificate and map), followed by `terraform state rm` and `anyscale cloud delete --cloud-id <id>`. If the teardown still does not finish, it says to contact Anyscale support with the cloud ID.
+- resource/anyscale_cloud_resource: When destroying a primary resource times out waiting for the cloud's service load balancers, the error now names the provider's own load balancer resources to delete by hand (the same recovery as `anyscale_cloud`) and points at Anyscale support if the teardown still does not finish.
+- resource/anyscale_role_binding: A binding revoked and re-granted outside Terraform under a new ID, as `anyscale role-binding policy apply` does, is now tracked by its new ID on refresh instead of being dropped and re-created, which failed with "Role Binding Already Exists". Refresh warns when a role-binding policy now states the grant, since managing one scope both ways makes each revoke what the other grants.
+- resource/anyscale_role_binding: Destroy and import of a binding granted moments earlier no longer fail while its permission propagates (a 403 "You may not read role binding" for a few seconds). These calls now retry for up to 30 seconds.
+
 ## [0.35.0] - 2026-11-04
 
 ### Added
@@ -1325,7 +1365,9 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.35.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.36.1...HEAD
+[0.36.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.36.1
+[0.36.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.36.0
 [0.35.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.35.0
 [0.34.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.34.1
 [0.34.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.34.0

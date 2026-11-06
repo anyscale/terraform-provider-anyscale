@@ -222,7 +222,7 @@ func TestCloudResourceDelete_LoadBalancerTeardownTimeoutSkipsDelete(t *testing.T
 	// A longer timeout cannot help once the cloud's IAM role is gone, so the error must also
 	// give the recovery that works then, not only "raise timeouts.delete".
 	for _, want := range []string{
-		"If that role or its policies were already destroyed, a longer timeout will not help.",
+		"If that identity or its permissions were already removed, a longer timeout will not help.",
 		"terraform state rm",
 		"anyscale cloud delete --cloud-id cld_del",
 		"raise timeouts.delete",

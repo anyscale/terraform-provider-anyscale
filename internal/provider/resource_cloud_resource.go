@@ -1036,7 +1036,7 @@ func (r *CloudResourceResource) Delete(ctx context.Context, req resource.DeleteR
 		if err != nil {
 			addCloudLBTeardownError(&resp.Diagnostics,
 				fmt.Sprintf("Primary cloud resource %s was not destroyed", state.ID.ValueString()),
-				"this cloud resource and its anyscale_cloud", cloudID, deleteTimeout, markedDeleting, err)
+				"this cloud resource and its anyscale_cloud", cloudID, state.CloudProvider.ValueString(), deleteTimeout, markedDeleting, err)
 			return
 		}
 		tflog.Info(ctx, "Primary cloud resource: load balancers torn down; the resource is deleted with its cloud",
