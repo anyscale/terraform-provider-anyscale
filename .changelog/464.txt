@@ -1,0 +1,4 @@
+```
+release-note:breaking-change
+data-source/anyscale_role: `anyscale_role` is removed and renamed to `anyscale_iam_role`; update the data source type in your configuration, keeping the same arguments.
+```
