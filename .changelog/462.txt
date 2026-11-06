@@ -1,9 +1,0 @@
-```
-release-note:changed
-resource/anyscale_iam_role_grant: diagnostic titles now say "Role Grant" throughout, and its description also warns against managing one scope together with `anyscale_iam_role_binding`.
-```
-
-```
-release-note:changed
-resource/anyscale_iam_role_binding: the destroy warning names `anyscale_iam_role_binding` instead of "the policy".
-```
