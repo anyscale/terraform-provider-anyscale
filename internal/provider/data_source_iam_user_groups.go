@@ -12,22 +12,22 @@ import (
 )
 
 var (
-	_ datasource.DataSource              = &UserGroupsDataSource{}
-	_ datasource.DataSourceWithConfigure = &UserGroupsDataSource{}
+	_ datasource.DataSource              = &IAMUserGroupsDataSource{}
+	_ datasource.DataSourceWithConfigure = &IAMUserGroupsDataSource{}
 )
 
-// NewUserGroupsDataSource creates a new user groups data source.
-func NewUserGroupsDataSource() datasource.DataSource {
-	return &UserGroupsDataSource{}
+// NewIAMUserGroupsDataSource creates a new user groups data source.
+func NewIAMUserGroupsDataSource() datasource.DataSource {
+	return &IAMUserGroupsDataSource{}
 }
 
-// UserGroupsDataSource lists the organization's user groups.
-type UserGroupsDataSource struct {
+// IAMUserGroupsDataSource lists the organization's user groups.
+type IAMUserGroupsDataSource struct {
 	client *Client
 }
 
-// UserGroupsDataSourceModel describes the data source data model.
-type UserGroupsDataSourceModel struct {
+// IAMUserGroupsDataSourceModel describes the data source data model.
+type IAMUserGroupsDataSourceModel struct {
 	Source types.String `tfsdk:"source"`
 	Groups types.List   `tfsdk:"groups"`
 }
@@ -38,14 +38,14 @@ var userGroupSummaryAttrTypes = map[string]attr.Type{
 	"source": types.StringType,
 }
 
-func (d *UserGroupsDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_user_groups"
+func (d *IAMUserGroupsDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_iam_user_groups"
 }
 
-func (d *UserGroupsDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+func (d *IAMUserGroupsDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: userGroupsBetaBanner +
-			"Lists the user groups in the token's organization. Use `anyscale_user_group` for a group's members and organization role.",
+			"Lists the user groups in the token's organization. Use `anyscale_iam_user_group` for a group's members and organization role.",
 		Attributes: map[string]schema.Attribute{
 			"source": schema.StringAttribute{
 				Optional:            true,
@@ -78,17 +78,17 @@ func (d *UserGroupsDataSource) Schema(ctx context.Context, req datasource.Schema
 	}
 }
 
-func (d *UserGroupsDataSource) Configure(ctx context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+func (d *IAMUserGroupsDataSource) Configure(ctx context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
 	if client, ok := clientFromProviderData(req.ProviderData, "Unexpected Data Source Configure Type", &resp.Diagnostics); ok {
 		d.client = client
 	}
 }
 
-func (d *UserGroupsDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
-	if refuseRBACOnAzure(d.client, "anyscale_user_groups", &resp.Diagnostics) {
+func (d *IAMUserGroupsDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	if refuseRBACOnAzure(d.client, "anyscale_iam_user_groups", &resp.Diagnostics) {
 		return
 	}
-	var config UserGroupsDataSourceModel
+	var config IAMUserGroupsDataSourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 	if resp.Diagnostics.HasError() {
 		return

@@ -14,24 +14,24 @@ import (
 )
 
 var (
-	_ datasource.DataSource                     = &UserGroupDataSource{}
-	_ datasource.DataSourceWithConfigure        = &UserGroupDataSource{}
-	_ datasource.DataSourceWithConfigValidators = &UserGroupDataSource{}
+	_ datasource.DataSource                     = &IAMUserGroupDataSource{}
+	_ datasource.DataSourceWithConfigure        = &IAMUserGroupDataSource{}
+	_ datasource.DataSourceWithConfigValidators = &IAMUserGroupDataSource{}
 )
 
-// NewUserGroupDataSource creates a new user group data source.
-func NewUserGroupDataSource() datasource.DataSource {
-	return &UserGroupDataSource{}
+// NewIAMUserGroupDataSource creates a new user group data source.
+func NewIAMUserGroupDataSource() datasource.DataSource {
+	return &IAMUserGroupDataSource{}
 }
 
-// UserGroupDataSource reads one user group, including directory-synced
+// IAMUserGroupDataSource reads one user group, including directory-synced
 // groups, which the resources refuse to manage.
-type UserGroupDataSource struct {
+type IAMUserGroupDataSource struct {
 	client *Client
 }
 
-// UserGroupDataSourceModel describes the data source data model.
-type UserGroupDataSourceModel struct {
+// IAMUserGroupDataSourceModel describes the data source data model.
+type IAMUserGroupDataSourceModel struct {
 	ID               types.String `tfsdk:"id"`
 	Name             types.String `tfsdk:"name"`
 	Source           types.String `tfsdk:"source"`
@@ -50,11 +50,11 @@ var userGroupOrganizationRoleAttrTypes = map[string]attr.Type{
 	"additional_roles": types.ListType{ElemType: types.StringType},
 }
 
-func (d *UserGroupDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_user_group"
+func (d *IAMUserGroupDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_iam_user_group"
 }
 
-func (d *UserGroupDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+func (d *IAMUserGroupDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: userGroupsBetaBanner +
 			"Reads one user group by ID or name, including groups synced from an identity provider (SCIM), which the user group resources cannot manage.",
@@ -112,23 +112,23 @@ func (d *UserGroupDataSource) Schema(ctx context.Context, req datasource.SchemaR
 	}
 }
 
-func (d *UserGroupDataSource) ConfigValidators(ctx context.Context) []datasource.ConfigValidator {
+func (d *IAMUserGroupDataSource) ConfigValidators(ctx context.Context) []datasource.ConfigValidator {
 	return []datasource.ConfigValidator{
 		datasourcevalidator.ExactlyOneOf(path.MatchRoot("id"), path.MatchRoot("name")),
 	}
 }
 
-func (d *UserGroupDataSource) Configure(ctx context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+func (d *IAMUserGroupDataSource) Configure(ctx context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
 	if client, ok := clientFromProviderData(req.ProviderData, "Unexpected Data Source Configure Type", &resp.Diagnostics); ok {
 		d.client = client
 	}
 }
 
-func (d *UserGroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
-	if refuseRBACOnAzure(d.client, "anyscale_user_group", &resp.Diagnostics) {
+func (d *IAMUserGroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	if refuseRBACOnAzure(d.client, "anyscale_iam_user_group", &resp.Diagnostics) {
 		return
 	}
-	var config UserGroupDataSourceModel
+	var config IAMUserGroupDataSourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -186,7 +186,7 @@ func (d *UserGroupDataSource) Read(ctx context.Context, req datasource.ReadReque
 		return
 	}
 
-	resp.Diagnostics.Append(resp.State.Set(ctx, &UserGroupDataSourceModel{
+	resp.Diagnostics.Append(resp.State.Set(ctx, &IAMUserGroupDataSourceModel{
 		ID:               types.StringValue(group.ID),
 		Name:             types.StringValue(group.Name),
 		Source:           types.StringPointerValue(group.Source),

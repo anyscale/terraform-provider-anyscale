@@ -17,8 +17,8 @@ import (
 )
 
 func init() {
-	resource.AddTestSweepers("anyscale_user_group", &resource.Sweeper{
-		Name:         "anyscale_user_group",
+	resource.AddTestSweepers("anyscale_iam_user_group", &resource.Sweeper{
+		Name:         "anyscale_iam_user_group",
 		F:            sweepUserGroups,
 		Dependencies: []string{"anyscale_iam_role_grant"},
 	})
@@ -74,11 +74,11 @@ func userGroupSweepCandidates(groups []sweepUserGroupResult, cutoff time.Time) [
 		}
 		createdAt, err := time.Parse(time.RFC3339, g.CreatedAt)
 		if err != nil {
-			log.Printf("[sweep:anyscale_user_group] skip %s (%s): unparseable created_at %q: %v", g.ID, g.Name, g.CreatedAt, err)
+			log.Printf("[sweep:anyscale_iam_user_group] skip %s (%s): unparseable created_at %q: %v", g.ID, g.Name, g.CreatedAt, err)
 			continue
 		}
 		if createdAt.After(cutoff) {
-			log.Printf("[sweep:anyscale_user_group] skip %s (%s): too young (created %s)", g.ID, g.Name, g.CreatedAt)
+			log.Printf("[sweep:anyscale_iam_user_group] skip %s (%s): too young (created %s)", g.ID, g.Name, g.CreatedAt)
 			continue
 		}
 		out = append(out, g)
@@ -89,7 +89,7 @@ func userGroupSweepCandidates(groups []sweepUserGroupResult, cutoff time.Time) [
 func sweepUserGroups(_ string) error {
 	client, err := GetTestClient()
 	if err != nil {
-		log.Printf("[sweep:anyscale_user_group] skipping: %v", err)
+		log.Printf("[sweep:anyscale_iam_user_group] skipping: %v", err)
 		return nil
 	}
 
@@ -106,7 +106,7 @@ func sweepUserGroupsWithClient(ctx context.Context, client *provider.Client, cut
 		return err
 	}
 	candidates := userGroupSweepCandidates(groups, cutoff)
-	log.Printf("[sweep:anyscale_user_group] listed %d group(s), %d candidate(s)", len(groups), len(candidates))
+	log.Printf("[sweep:anyscale_iam_user_group] listed %d group(s), %d candidate(s)", len(groups), len(candidates))
 	if len(candidates) == 0 {
 		return nil
 	}
@@ -125,7 +125,7 @@ func sweepUserGroupsWithClient(ctx context.Context, client *provider.Client, cut
 		}
 		swept++
 	}
-	log.Printf("[sweep:anyscale_user_group] swept=%d failed=%d", swept, len(failures))
+	log.Printf("[sweep:anyscale_iam_user_group] swept=%d failed=%d", swept, len(failures))
 	if len(failures) > 0 {
 		return fmt.Errorf("user group sweep had %d failure(s): %s", len(failures), strings.Join(failures, "; "))
 	}
@@ -171,7 +171,7 @@ func listUserGroupMembersForSweep(ctx context.Context, client *provider.Client) 
 // that access permanently.
 func sweepDeleteUserGroup(ctx context.Context, client *provider.Client, g sweepUserGroupResult, memberIDs []string) error {
 	if isSweepDryRun() {
-		log.Printf("[sweep:anyscale_user_group] DRY-RUN would remove %d member(s) from and DELETE %s (%s)", len(memberIDs), g.ID, g.Name)
+		log.Printf("[sweep:anyscale_iam_user_group] DRY-RUN would remove %d member(s) from and DELETE %s (%s)", len(memberIDs), g.ID, g.Name)
 		return nil
 	}
 
@@ -192,7 +192,7 @@ func sweepDeleteUserGroup(ctx context.Context, client *provider.Client, g sweepU
 			if strings.Contains(body, "User IDs not found") {
 				return fmt.Errorf("remove members: status %d: %s", status, truncateBody(body, 256))
 			}
-			log.Printf("[sweep:anyscale_user_group] %s (%s) already gone", g.ID, g.Name)
+			log.Printf("[sweep:anyscale_iam_user_group] %s (%s) already gone", g.ID, g.Name)
 			return nil
 		default:
 			return fmt.Errorf("remove members: status %d: %s", status, truncateBody(body, 256))
@@ -205,7 +205,7 @@ func sweepDeleteUserGroup(ctx context.Context, client *provider.Client, g sweepU
 	}
 	switch status {
 	case http.StatusNoContent, http.StatusOK, http.StatusNotFound:
-		log.Printf("[sweep:anyscale_user_group] DELETE OK %s (%s): status=%d members_removed=%d", g.ID, g.Name, status, len(memberIDs))
+		log.Printf("[sweep:anyscale_iam_user_group] DELETE OK %s (%s): status=%d members_removed=%d", g.ID, g.Name, status, len(memberIDs))
 		return nil
 	default:
 		return fmt.Errorf("status %d: %s", status, truncateBody(body, 256))

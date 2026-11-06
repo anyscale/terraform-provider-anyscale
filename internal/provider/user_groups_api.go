@@ -15,7 +15,7 @@ import (
 // userGroupsBetaBanner opens the MarkdownDescription of every user group
 // resource and data source. The policy it links to is written once, in the
 // RBAC guide, rather than repeated per attribute.
-const userGroupsBetaBanner = "~> **Beta.** User groups are a Beta feature. Breaking schema changes get a deprecation first and a changelog entry. See the [RBAC guide](../guides/rbac.md#user-groups-beta).\n\n"
+const userGroupsBetaBanner = "~> **Beta.** User groups are a Beta feature. Beta resources may change incompatibly; every breaking change is listed in the changelog. Pin the provider version if you depend on these resources, and read the changelog before upgrading. See the [RBAC guide](../guides/rbac.md#user-groups-beta).\n\n"
 
 const userGroupsBasePath = "/api/v2/user_groups"
 
@@ -101,7 +101,7 @@ func isUserGroupSCIM(g *userGroupResult) bool {
 // directory-synced group.
 func userGroupSCIMDetail(groupID string) string {
 	return fmt.Sprintf("User group %q is synced from your identity provider, which owns its name and membership. "+
-		"Directory-synced groups cannot be managed by Terraform; read them with the anyscale_user_group data source instead.", groupID)
+		"Directory-synced groups cannot be managed by Terraform; read them with the anyscale_iam_user_group data source instead.", groupID)
 }
 
 // isUserGroupNotFound reports whether err is a 404 whose detail says the

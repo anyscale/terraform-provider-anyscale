@@ -130,18 +130,18 @@ resource "anyscale_iam_role_grant" "test" {
 	})
 }
 
-func TestAccUserGroupResource_AzureBlocked_MockServer(t *testing.T) {
+func TestAccIAMUserGroupResource_AzureBlocked_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t)
 	var azure atomic.Bool
 	cfg := func(name string) string {
 		return m.providerBlock() + fmt.Sprintf(`
-resource "anyscale_user_group" "test" {
+resource "anyscale_iam_user_group" "test" {
   name = %q
 }
 `, name)
 	}
-	const addr = "anyscale_user_group.test"
+	const addr = "anyscale_iam_user_group.test"
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: azureClassifiedFactories(&azure),
 		CheckDestroy: func(*terraform.State) error {
@@ -158,7 +158,7 @@ func TestAccUserGroupMembersResource_AzureBlocked_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t, ugUserA, ugUserB)
 	user := "user"
-	// The group is seeded out of band: anyscale_user_group is blocked on Azure
+	// The group is seeded out of band: anyscale_iam_user_group is blocked on Azure
 	// too, so declaring it here would mask whether the members resource refuses.
 	groupID := m.seedGroup("tfacc-azure-ugm", &user)
 	var azure atomic.Bool
@@ -323,7 +323,7 @@ data "anyscale_iam_role" "test" {
 	})
 }
 
-func TestAccUserGroupDataSource_AzureBlocked_MockServer(t *testing.T) {
+func TestAccIAMUserGroupDataSource_AzureBlocked_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t)
 	user := "user"
@@ -332,14 +332,14 @@ func TestAccUserGroupDataSource_AzureBlocked_MockServer(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: azureClassifiedFactories(&azure),
 		Steps: azureDataSourceSteps(&azure, m.providerBlock()+`
-data "anyscale_user_group" "test" {
+data "anyscale_iam_user_group" "test" {
   name = "tfacc-azure-ugds"
 }
 `),
 	})
 }
 
-func TestAccUserGroupsDataSource_AzureBlocked_MockServer(t *testing.T) {
+func TestAccIAMUserGroupsDataSource_AzureBlocked_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t)
 	user := "user"
@@ -348,7 +348,7 @@ func TestAccUserGroupsDataSource_AzureBlocked_MockServer(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: azureClassifiedFactories(&azure),
 		Steps: azureDataSourceSteps(&azure, m.providerBlock()+`
-data "anyscale_user_groups" "test" {
+data "anyscale_iam_user_groups" "test" {
   source = "user"
 }
 `),

@@ -28,7 +28,7 @@ var (
 
 func ugMockConfig(m *userGroupMockServer, groupName string, members ...string) string {
 	cfg := m.providerBlock() + fmt.Sprintf(`
-resource "anyscale_user_group" "test" {
+resource "anyscale_iam_user_group" "test" {
   name = %q
 }
 `, groupName)
@@ -39,7 +39,7 @@ resource "anyscale_user_group" "test" {
 		}
 		cfg += fmt.Sprintf(`
 resource "anyscale_user_group_members" "test" {
-  user_group_id = anyscale_user_group.test.id
+  user_group_id = anyscale_iam_user_group.test.id
   members       = [%s]
 }
 `, strings.Join(quoted, ", "))
@@ -52,9 +52,9 @@ resource "anyscale_user_group_members" "test" {
 // cannot pass it.
 func ugExpectMembers(m *userGroupMockServer, want ...string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		rs, ok := s.RootModule().Resources["anyscale_user_group.test"]
+		rs, ok := s.RootModule().Resources["anyscale_iam_user_group.test"]
 		if !ok {
-			return fmt.Errorf("anyscale_user_group.test not in state")
+			return fmt.Errorf("anyscale_iam_user_group.test not in state")
 		}
 		got, exists := m.memberIDs(rs.Primary.ID)
 		if !exists {
@@ -122,7 +122,7 @@ func TestAccUserGroupMembersResource_MockLifecycle(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					ugExpectMembers(m, ugUserA.UserID, ugUserB.UserID),
 					func(s *terraform.State) error {
-						groupID = s.RootModule().Resources["anyscale_user_group.test"].Primary.ID
+						groupID = s.RootModule().Resources["anyscale_iam_user_group.test"].Primary.ID
 						return nil
 					},
 					ugClearWrites(m),
@@ -131,7 +131,7 @@ func TestAccUserGroupMembersResource_MockLifecycle(t *testing.T) {
 					statecheck.ExpectKnownValue("anyscale_user_group_members.test", tfjsonpath.New("members"),
 						knownvalue.SetExact([]knownvalue.Check{knownvalue.StringExact("Alice@Example.com"), knownvalue.StringExact("bob@example.com")})),
 					statecheck.CompareValuePairs("anyscale_user_group_members.test", tfjsonpath.New("id"),
-						"anyscale_user_group.test", tfjsonpath.New("id"), compare.ValuesSame()),
+						"anyscale_iam_user_group.test", tfjsonpath.New("id"), compare.ValuesSame()),
 				},
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
@@ -190,7 +190,7 @@ func TestAccUserGroupMembersResource_MockLifecycle(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					ugExpectMembers(m),
 					func(s *terraform.State) error {
-						if got := s.RootModule().Resources["anyscale_user_group.test"].Primary.ID; got != groupID {
+						if got := s.RootModule().Resources["anyscale_iam_user_group.test"].Primary.ID; got != groupID {
 							return fmt.Errorf("group ID changed from %s to %s", groupID, got)
 						}
 						return nil
@@ -229,11 +229,11 @@ func TestAccUserGroupMembersResource_MockServiceAccountMember(t *testing.T) {
 	})
 }
 
-// TestAccUserGroupResource_MockDestroyRemovesMembersFirst: destroying a group
+// TestAccIAMUserGroupResource_MockDestroyRemovesMembersFirst: destroying a group
 // that Terraform manages without a members resource still removes the members
 // someone added outside Terraform before deleting it. Per the backend source,
 // group delete does not revoke the access they held through the group.
-func TestAccUserGroupResource_MockDestroyRemovesMembersFirst(t *testing.T) {
+func TestAccIAMUserGroupResource_MockDestroyRemovesMembersFirst(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t, ugUserA, ugUserB)
 	const name = "tfacc-ug-mock-destroy"
@@ -255,7 +255,7 @@ func TestAccUserGroupResource_MockDestroyRemovesMembersFirst(t *testing.T) {
 			{
 				Config: ugMockConfig(m, name, nil...),
 				Check: func(s *terraform.State) error {
-					groupID = s.RootModule().Resources["anyscale_user_group.test"].Primary.ID
+					groupID = s.RootModule().Resources["anyscale_iam_user_group.test"].Primary.ID
 					m.setMember(groupID, ugUserA.UserID, true)
 					m.setMember(groupID, ugUserB.UserID, true)
 					m.takeWrites()
@@ -329,7 +329,7 @@ func TestAccUserGroupMembersResource_MockImport(t *testing.T) {
 				},
 			},
 			{
-				ResourceName:      "anyscale_user_group.test",
+				ResourceName:      "anyscale_iam_user_group.test",
 				ImportState:       true,
 				ImportStateVerify: true,
 			},
@@ -376,7 +376,7 @@ func TestAccUserGroupMembersResource_MockGroupDeletedOutOfBand(t *testing.T) {
 				Config:    ugMockConfig(m, name, "alice@example.com"),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("anyscale_user_group.test", plancheck.ResourceActionCreate),
+						plancheck.ExpectResourceAction("anyscale_iam_user_group.test", plancheck.ResourceActionCreate),
 						plancheck.ExpectResourceAction("anyscale_user_group_members.test", plancheck.ResourceActionCreate),
 					},
 				},
@@ -461,11 +461,11 @@ func TestAccUserGroupMembersResource_MockDuplicateCaseRejected(t *testing.T) {
 	}
 }
 
-// TestAccUserGroupResource_MockSCIMRejected: a directory-synced group cannot
+// TestAccIAMUserGroupResource_MockSCIMRejected: a directory-synced group cannot
 // be imported, and its membership cannot be managed. The backend does not
 // guard DELETE for scim groups, so the import refusal is what keeps a destroy
 // from deleting one.
-func TestAccUserGroupResource_MockSCIMRejected(t *testing.T) {
+func TestAccIAMUserGroupResource_MockSCIMRejected(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t, ugUserA)
 	scim := "scim"
@@ -476,11 +476,11 @@ func TestAccUserGroupResource_MockSCIMRejected(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: m.providerBlock() + `
-resource "anyscale_user_group" "test" {
+resource "anyscale_iam_user_group" "test" {
   name = "okta-admins"
 }
 `,
-				ResourceName:  "anyscale_user_group.test",
+				ResourceName:  "anyscale_iam_user_group.test",
 				ImportState:   true,
 				ImportStateId: scimID,
 				ExpectError:   regexp.MustCompile(`(?i)identity\s+provider`),
@@ -506,10 +506,10 @@ resource "anyscale_user_group_members" "test" {
 	}
 }
 
-// TestAccUserGroupResource_MockDuplicateName: a 409 from create surfaces the
+// TestAccIAMUserGroupResource_MockDuplicateName: a 409 from create surfaces the
 // existing group's ID in a ready-to-run import command, and create is sent
 // exactly once.
-func TestAccUserGroupResource_MockDuplicateName(t *testing.T) {
+func TestAccIAMUserGroupResource_MockDuplicateName(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t)
 	user := "user"
@@ -534,11 +534,11 @@ func TestAccUserGroupResource_MockDuplicateName(t *testing.T) {
 	}
 }
 
-// TestAccUserGroupResource_MockNameValidation: the server strips surrounding
+// TestAccIAMUserGroupResource_MockNameValidation: the server strips surrounding
 // whitespace, so a padded name would never converge; it is rejected at plan
 // time along with an empty or over-long name. A clean name is the positive
 // control.
-func TestAccUserGroupResource_MockNameValidation(t *testing.T) {
+func TestAccIAMUserGroupResource_MockNameValidation(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t)
 	for _, tc := range []struct {
@@ -563,8 +563,8 @@ func TestAccUserGroupResource_MockNameValidation(t *testing.T) {
 	}
 }
 
-// TestAccUserGroupResource_MockRenameInPlace: a rename keeps the ID.
-func TestAccUserGroupResource_MockRenameInPlace(t *testing.T) {
+// TestAccIAMUserGroupResource_MockRenameInPlace: a rename keeps the ID.
+func TestAccIAMUserGroupResource_MockRenameInPlace(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t)
 	resource.Test(t, resource.TestCase{
@@ -574,11 +574,11 @@ func TestAccUserGroupResource_MockRenameInPlace(t *testing.T) {
 			{
 				Config: ugMockConfig(m, "tfacc-ug-mock-b", nil...),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply:             []plancheck.PlanCheck{plancheck.ExpectResourceAction("anyscale_user_group.test", plancheck.ResourceActionUpdate)},
+					PreApply:             []plancheck.PlanCheck{plancheck.ExpectResourceAction("anyscale_iam_user_group.test", plancheck.ResourceActionUpdate)},
 					PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
 				},
 				Check: func(s *terraform.State) error {
-					id := s.RootModule().Resources["anyscale_user_group.test"].Primary.ID
+					id := s.RootModule().Resources["anyscale_iam_user_group.test"].Primary.ID
 					if m.groupIDByName("tfacc-ug-mock-b") != id || m.groupCount() != 1 {
 						return fmt.Errorf("rename did not update group %s in place", id)
 					}
@@ -589,9 +589,9 @@ func TestAccUserGroupResource_MockRenameInPlace(t *testing.T) {
 	})
 }
 
-// TestAccUserGroupDataSource_Mock reads by name and by ID, including a scim
+// TestAccIAMUserGroupDataSource_Mock reads by name and by ID, including a scim
 // group with an organization role and a legacy group with a null source.
-func TestAccUserGroupDataSource_Mock(t *testing.T) {
+func TestAccIAMUserGroupDataSource_Mock(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t, ugUserA, ugUserB, ugUserC)
 	scim := "scim"
@@ -606,41 +606,41 @@ func TestAccUserGroupDataSource_Mock(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: m.providerBlock() + fmt.Sprintf(`
-data "anyscale_user_group" "by_name" {
+data "anyscale_iam_user_group" "by_name" {
   name = "okta-admins"
 }
-data "anyscale_user_group" "by_id" {
+data "anyscale_iam_user_group" "by_id" {
   id = %q
 }
-data "anyscale_user_group" "legacy" {
+data "anyscale_iam_user_group" "legacy" {
   id = %q
 }
 `, scimID, legacyID),
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue("data.anyscale_user_group.by_name", tfjsonpath.New("id"), knownvalue.StringExact(scimID)),
-					statecheck.ExpectKnownValue("data.anyscale_user_group.by_name", tfjsonpath.New("source"), knownvalue.StringExact("scim")),
-					statecheck.ExpectKnownValue("data.anyscale_user_group.by_name", tfjsonpath.New("members"), knownvalue.ListExact([]knownvalue.Check{
+					statecheck.ExpectKnownValue("data.anyscale_iam_user_group.by_name", tfjsonpath.New("id"), knownvalue.StringExact(scimID)),
+					statecheck.ExpectKnownValue("data.anyscale_iam_user_group.by_name", tfjsonpath.New("source"), knownvalue.StringExact("scim")),
+					statecheck.ExpectKnownValue("data.anyscale_iam_user_group.by_name", tfjsonpath.New("members"), knownvalue.ListExact([]knownvalue.Check{
 						knownvalue.ObjectExact(map[string]knownvalue.Check{"user_id": knownvalue.StringExact(ugUserA.UserID), "email": knownvalue.StringExact("alice@example.com"), "name": knownvalue.StringExact("Alice")}),
 						knownvalue.ObjectExact(map[string]knownvalue.Check{"user_id": knownvalue.StringExact(ugUserB.UserID), "email": knownvalue.StringExact("bob@example.com"), "name": knownvalue.StringExact("Bob")}),
 						knownvalue.ObjectExact(map[string]knownvalue.Check{"user_id": knownvalue.StringExact(ugUserC.UserID), "email": knownvalue.StringExact("carol@example.com"), "name": knownvalue.StringExact("Carol")}),
 					})),
-					statecheck.ExpectKnownValue("data.anyscale_user_group.by_name", tfjsonpath.New("organization_role"), knownvalue.ObjectExact(map[string]knownvalue.Check{
+					statecheck.ExpectKnownValue("data.anyscale_iam_user_group.by_name", tfjsonpath.New("organization_role"), knownvalue.ObjectExact(map[string]knownvalue.Check{
 						"base_role":        knownvalue.StringExact("collaborator"),
 						"additional_roles": knownvalue.ListExact([]knownvalue.Check{knownvalue.StringExact("image_reader")}),
 					})),
-					statecheck.ExpectKnownValue("data.anyscale_user_group.by_id", tfjsonpath.New("name"), knownvalue.StringExact("okta-admins")),
-					statecheck.ExpectKnownValue("data.anyscale_user_group.legacy", tfjsonpath.New("source"), knownvalue.Null()),
-					statecheck.ExpectKnownValue("data.anyscale_user_group.legacy", tfjsonpath.New("organization_role"), knownvalue.Null()),
-					statecheck.ExpectKnownValue("data.anyscale_user_group.legacy", tfjsonpath.New("members"), knownvalue.ListSizeExact(0)),
+					statecheck.ExpectKnownValue("data.anyscale_iam_user_group.by_id", tfjsonpath.New("name"), knownvalue.StringExact("okta-admins")),
+					statecheck.ExpectKnownValue("data.anyscale_iam_user_group.legacy", tfjsonpath.New("source"), knownvalue.Null()),
+					statecheck.ExpectKnownValue("data.anyscale_iam_user_group.legacy", tfjsonpath.New("organization_role"), knownvalue.Null()),
+					statecheck.ExpectKnownValue("data.anyscale_iam_user_group.legacy", tfjsonpath.New("members"), knownvalue.ListSizeExact(0)),
 				},
 			},
 		},
 	})
 }
 
-// TestAccUserGroupDataSource_MockArguments: exactly one of id or name, and a
+// TestAccIAMUserGroupDataSource_MockArguments: exactly one of id or name, and a
 // miss is an error naming what was looked up.
-func TestAccUserGroupDataSource_MockArguments(t *testing.T) {
+func TestAccIAMUserGroupDataSource_MockArguments(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t)
 	user := "user"
@@ -657,16 +657,16 @@ func TestAccUserGroupDataSource_MockArguments(t *testing.T) {
 		resource.Test(t, resource.TestCase{
 			ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 			Steps: []resource.TestStep{{
-				Config:      m.providerBlock() + "\ndata \"anyscale_user_group\" \"test\" {\n  " + tc.body + "\n}\n",
+				Config:      m.providerBlock() + "\ndata \"anyscale_iam_user_group\" \"test\" {\n  " + tc.body + "\n}\n",
 				ExpectError: regexp.MustCompile(tc.want),
 			}},
 		})
 	}
 }
 
-// TestAccUserGroupsDataSource_Mock: the list follows paging, drops the row
+// TestAccIAMUserGroupsDataSource_Mock: the list follows paging, drops the row
 // an offset page repeats, and filters by source.
-func TestAccUserGroupsDataSource_Mock(t *testing.T) {
+func TestAccIAMUserGroupsDataSource_Mock(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t)
 	m.listPageSize = 2
@@ -683,27 +683,27 @@ func TestAccUserGroupsDataSource_Mock(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: m.providerBlock() + `
-data "anyscale_user_groups" "all" {}
-data "anyscale_user_groups" "scim" {
+data "anyscale_iam_user_groups" "all" {}
+data "anyscale_iam_user_groups" "scim" {
   source = "scim"
 }
-data "anyscale_user_groups" "user" {
+data "anyscale_iam_user_groups" "user" {
   source = "user"
 }
 `,
 				ConfigStateChecks: []statecheck.StateCheck{
 					// Newest first, each exactly once.
-					statecheck.ExpectKnownValue("data.anyscale_user_groups.all", tfjsonpath.New("groups"), knownvalue.ListExact([]knownvalue.Check{
+					statecheck.ExpectKnownValue("data.anyscale_iam_user_groups.all", tfjsonpath.New("groups"), knownvalue.ListExact([]knownvalue.Check{
 						knownvalue.ObjectPartial(map[string]knownvalue.Check{"id": knownvalue.StringExact(ids[4])}),
 						knownvalue.ObjectPartial(map[string]knownvalue.Check{"id": knownvalue.StringExact(ids[3])}),
 						knownvalue.ObjectPartial(map[string]knownvalue.Check{"id": knownvalue.StringExact(ids[2]), "source": knownvalue.Null()}),
 						knownvalue.ObjectPartial(map[string]knownvalue.Check{"id": knownvalue.StringExact(ids[1])}),
 						knownvalue.ObjectPartial(map[string]knownvalue.Check{"id": knownvalue.StringExact(ids[0])}),
 					})),
-					statecheck.ExpectKnownValue("data.anyscale_user_groups.scim", tfjsonpath.New("groups"), knownvalue.ListExact([]knownvalue.Check{
+					statecheck.ExpectKnownValue("data.anyscale_iam_user_groups.scim", tfjsonpath.New("groups"), knownvalue.ListExact([]knownvalue.Check{
 						knownvalue.ObjectExact(map[string]knownvalue.Check{"id": knownvalue.StringExact(ids[1]), "name": knownvalue.StringExact("tfacc-ug-mock-l2"), "source": knownvalue.StringExact("scim")}),
 					})),
-					statecheck.ExpectKnownValue("data.anyscale_user_groups.user", tfjsonpath.New("groups"), knownvalue.ListSizeExact(3)),
+					statecheck.ExpectKnownValue("data.anyscale_iam_user_groups.user", tfjsonpath.New("groups"), knownvalue.ListSizeExact(3)),
 				},
 			},
 		},

@@ -314,7 +314,7 @@ func TestCheckDestroy_403(t *testing.T) {
 		{"absent from the list", "anyscale_project", "/api/v2/projects/%s", 200, `{"results": [{"id": "prj_other"}], "metadata": {"next_paging_token": null}}`, ""},
 		{"still listed", "anyscale_project", "/api/v2/projects/%s", 200, `{"results": [{"id": "prj_gone"}], "metadata": {"next_paging_token": null}}`, "still listed"},
 		{"list fails", "anyscale_project", "/api/v2/projects/%s", 500, `{}`, "list check failed"},
-		{"no list endpoint", "anyscale_user_group", "/api/v2/groups/%s", 0, ``, ""},
+		{"no list endpoint", "anyscale_iam_user_group", "/api/v2/groups/%s", 0, ``, ""},
 	}
 	skipRetryBackoff(t)
 	for _, tc := range cases {

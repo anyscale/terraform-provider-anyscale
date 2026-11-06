@@ -84,7 +84,7 @@ func liveGroupMemberIDs(t *testing.T, groupID string) ([]string, bool) {
 
 func testAccCheckLiveGroupMembers(t *testing.T, want ...string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		groupID := s.RootModule().Resources["anyscale_user_group.test"].Primary.ID
+		groupID := s.RootModule().Resources["anyscale_iam_user_group.test"].Primary.ID
 		got, found := liveGroupMemberIDs(t, groupID)
 		if !found {
 			return fmt.Errorf("group %s is missing from the memberships listing", groupID)
@@ -102,12 +102,12 @@ func testAccUserGroupMembersConfig(name string, members ...string) string {
 		quoted[i] = fmt.Sprintf("%q", e)
 	}
 	return realInfraProviderBlock() + fmt.Sprintf(`
-resource "anyscale_user_group" "test" {
+resource "anyscale_iam_user_group" "test" {
   name = %q
 }
 
 resource "anyscale_user_group_members" "test" {
-  user_group_id = anyscale_user_group.test.id
+  user_group_id = anyscale_iam_user_group.test.id
   members  = [%s]
 }
 `, name, strings.Join(quoted, ", "))
@@ -128,14 +128,14 @@ func TestAccUserGroupMembersResource_RealAPI(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		CheckDestroy:             NewAPIDestroyCheck("anyscale_user_group", "/api/v2/user_groups/%s"),
+		CheckDestroy:             NewAPIDestroyCheck("anyscale_iam_user_group", "/api/v2/user_groups/%s"),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccUserGroupMembersConfig(name, configEmail),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					testAccCheckLiveGroupMembers(t, userID),
 					func(s *terraform.State) error {
-						groupID = s.RootModule().Resources["anyscale_user_group.test"].Primary.ID
+						groupID = s.RootModule().Resources["anyscale_iam_user_group.test"].Primary.ID
 						return nil
 					},
 				),

@@ -116,7 +116,7 @@ func TestLegacyRBACDeprecation_Negative(t *testing.T) {
 	for name, r := range map[string]resource.Resource{
 		"anyscale_organization_user":       NewOrganizationUserResource(),
 		"anyscale_organization_invitation": NewOrganizationInvitationResource(),
-		"anyscale_user_group":              NewUserGroupResource(),
+		"anyscale_iam_user_group":          NewIAMUserGroupResource(),
 		"anyscale_user_group_members":      NewUserGroupMembersResource(),
 	} {
 		s := resourceSchema(t, r)
@@ -126,8 +126,8 @@ func TestLegacyRBACDeprecation_Negative(t *testing.T) {
 		}
 	}
 	for name, d := range map[string]datasource.DataSource{
-		"anyscale_user_group":  NewUserGroupDataSource(),
-		"anyscale_user_groups": NewUserGroupsDataSource(),
+		"anyscale_iam_user_group":  NewIAMUserGroupDataSource(),
+		"anyscale_iam_user_groups": NewIAMUserGroupsDataSource(),
 	} {
 		s := dataSourceSchema(t, d)
 		notDeprecated("data."+name, s)

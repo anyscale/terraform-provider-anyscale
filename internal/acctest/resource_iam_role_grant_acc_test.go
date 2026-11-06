@@ -85,7 +85,7 @@ func roleBindingIDsForGroup(t *testing.T, cloudID, groupID string) []string {
 
 func testAccRoleBindingConfig(groupName, roleName, cloudID string, withBinding bool) string {
 	cfg := fmt.Sprintf(`
-resource "anyscale_user_group" "test" {
+resource "anyscale_iam_user_group" "test" {
   name = %q
 }
 
@@ -96,7 +96,7 @@ data "anyscale_iam_role" "test" {
 	if withBinding {
 		cfg += fmt.Sprintf(`
 resource "anyscale_iam_role_grant" "test" {
-  user_group_id = anyscale_user_group.test.id
+  user_group_id = anyscale_iam_user_group.test.id
   role_id       = data.anyscale_iam_role.test.id
   cloud_id      = %q
 }
@@ -122,9 +122,9 @@ func TestAccIAMRoleGrantResource_RealAPI(t *testing.T) {
 
 	inAPI := func(want bool) resource.TestCheckFunc {
 		return func(s *terraform.State) error {
-			g, ok := s.RootModule().Resources["anyscale_user_group.test"]
+			g, ok := s.RootModule().Resources["anyscale_iam_user_group.test"]
 			if !ok {
-				return fmt.Errorf("anyscale_user_group.test not in state")
+				return fmt.Errorf("anyscale_iam_user_group.test not in state")
 			}
 			groupID = g.Primary.ID
 			ids := roleBindingIDsForGroup(t, cloudID, groupID)
