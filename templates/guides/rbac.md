@@ -58,9 +58,9 @@ are subject to the same constraints.
 
 ## User groups (Beta)
 
-~> **Beta.** User groups are a Beta feature. Breaking changes to their schema are deprecated first
-and listed in the changelog. Pin the provider version if you depend on these resources, and read the
-changelog before upgrading.
+~> **Beta.** User groups are a Beta feature. Beta resources may change incompatibly; every breaking
+change is listed in the changelog. Pin the provider version if you depend on these resources, and
+read the changelog before upgrading.
 
 An Anyscale **user group** is a named set of organization members. This provider manages groups in
 four types:
