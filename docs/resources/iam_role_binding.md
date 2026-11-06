@@ -76,7 +76,7 @@ resource "anyscale_iam_role_binding" "project" {
 
 ### Required
 
-- `roles` (Attributes Map) Every direct binding on the scope, keyed by role ID (`rol_...`; look one up with the `anyscale_role` data source). `{}` revokes every binding the API allows. The API refuses to revoke the provider identity's own binding, so name it to keep it. (see [below for nested schema](#nestedatt--roles))
+- `roles` (Attributes Map) Every direct binding on the scope, keyed by role ID (`rol_...`; look one up with the `anyscale_iam_role` data source). `{}` revokes every binding the API allows. The API refuses to revoke the provider identity's own binding, so name it to keep it. (see [below for nested schema](#nestedatt--roles))
 
 ### Optional
 

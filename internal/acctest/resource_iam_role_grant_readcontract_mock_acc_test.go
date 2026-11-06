@@ -487,11 +487,11 @@ resource "anyscale_iam_role_grant" "test" {
 	}
 }
 
-// ---- anyscale_role data source ----
+// ---- anyscale_iam_role data source ----
 
 func roleDSConfig(m *roleBindingMockServer, arg, value string) string {
 	return m.providerBlock() + fmt.Sprintf(`
-data "anyscale_role" "test" {
+data "anyscale_iam_role" "test" {
   %s = %q
 }
 `, arg, value)
@@ -507,7 +507,7 @@ func newRoleMock(t *testing.T) *roleBindingMockServer {
 }
 
 // By name: the exact match among the listing's "contains" results.
-func TestAccRoleDataSource_ByNameExact(t *testing.T) {
+func TestAccIAMRoleDataSource_ByNameExact(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRoleMock(t)
 	resource.Test(t, resource.TestCase{
@@ -516,9 +516,9 @@ func TestAccRoleDataSource_ByNameExact(t *testing.T) {
 			{
 				Config: roleDSConfig(m, "name", "viewer"),
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue("data.anyscale_role.test", tfjsonpath.New("id"), knownvalue.StringExact("rol_00000000000000000000000010")),
-					statecheck.ExpectKnownValue("data.anyscale_role.test", tfjsonpath.New("built_in"), knownvalue.Bool(true)),
-					statecheck.ExpectKnownValue("data.anyscale_role.test", tfjsonpath.New("description"), knownvalue.StringExact("Read clouds.")),
+					statecheck.ExpectKnownValue("data.anyscale_iam_role.test", tfjsonpath.New("id"), knownvalue.StringExact("rol_00000000000000000000000010")),
+					statecheck.ExpectKnownValue("data.anyscale_iam_role.test", tfjsonpath.New("built_in"), knownvalue.Bool(true)),
+					statecheck.ExpectKnownValue("data.anyscale_iam_role.test", tfjsonpath.New("description"), knownvalue.StringExact("Read clouds.")),
 				},
 			},
 		},
@@ -526,7 +526,7 @@ func TestAccRoleDataSource_ByNameExact(t *testing.T) {
 }
 
 // Description is null, not "", when the role has none.
-func TestAccRoleDataSource_NullDescription(t *testing.T) {
+func TestAccIAMRoleDataSource_NullDescription(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRoleMock(t)
 	resource.Test(t, resource.TestCase{
@@ -535,7 +535,7 @@ func TestAccRoleDataSource_NullDescription(t *testing.T) {
 			{
 				Config: roleDSConfig(m, "name", "viewer_plus"),
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue("data.anyscale_role.test", tfjsonpath.New("description"), knownvalue.Null()),
+					statecheck.ExpectKnownValue("data.anyscale_iam_role.test", tfjsonpath.New("description"), knownvalue.Null()),
 				},
 			},
 		},
@@ -543,7 +543,7 @@ func TestAccRoleDataSource_NullDescription(t *testing.T) {
 }
 
 // Match is case-sensitive; a case-only mismatch errors and names the role.
-func TestAccRoleDataSource_CaseMismatchHint(t *testing.T) {
+func TestAccIAMRoleDataSource_CaseMismatchHint(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRoleMock(t)
 	resource.Test(t, resource.TestCase{
@@ -555,7 +555,7 @@ func TestAccRoleDataSource_CaseMismatchHint(t *testing.T) {
 }
 
 // An archived role cannot be assigned, so lookup by name excludes it.
-func TestAccRoleDataSource_ArchivedExcludedByName(t *testing.T) {
+func TestAccIAMRoleDataSource_ArchivedExcludedByName(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRoleMock(t)
 	resource.Test(t, resource.TestCase{
@@ -567,7 +567,7 @@ func TestAccRoleDataSource_ArchivedExcludedByName(t *testing.T) {
 }
 
 // The name filter is "contains", so the exact match can sit past page one.
-func TestAccRoleDataSource_ByNameWalksEveryPage(t *testing.T) {
+func TestAccIAMRoleDataSource_ByNameWalksEveryPage(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRoleBindingMockServer(t)
 	for i := range 60 {
@@ -580,14 +580,14 @@ func TestAccRoleDataSource_ByNameWalksEveryPage(t *testing.T) {
 			{
 				Config: roleDSConfig(m, "name", "operator"),
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue("data.anyscale_role.test", tfjsonpath.New("id"), knownvalue.StringExact("rol_zzzzzzzzzzzzzzzzzzzzzzzzzz")),
+					statecheck.ExpectKnownValue("data.anyscale_iam_role.test", tfjsonpath.New("id"), knownvalue.StringExact("rol_zzzzzzzzzzzzzzzzzzzzzzzzzz")),
 				},
 			},
 		},
 	})
 }
 
-func TestAccRoleDataSource_FlagOff(t *testing.T) {
+func TestAccIAMRoleDataSource_FlagOff(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRoleMock(t)
 	m.setFlagOff(true)

@@ -13,34 +13,34 @@ import (
 )
 
 var (
-	_ datasource.DataSource              = &RoleDataSource{}
-	_ datasource.DataSourceWithConfigure = &RoleDataSource{}
+	_ datasource.DataSource              = &IAMRoleDataSource{}
+	_ datasource.DataSourceWithConfigure = &IAMRoleDataSource{}
 )
 
-// NewRoleDataSource creates a new role data source.
-func NewRoleDataSource() datasource.DataSource {
-	return &RoleDataSource{}
+// NewIAMRoleDataSource creates a new role data source.
+func NewIAMRoleDataSource() datasource.DataSource {
+	return &IAMRoleDataSource{}
 }
 
-// RoleDataSource resolves an assignable role by name: a built-in role or one
+// IAMRoleDataSource resolves an assignable role by name: a built-in role or one
 // of the organization's own.
-type RoleDataSource struct {
+type IAMRoleDataSource struct {
 	client *Client
 }
 
-// RoleDataSourceModel describes the data source data model.
-type RoleDataSourceModel struct {
+// IAMRoleDataSourceModel describes the data source data model.
+type IAMRoleDataSourceModel struct {
 	ID          types.String `tfsdk:"id"`
 	Name        types.String `tfsdk:"name"`
 	Description types.String `tfsdk:"description"`
 	BuiltIn     types.Bool   `tfsdk:"built_in"`
 }
 
-func (d *RoleDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_role"
+func (d *IAMRoleDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_iam_role"
 }
 
-func (d *RoleDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+func (d *IAMRoleDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: roleBindingsBetaBanner +
 			"Looks up a role that can be granted with `anyscale_iam_role_grant`: a built-in role or one of the organization's own. " +
@@ -68,17 +68,17 @@ func (d *RoleDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 	}
 }
 
-func (d *RoleDataSource) Configure(ctx context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+func (d *IAMRoleDataSource) Configure(ctx context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
 	if client, ok := clientFromProviderData(req.ProviderData, "Unexpected Data Source Configure Type", &resp.Diagnostics); ok {
 		d.client = client
 	}
 }
 
-func (d *RoleDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
-	if refuseRBACOnAzure(d.client, "anyscale_role", &resp.Diagnostics) {
+func (d *IAMRoleDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	if refuseRBACOnAzure(d.client, "anyscale_iam_role", &resp.Diagnostics) {
 		return
 	}
-	var config RoleDataSourceModel
+	var config IAMRoleDataSourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 	if resp.Diagnostics.HasError() {
 		return

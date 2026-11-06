@@ -104,7 +104,7 @@ resource "anyscale_iam_role_grant" "carol_project_viewer" {
 
 ### Required
 
-- `role_id` (String) The role to grant (`rol_...`); look one up by name with the `anyscale_role` data source. Changing it replaces the binding, leaving the principal without the role in between unless the resource sets `lifecycle { create_before_destroy = true }`.
+- `role_id` (String) The role to grant (`rol_...`); look one up by name with the `anyscale_iam_role` data source. Changing it replaces the binding, leaving the principal without the role in between unless the resource sets `lifecycle { create_before_destroy = true }`.
 
 ### Optional
 

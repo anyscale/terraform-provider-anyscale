@@ -89,7 +89,7 @@ resource "anyscale_user_group" "test" {
   name = %q
 }
 
-data "anyscale_role" "test" {
+data "anyscale_iam_role" "test" {
   name = %q
 }
 `, groupName, roleName)
@@ -97,7 +97,7 @@ data "anyscale_role" "test" {
 		cfg += fmt.Sprintf(`
 resource "anyscale_iam_role_grant" "test" {
   user_group_id = anyscale_user_group.test.id
-  role_id       = data.anyscale_role.test.id
+  role_id       = data.anyscale_iam_role.test.id
   cloud_id      = %q
 }
 `, cloudID)

@@ -106,7 +106,7 @@ func TestAccIAMRoleGrantResource_AzureBlocked_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRoleBindingLifecycleMock(t)
 	var azure atomic.Bool
-	// role_id is a literal, not data.anyscale_role: that data source is blocked on
+	// role_id is a literal, not data.anyscale_iam_role: that data source is blocked on
 	// Azure too and would mask whether the resource itself refuses.
 	cfg := func(roleID string) string {
 		return m.providerBlock() + fmt.Sprintf(`
@@ -309,14 +309,14 @@ func azureDataSourceSteps(azure *atomic.Bool, config string) []resource.TestStep
 	}
 }
 
-func TestAccRoleDataSource_AzureBlocked_MockServer(t *testing.T) {
+func TestAccIAMRoleDataSource_AzureBlocked_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRoleBindingLifecycleMock(t)
 	var azure atomic.Bool
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: azureClassifiedFactories(&azure),
 		Steps: azureDataSourceSteps(&azure, m.providerBlock()+`
-data "anyscale_role" "test" {
+data "anyscale_iam_role" "test" {
   name = "project_viewer"
 }
 `),
