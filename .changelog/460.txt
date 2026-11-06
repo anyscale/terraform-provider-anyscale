@@ -1,14 +1,14 @@
 ```
 release-note:breaking-change
-resource/anyscale_iam_role_grant: replaces `anyscale_role_binding`, which is removed in this release.
+resource/anyscale_role_binding: `anyscale_role_binding` is removed and renamed to `anyscale_iam_role_grant`; update the resource type in your configuration.
 ```
 
 ```
 release-note:breaking-change
-resource/anyscale_iam_role_binding: replaces `anyscale_role_binding_policy`, which is removed in this release.
+resource/anyscale_role_binding_policy: `anyscale_role_binding_policy` is removed and renamed to `anyscale_iam_role_binding`, which is authoritative over every direct grant on its scope; update the resource type in your configuration.
 ```
 
 ```
 release-note:breaking-change
-data-source/anyscale_iam_role_binding: replaces the `anyscale_role_binding_policy` data source, which is removed in this release.
+data-source/anyscale_role_binding_policy: `anyscale_role_binding_policy` is removed and renamed to `anyscale_iam_role_binding`; update the data source type in your configuration, keeping the same scope arguments.
 ```
