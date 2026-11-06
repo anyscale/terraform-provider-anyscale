@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.36.1] - 2026-11-06
+
+### Added
+
+- resource/anyscale_role_binding_policy: The create plan's revoke warning now says a listed grant may belong to an `anyscale_role_binding` managing the same scope.
+- resource/anyscale_role_binding: Refresh now warns when the binding was revoked outside Terraform, and names the hazard of also managing its scope with a role-binding policy.
+- resource/anyscale_role_binding_policy: Update and destroy plans now warn when they revoke a role binding made outside the policy, such as one an `anyscale_role_binding` manages.
+
 ## [0.36.0] - 2026-11-05
 
 ### New Resources
@@ -1357,7 +1365,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.36.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.36.1...HEAD
+[0.36.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.36.1
 [0.36.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.36.0
 [0.35.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.35.0
 [0.34.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.34.1

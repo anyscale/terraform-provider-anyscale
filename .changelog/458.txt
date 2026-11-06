@@ -1,3 +1,0 @@
-```release-note:added
-resource/anyscale_role_binding_policy: Update and destroy plans now warn when they revoke a role binding made outside the policy, such as one an `anyscale_role_binding` manages.
-```
