@@ -1,14 +1,14 @@
 ```
 release-note:breaking-change
-resource/anyscale_iam_role_grant: replaces `anyscale_role_binding` (removed); to migrate, run `terraform state rm` on each old resource and import it under the new name with the same ID (an `rb_...` ID or the natural key), then update the resource type in your configuration.
+resource/anyscale_iam_role_grant: replaces `anyscale_role_binding`, which is removed in this release.
 ```
 
 ```
 release-note:breaking-change
-resource/anyscale_iam_role_binding: replaces `anyscale_role_binding_policy` (removed) and is authoritative over every direct grant on its scope; to migrate, run `terraform state rm` on the old resource, update the resource type, and import with `<scope_type>/<scope_id>`, then review the first plan, which revokes any grant on the scope the `roles` map does not name.
+resource/anyscale_iam_role_binding: replaces `anyscale_role_binding_policy`, which is removed in this release.
 ```
 
 ```
 release-note:breaking-change
-data-source/anyscale_iam_role_binding: replaces the `anyscale_role_binding_policy` data source (removed); to migrate, update the data source type in your configuration, keeping the same scope arguments.
+data-source/anyscale_iam_role_binding: replaces the `anyscale_role_binding_policy` data source, which is removed in this release.
 ```
