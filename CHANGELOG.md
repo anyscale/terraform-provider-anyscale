@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.38.0] - 2026-11-06
+
+### Breaking Changes
+
+- data-source/anyscale_role: `anyscale_role` is removed and renamed to `anyscale_iam_role`; update the data source type in your configuration, keeping the same arguments.
+- resource/anyscale_user_group: `anyscale_user_group` is removed and renamed to `anyscale_iam_user_group`; update the resource type in your configuration.
+- data-source/anyscale_user_group: `anyscale_user_group` is removed and renamed to `anyscale_iam_user_group`; update the data source type in your configuration, keeping the same arguments.
+- data-source/anyscale_user_groups: `anyscale_user_groups` is removed and renamed to `anyscale_iam_user_groups`; update the data source type in your configuration, keeping the same arguments.
+- resource/anyscale_user_group_members: `anyscale_user_group_members` is removed and renamed to `anyscale_iam_user_group_members`; update the resource type in your configuration.
+
 ## [0.37.0] - 2026-11-06
 
 ### Breaking Changes
@@ -1373,7 +1383,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.37.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.38.0...HEAD
+[0.38.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.38.0
 [0.37.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.37.0
 [0.36.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.36.1
 [0.36.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.36.0
