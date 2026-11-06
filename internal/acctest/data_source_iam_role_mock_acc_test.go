@@ -12,8 +12,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
-// Mock acceptance tests for data anyscale_iam_role (the v0.38.0 rename of
-// anyscale_role), covering the Read paths the role-grant lifecycle tests do
+// Mock acceptance tests for data anyscale_iam_role, introduced by the
+// v0.38.0 rename, covering the Read paths the role-grant lifecycle tests do
 // not: a custom role with no description, archived roles being excluded, a
 // name that matches several roles, and role bindings being disabled for the
 // org. They run through resource.Test against roleBindingMockServer and need
