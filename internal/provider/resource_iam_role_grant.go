@@ -142,7 +142,7 @@ func (r *IAMRoleGrantResource) Schema(ctx context.Context, req resource.SchemaRe
 			"Grants one role to one user group or user on an organization, cloud or project. " +
 			"Access granted this way is not visible to `anyscale_cloud_access`; see the [RBAC guide](../guides/rbac.md). " +
 			"A binding cannot be edited, so changing any argument replaces it. " +
-			"Don't manage one scope with both this resource and `anyscale role-binding policy apply`: a policy apply revokes this resource's bindings, and the next apply re-creates them. " +
+			"Don't manage one scope with both this resource and `anyscale_iam_role_binding` or `anyscale role-binding policy apply`: the binding resource and a policy apply revoke this resource's grants, and the next apply re-creates them. " +
 			"Requires an organization [converted to role bindings](../guides/rbac.md#organization-access-mode).",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -316,7 +316,7 @@ func (r *IAMRoleGrantResource) addDuplicateError(ctx context.Context, diags *dia
 			break
 		}
 	}
-	diags.AddError("Role Binding Already Exists",
+	diags.AddError("Role Grant Already Exists",
 		fmt.Sprintf("%s To manage the existing binding with Terraform, import it:\n\n  terraform import <resource address> %s",
 			extractAPIErrorDetail(createErr), importID))
 }
@@ -343,7 +343,7 @@ func (r *IAMRoleGrantResource) Read(ctx context.Context, req resource.ReadReques
 			return
 		}
 		if isHTTPStatus(err, http.StatusForbidden) {
-			resp.Diagnostics.AddError("Role Binding Not Readable",
+			resp.Diagnostics.AddError("Role Grant Not Readable",
 				fmt.Sprintf("The Anyscale API refused to list bindings on %s %q (HTTP 403): %s "+
 					"Reading them requires managing IAM on the %s. If the %s was deleted outside Terraform, remove this binding from state with `terraform state rm`.",
 					resourceType, resourceID, extractAPIErrorDetail(err), resourceType, resourceType))
@@ -356,7 +356,7 @@ func (r *IAMRoleGrantResource) Read(ctx context.Context, req resource.ReadReques
 	if binding == nil {
 		// Revoked outside Terraform, or the principal no longer exists.
 		tflog.Warn(ctx, "Role binding not found, removing from state", map[string]any{"role_binding_id": bindingID})
-		resp.Diagnostics.AddWarning("Role Binding Revoked Outside Terraform",
+		resp.Diagnostics.AddWarning("Role Grant Revoked Outside Terraform",
 			fmt.Sprintf("Role binding %q (role %s to %s %s on %s %s) no longer exists: it was revoked outside Terraform, or the user or user group holding it was deleted. "+
 				"Terraform plans to re-create it. If a role-binding policy (anyscale_iam_role_binding or anyscale role-binding policy apply) manages this %s, "+
 				"manage its grants one way only, or each apply revokes what the other grants.",
@@ -396,7 +396,7 @@ func (r *IAMRoleGrantResource) adoptRegrantedBinding(ctx context.Context, resp *
 		map[string]any{"role_binding_id": oldID, "new_role_binding_id": newID})
 	if binding.Origin != nil && *binding.Origin != roleBindingOriginImperative {
 		resourceType, _ := state.scope()
-		resp.Diagnostics.AddWarning("Role Binding Now Stated by a Role-Binding Policy",
+		resp.Diagnostics.AddWarning("Role Grant Now Stated by a Role-Binding Policy",
 			fmt.Sprintf("Role binding %q was revoked and re-granted outside Terraform as %q (origin %q), and Terraform now tracks the new ID. "+
 				"A role-binding policy on this %s states this grant, so managing it with both anyscale_iam_role_grant and `anyscale role-binding policy apply` "+
 				"makes each revoke what the other grants. Manage the grants on this %s one way.",
@@ -408,7 +408,7 @@ func (r *IAMRoleGrantResource) adoptRegrantedBinding(ctx context.Context, resp *
 
 func (r *IAMRoleGrantResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	// Every argument forces replacement, so Terraform never plans an update.
-	resp.Diagnostics.AddError("Role Binding Cannot Be Updated",
+	resp.Diagnostics.AddError("Role Grant Cannot Be Updated",
 		"Every argument of anyscale_iam_role_grant forces replacement, so an in-place update was not expected. Please report this issue to the provider developers.")
 }
 
@@ -448,7 +448,7 @@ func (r *IAMRoleGrantResource) Delete(ctx context.Context, req resource.DeleteRe
 		return
 	}
 	if isStatusWithSubstring(err, http.StatusForbidden, roleBindingSelfRevokeSubstring) {
-		resp.Diagnostics.AddError("Cannot Revoke the Provider's Own Role Binding",
+		resp.Diagnostics.AddError("Cannot Revoke the Provider's Own Role Grant",
 			fmt.Sprintf("%s Revoke it in the Anyscale console or with a different identity, or run `terraform state rm` on this resource's address to stop managing it.",
 				extractAPIErrorDetail(err)))
 		return
@@ -534,11 +534,11 @@ func (r *IAMRoleGrantResource) resolveRoleBindingNaturalKey(ctx context.Context,
 		switch {
 		case isRoleBindingsDisabled(err):
 			if r.roleBindingsOnAfterNotFound(ctx, diags, "list role bindings for import", err, "") {
-				AddConfigError(diags, "Role Binding Principal Not Found",
+				AddConfigError(diags, "Role Grant Principal Not Found",
 					fmt.Sprintf("The %s %q could not be found: %s", key.PrincipalType, key.PrincipalID, extractAPIErrorDetail(err)))
 			}
 		case isHTTPStatus(err, http.StatusForbidden):
-			AddConfigError(diags, "Role Bindings Not Readable",
+			AddConfigError(diags, "Role Grants Not Readable",
 				fmt.Sprintf("The Anyscale API refused to list bindings on %s %q (HTTP 403): %s Reading them requires managing IAM on the %s.",
 					key.ResourceType, key.ResourceID, extractAPIErrorDetail(err), key.ResourceType))
 		default:
@@ -551,7 +551,7 @@ func (r *IAMRoleGrantResource) resolveRoleBindingNaturalKey(ctx context.Context,
 			return b.ID
 		}
 	}
-	AddConfigError(diags, "Role Binding Not Found",
+	AddConfigError(diags, "Role Grant Not Found",
 		fmt.Sprintf("No role binding grants role %q to %s %q on %s %q. Import never creates a binding; to grant it, declare the resource and apply.",
 			key.RoleID, key.PrincipalType, key.PrincipalID, key.ResourceType, key.ResourceID))
 	return ""
@@ -589,7 +589,7 @@ func (r *IAMRoleGrantResource) ImportState(ctx context.Context, req resource.Imp
 			}
 		case isHTTPStatus(err, http.StatusForbidden):
 			// A binding that does not exist answers 403 here as well.
-			AddConfigError(&resp.Diagnostics, "Role Binding Not Found",
+			AddConfigError(&resp.Diagnostics, "Role Grant Not Found",
 				fmt.Sprintf("No role binding %q could be read: it does not exist, was revoked, or you do not manage IAM on the resource it is held on. %s",
 					bindingID, extractAPIErrorDetail(err)))
 		default:
@@ -598,13 +598,13 @@ func (r *IAMRoleGrantResource) ImportState(ctx context.Context, req resource.Imp
 		return
 	}
 	if !isManagedRoleBindingPrincipal(binding.PrincipalType) {
-		AddConfigError(&resp.Diagnostics, "Role Binding Principal Not Supported",
+		AddConfigError(&resp.Diagnostics, "Role Grant Principal Not Supported",
 			fmt.Sprintf("Role binding %q is held by a %s, which anyscale_iam_role_grant does not manage. It manages bindings held by a user group or a user.",
 				bindingID, binding.PrincipalType))
 		return
 	}
 	if !isManagedRoleBindingScope(binding.ResourceType) {
-		AddConfigError(&resp.Diagnostics, "Role Binding Scope Not Supported",
+		AddConfigError(&resp.Diagnostics, "Role Grant Scope Not Supported",
 			fmt.Sprintf("Role binding %q is held on a %s, which anyscale_iam_role_grant does not manage. It manages bindings on an organization, cloud or project.",
 				bindingID, binding.ResourceType))
 		return

@@ -326,7 +326,7 @@ func (r *IAMRoleBindingResource) planDestroy(ctx context.Context, req resource.M
 	}
 	if outside := grantedOutsidePolicy(result.Removed); len(outside) > 0 {
 		detail += "\n\nThese revoked grants were made outside this policy:\n" + describePolicyBindings(outside) +
-			"\nIf any of these is an anyscale_iam_role_grant in any configuration, this scope is managed twice: destroying the policy revokes that resource's grant until its next apply re-creates it."
+			"\nIf any of these is an anyscale_iam_role_grant in any configuration, this scope is managed twice: destroying this anyscale_iam_role_binding revokes that resource's grant until its next apply re-creates it."
 	}
 	resp.Diagnostics.AddWarning("Destroy Revokes Role Bindings", detail)
 }

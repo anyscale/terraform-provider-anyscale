@@ -24,7 +24,7 @@ func TestAccIAMRoleGrantResource_RevokedOutOfBandWarnsCLI(t *testing.T) {
 	if err != nil || len(cliDiagnostics(lines, "error")) > 0 {
 		t.Fatalf("terraform plan failed: %v %v\n%s", err, cliDiagnostics(lines, "error"), out)
 	}
-	pmExpectWarning(t, lines, "Role Binding Revoked Outside Terraform",
+	pmExpectWarning(t, lines, "Role Grant Revoked Outside Terraform",
 		"role "+rbRole+" to user_group "+rbGroup+" on cloud "+rbCloud,
 		"or the user or user group holding it was deleted. Terraform plans to re-create it",
 		"(anyscale_iam_role_binding or anyscale role-binding policy apply) manages this cloud")
