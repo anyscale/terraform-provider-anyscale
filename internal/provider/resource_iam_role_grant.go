@@ -386,7 +386,7 @@ func (r *IAMRoleGrantResource) adoptRegrantedBinding(ctx context.Context, resp *
 	oldID := state.ID.ValueString()
 	binding, err := getRoleBindingWithRetry(ctx, r.client, newID)
 	if err != nil {
-		resp.Diagnostics.AddError("Could Not Read Re-granted Role Binding",
+		resp.Diagnostics.AddError("Could Not Read Re-granted Role Grant",
 			fmt.Sprintf("Role binding %q was revoked and re-granted outside Terraform as %q, but reading %q failed: %s "+
 				"Terraform state was not changed; run the plan again.", oldID, newID, newID, extractAPIErrorDetail(err)))
 		return
