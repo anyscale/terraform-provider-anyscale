@@ -117,7 +117,7 @@ func TestLegacyRBACDeprecation_Negative(t *testing.T) {
 		"anyscale_organization_user":       NewOrganizationUserResource(),
 		"anyscale_organization_invitation": NewOrganizationInvitationResource(),
 		"anyscale_iam_user_group":          NewIAMUserGroupResource(),
-		"anyscale_user_group_members":      NewUserGroupMembersResource(),
+		"anyscale_iam_user_group_members":  NewIAMUserGroupMembersResource(),
 	} {
 		s := resourceSchema(t, r)
 		notDeprecated(name, s)

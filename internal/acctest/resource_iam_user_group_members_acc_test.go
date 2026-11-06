@@ -16,12 +16,12 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
-// Real-API membership coverage for anyscale_user_group_members. It adds and
+// Real-API membership coverage for anyscale_iam_user_group_members. It adds and
 // removes ANYSCALE_TEST_USER_EMAIL from a group the test creates. The group
 // carries no role, so membership grants nothing, but it is still a write about
 // a real person, so the test is opt-in and checks the target org.
 //
-// Run: TF_ACC=1 ANYSCALE_TEST_USER_EMAIL=<disposable member> ANYSCALE_TEST_ORG_NAME=<org> go test ./internal/acctest -run '^TestAccUserGroupMembersResource_RealAPI$' -v -count=1
+// Run: TF_ACC=1 ANYSCALE_TEST_USER_EMAIL=<disposable member> ANYSCALE_TEST_ORG_NAME=<org> go test ./internal/acctest -run '^TestAccIAMUserGroupMembersResource_RealAPI$' -v -count=1
 
 // liveOrgUser resolves an email to the member's usr_ ID and the email as the
 // API spells it, through the same listing the provider uses.
@@ -106,17 +106,17 @@ resource "anyscale_iam_user_group" "test" {
   name = %q
 }
 
-resource "anyscale_user_group_members" "test" {
+resource "anyscale_iam_user_group_members" "test" {
   user_group_id = anyscale_iam_user_group.test.id
   members  = [%s]
 }
 `, name, strings.Join(quoted, ", "))
 }
 
-// TestAccUserGroupMembersResource_RealAPI covers add with a differently-cased
+// TestAccIAMUserGroupMembersResource_RealAPI covers add with a differently-cased
 // email, import, an out-of-band removal re-added by apply, emptying the set,
 // and destroy. Every membership claim is checked against the API, not state.
-func TestAccUserGroupMembersResource_RealAPI(t *testing.T) {
+func TestAccIAMUserGroupMembersResource_RealAPI(t *testing.T) {
 	email := requireRealInfraTestUser(t)
 	userID, apiEmail := liveOrgUser(t, email)
 	// An uppercased config exercises the case-insensitive match and the kept
@@ -140,7 +140,7 @@ func TestAccUserGroupMembersResource_RealAPI(t *testing.T) {
 					},
 				),
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue("anyscale_user_group_members.test", tfjsonpath.New("members"),
+					statecheck.ExpectKnownValue("anyscale_iam_user_group_members.test", tfjsonpath.New("members"),
 						knownvalue.SetExact([]knownvalue.Check{knownvalue.StringExact(configEmail)})),
 				},
 				ConfigPlanChecks: resource.ConfigPlanChecks{
@@ -148,7 +148,7 @@ func TestAccUserGroupMembersResource_RealAPI(t *testing.T) {
 				},
 			},
 			{
-				ResourceName:            "anyscale_user_group_members.test",
+				ResourceName:            "anyscale_iam_user_group_members.test",
 				ImportState:             true,
 				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: []string{"members"},
@@ -171,7 +171,7 @@ func TestAccUserGroupMembersResource_RealAPI(t *testing.T) {
 				},
 				Config: testAccUserGroupMembersConfig(name, configEmail),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction("anyscale_user_group_members.test", plancheck.ResourceActionUpdate)},
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction("anyscale_iam_user_group_members.test", plancheck.ResourceActionUpdate)},
 				},
 				Check: testAccCheckLiveGroupMembers(t, userID),
 			},

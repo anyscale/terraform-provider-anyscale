@@ -20,39 +20,43 @@ import (
 )
 
 var (
-	_ resource.Resource                = &UserGroupMembersResource{}
-	_ resource.ResourceWithConfigure   = &UserGroupMembersResource{}
-	_ resource.ResourceWithModifyPlan  = &UserGroupMembersResource{}
-	_ resource.ResourceWithImportState = &UserGroupMembersResource{}
+	_ resource.Resource                = &IAMUserGroupMembersResource{}
+	_ resource.ResourceWithConfigure   = &IAMUserGroupMembersResource{}
+	_ resource.ResourceWithModifyPlan  = &IAMUserGroupMembersResource{}
+	_ resource.ResourceWithImportState = &IAMUserGroupMembersResource{}
 )
 
-// NewUserGroupMembersResource creates a new user group members resource.
-func NewUserGroupMembersResource() resource.Resource {
-	return &UserGroupMembersResource{}
+// NewIAMUserGroupMembersResource creates a new user group members resource.
+func NewIAMUserGroupMembersResource() resource.Resource {
+	return &IAMUserGroupMembersResource{}
 }
 
-// UserGroupMembersResource owns the complete member set of one user group:
+// IAMUserGroupMembersResource owns the complete member set of one user group:
 // members present in the group but absent from the configuration are
 // removed. Members are keyed by email and resolved to user IDs on every
 // write.
-type UserGroupMembersResource struct {
+type IAMUserGroupMembersResource struct {
 	client *Client
 }
 
-// UserGroupMembersResourceModel describes the resource data model.
-type UserGroupMembersResourceModel struct {
+// IAMUserGroupMembersResourceModel describes the resource data model.
+type IAMUserGroupMembersResourceModel struct {
 	ID          types.String `tfsdk:"id"`
 	UserGroupID types.String `tfsdk:"user_group_id"`
 	Members     types.Set    `tfsdk:"members"`
 }
 
-func (r *UserGroupMembersResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_user_group_members"
+func (r *IAMUserGroupMembersResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_iam_user_group_members"
 }
 
-func (r *UserGroupMembersResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *IAMUserGroupMembersResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		// Version 1 renamed group_id to user_group_id; see UpgradeState.
+		// Version 1 is kept because lowering a schema version breaks existing
+		// state, and there is no upgrader because no earlier state of this
+		// type can exist: state written before the rename lives under the
+		// removed anyscale_user_group_members type and reaches this type only
+		// via import or create, which write version 1 directly.
 		Version: 1,
 		MarkdownDescription: userGroupsBetaBanner +
 			"Manages the complete member list of an Anyscale user group. This resource is authoritative: members added outside Terraform are removed on the next apply, and destroying it empties the group without deleting it. " +
@@ -90,14 +94,14 @@ func (r *UserGroupMembersResource) Schema(ctx context.Context, req resource.Sche
 	}
 }
 
-func (r *UserGroupMembersResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+func (r *IAMUserGroupMembersResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	if client, ok := clientFromProviderData(req.ProviderData, "Unexpected Resource Configure Type", &resp.Diagnostics); ok {
 		r.client = client
 	}
 }
 
-func (r *UserGroupMembersResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var plan UserGroupMembersResourceModel
+func (r *IAMUserGroupMembersResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var plan IAMUserGroupMembersResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -111,8 +115,8 @@ func (r *UserGroupMembersResource) Create(ctx context.Context, req resource.Crea
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-func (r *UserGroupMembersResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var state UserGroupMembersResourceModel
+func (r *IAMUserGroupMembersResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var state IAMUserGroupMembersResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -156,8 +160,8 @@ func (r *UserGroupMembersResource) Read(ctx context.Context, req resource.ReadRe
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func (r *UserGroupMembersResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var plan UserGroupMembersResourceModel
+func (r *IAMUserGroupMembersResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan IAMUserGroupMembersResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -174,8 +178,8 @@ func (r *UserGroupMembersResource) Update(ctx context.Context, req resource.Upda
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-func (r *UserGroupMembersResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	var state UserGroupMembersResourceModel
+func (r *IAMUserGroupMembersResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var state IAMUserGroupMembersResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -191,12 +195,12 @@ func (r *UserGroupMembersResource) Delete(ctx context.Context, req resource.Dele
 }
 
 // ModifyPlan refuses to create or change this resource on an Azure control plane.
-func (r *UserGroupMembersResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	refuseRBACPlanOnAzure(r.client, "anyscale_user_group_members", req, resp)
+func (r *IAMUserGroupMembersResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	refuseRBACPlanOnAzure(r.client, "anyscale_iam_user_group_members", req, resp)
 }
 
-func (r *UserGroupMembersResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	if refuseRBACOnAzure(r.client, "anyscale_user_group_members", &resp.Diagnostics) {
+func (r *IAMUserGroupMembersResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	if refuseRBACOnAzure(r.client, "anyscale_iam_user_group_members", &resp.Diagnostics) {
 		return
 	}
 	groupID := req.ID
@@ -226,7 +230,7 @@ func (r *UserGroupMembersResource) ImportState(ctx context.Context, req resource
 		return
 	}
 
-	resp.Diagnostics.Append(resp.State.Set(ctx, &UserGroupMembersResourceModel{
+	resp.Diagnostics.Append(resp.State.Set(ctx, &IAMUserGroupMembersResourceModel{
 		ID:          types.StringValue(group.ID),
 		UserGroupID: types.StringValue(group.ID),
 		Members:     set,
@@ -237,7 +241,7 @@ func (r *UserGroupMembersResource) ImportState(ctx context.Context, req resource
 // group is Anyscale-managed, resolves every email to a user ID, and sends the
 // add and remove deltas against current membership. Both member routes are
 // idempotent, so re-applying after a partial failure converges.
-func (r *UserGroupMembersResource) applyMembers(ctx context.Context, plan *UserGroupMembersResourceModel, diags *diag.Diagnostics) {
+func (r *IAMUserGroupMembersResource) applyMembers(ctx context.Context, plan *IAMUserGroupMembersResourceModel, diags *diag.Diagnostics) {
 	groupID := plan.UserGroupID.ValueString()
 
 	group, err := getUserGroup(ctx, r.client, groupID)
