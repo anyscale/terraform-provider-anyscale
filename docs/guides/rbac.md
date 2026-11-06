@@ -21,7 +21,7 @@ Read this before writing configuration that spans more than one scope.
 | Organization membership | [`anyscale_organization_user`](../resources/organization_user.md) | Whether the user is under Terraform management. It cannot create a member - people join by invitation - but declaring it adopts an existing member with no API call. Destroying it removes nobody: it cancels only a still-pending invitation this resource itself sent. |
 | Organization role | [`anyscale_organization_user_role`](../resources/organization_user_role.md) | One user's `base_role` and `deny_roles` in the organization. Authoritative over that one user's role - not over who is a member. |
 | User groups (Beta) | [`anyscale_user_group`](../resources/user_group.md), [`anyscale_user_group_members`](../resources/user_group_members.md) | A group's name, and its **entire** member list. Not what the group may access - see role bindings, next row. See [User groups (Beta)](#user-groups-beta). |
-| Role grants (Beta) | [`anyscale_role_binding`](../resources/role_binding.md), [`anyscale_role_binding_policy`](../resources/role_binding_policy.md), [`anyscale_role`](../data-sources/role.md) data source | One role held by one user group or one user on one cloud, project, or the organization (`anyscale_role_binding`), or every direct role binding on a scope (`anyscale_role_binding_policy`). **Converted organizations only** - see [Organization access mode](#organization-access-mode). See [Role bindings (Beta)](#role-bindings-beta). |
+| Role grants (Beta) | [`anyscale_iam_role_grant`](../resources/iam_role_grant.md), [`anyscale_iam_role_binding`](../resources/iam_role_binding.md), [`anyscale_role`](../data-sources/role.md) data source | One role held by one user group or one user on one cloud, project, or the organization (`anyscale_iam_role_grant`), or every direct role binding on a scope (`anyscale_iam_role_binding`). **Converted organizations only** - see [Organization access mode](#organization-access-mode). See [Role bindings (Beta)](#role-bindings-beta). |
 
 `anyscale_organization_user_role` uses the word "authoritative" to mean: authoritative over the one row
 it manages, never over a whole population - see
@@ -78,7 +78,7 @@ Managing groups needs the organization-level permission to manage IAM (an organi
 
 In scope: creating and renaming groups, and managing who belongs to them. **Not managed here:** what a
 group may access. Grant a group a role on a cloud, project, or the organization with
-[`anyscale_role_binding`](#role-bindings-beta). A group may also already hold grants set in the
+[`anyscale_iam_role_grant`](#role-bindings-beta). A group may also already hold grants set in the
 Anyscale console or API, so adding or removing members can grant or revoke real access. A group's
 organization roles (`base_role`) are not managed by this provider.
 
@@ -191,8 +191,8 @@ and conversion is one-way.
 | | Unconverted organization | Converted organization |
 |---|---|---|
 | Access is held by | Collaborator and policy records | Role bindings |
-| Writes that work | [`anyscale_organization_user_role`](../resources/organization_user_role.md), `anyscale_cloud.auto_add_user` | [`anyscale_role_binding`](../resources/role_binding.md) |
-| Writes the API refuses (HTTP 409) | `anyscale_role_binding` | The resources in the Unconverted column |
+| Writes that work | [`anyscale_organization_user_role`](../resources/organization_user_role.md), `anyscale_cloud.auto_add_user` | [`anyscale_iam_role_grant`](../resources/iam_role_grant.md) |
+| Writes the API refuses (HTTP 409) | `anyscale_iam_role_grant` | The resources in the Unconverted column |
 | Not affected by mode | [`anyscale_user_group`](../resources/user_group.md), [`anyscale_user_group_members`](../resources/user_group_members.md), [`anyscale_organization_user`](../resources/organization_user.md), [`anyscale_project`](../resources/project.md), [`anyscale_cloud`](../resources/cloud.md) (except `auto_add_user`) | same |
 
 The provider does not detect the mode in advance; the API refuses the write and the provider reports it.
@@ -201,7 +201,7 @@ organization is unconverted until an admin converts it.
 
 **Azure control planes.** On an Anyscale control plane in Azure (`console.azure.anyscale.com`), access
 is managed with Azure role-based access control in the Azure portal, in either mode. When the
-provider's API URL is one of these hosts, creating, changing or importing `anyscale_role_binding`,
+provider's API URL is one of these hosts, creating, changing or importing `anyscale_iam_role_grant`,
 `anyscale_user_group`, `anyscale_user_group_members` or
 `anyscale_organization_user_role`, reading the `anyscale_role`, `anyscale_user_group` or
 `anyscale_user_groups` data sources, and setting `anyscale_cloud.auto_add_user` fail at plan with "RBAC
@@ -211,7 +211,7 @@ front of an Azure control plane is not detected.
 | Error | Mode it means | What to do |
 |---|---|---|
 | "Organization Not Converted to Role Bindings" | Unconverted | Convert the organization in Users & IAM, or manage organization roles with `anyscale_organization_user_role`. |
-| "Organization Uses Role Bindings" | Converted | Stop managing that access with this resource; use `anyscale_role_binding` on a user group or a user. |
+| "Organization Uses Role Bindings" | Converted | Stop managing that access with this resource; use `anyscale_iam_role_grant` on a user group or a user. |
 
 In a converted organization, destroying `anyscale_organization_user_role` warns "Organization Uses Role
 Bindings" and removes it from state; nothing is reverted, and the existing role is left in place.
@@ -226,7 +226,7 @@ Role-binding writes are refused until the organization converts, so the move hap
    would declare already exist.
 2. Run `terraform state rm` for `anyscale_organization_user_role` (or destroy it, which only warns), and remove it
    from your configuration.
-3. Declare an `anyscale_role_binding` for each grant you want Terraform to manage, and **import** the
+3. Declare an `anyscale_iam_role_grant` for each grant you want Terraform to manage, and **import** the
    existing binding instead of creating one. Creating a grant that already exists fails with "Role Binding
    Already Exists". You do not need to look up the binding ID: import by what the binding grants,
    `<scope_type>/<scope_id>/<principal_type>/<principal_id>/<role_id>`, where `scope_type` is `organization`,
@@ -241,7 +241,7 @@ locals {
   }
 }
 
-resource "anyscale_role_binding" "grant" {
+resource "anyscale_iam_role_grant" "viewer" {
   for_each      = local.grants
   user_group_id = each.value.group
   role_id       = each.value.role
@@ -250,7 +250,7 @@ resource "anyscale_role_binding" "grant" {
 
 import {
   for_each = local.grants
-  to       = anyscale_role_binding.grant[each.key]
+  to       = anyscale_iam_role_grant.viewer[each.key]
   id       = "project/${var.project_id}/user_group/${each.value.group}/${each.value.role}"
 }
 ```
@@ -269,8 +269,8 @@ None is available on an Azure control plane (see [Organization access mode](#org
 
 | Deprecated | In a converted organization | Use instead |
 |---|---|---|
-| `anyscale_organization_user_role` | Writes fail with "Organization Uses Role Bindings" | `anyscale_role_binding` |
-| `anyscale_cloud.auto_add_user` | Setting it fails | An `anyscale_role_binding` on the cloud for the All users group |
+| `anyscale_organization_user_role` | Writes fail with "Organization Uses Role Bindings" | `anyscale_iam_role_grant` |
+| `anyscale_cloud.auto_add_user` | Setting it fails | An `anyscale_iam_role_grant` on the cloud for the All users group |
 | `auto_add_user` on the `anyscale_cloud` and `anyscale_clouds` data sources | No longer applies | Same |
 | `collaborators` on the `anyscale_project` data source; `permission_level`, `base_role` and `additional_roles` on the `anyscale_organization_user(s)` data sources; `organization_permission_level` on the `anyscale_user` data source | A snapshot from before conversion | No replacement yet |
 
@@ -282,17 +282,22 @@ attribute, Terraform 1.15 prints the provider's message and Terraform 1.10 a gen
 
 ## Role bindings (Beta)
 
-~> **Beta, behind a feature flag.** Role bindings are a Beta feature, under the same terms as
-[user groups](#user-groups-beta): breaking schema changes get a deprecation first and a changelog
-entry. Anyscale enables them per organization while customers migrate: contact
-support@anyscale.com for access. Without it, every call fails with "Role bindings are not enabled". The organization must also be
-[converted](#organization-access-mode).
+~> **Beta, behind a feature flag.** Role bindings are a Beta feature. Beta resources can change
+incompatibly between provider versions - 0.37.0 renamed both of them, with no alias for the old
+names - so pin the provider version, and read the changelog before upgrading; every breaking
+change is listed there. Anyscale enables them per organization while customers migrate: contact
+support@anyscale.com for access. Without it, every call fails with "Role bindings are not enabled".
+The organization must also be [converted](#organization-access-mode).
 
-Vocabulary, if you know AWS or Google IAM: `anyscale_role_binding` is **additive** and non-authoritative, like
-`google_project_iam_member`, not like `google_project_iam_binding` (which owns a whole role). It grants only
-what you declare and never removes other grants.
+Vocabulary, if you know other IAM systems: these names follow the Anyscale CLI, not anybody
+else's. `anyscale_iam_role_grant` is **additive** and non-authoritative, like
+`google_project_iam_member` - it grants only what you declare and never removes other grants.
+`anyscale_iam_role_binding` owns **every** grant on one scope: more than `google_project_iam_binding`
+(which owns one role), and unlike a Kubernetes `RoleBinding`, which is additive. Each API object
+is still a "role binding" with an `rb_` ID - one `anyscale_iam_role_grant` creates exactly one,
+so someone tracing an `rb_` ID from the console or API lands on the grant resource.
 
-`anyscale_role_binding` grants **one role to one user group or one user on one scope** - exactly one of
+`anyscale_iam_role_grant` grants **one role to one user group or one user on one scope** - exactly one of
 `user_group_id` or `user_id`, and exactly one of `cloud_id`,
 `project_id`, or `organization_id`. Look up the role with the [`anyscale_role`](../data-sources/role.md)
 data source, which resolves a role by its exact, case-sensitive `name`. Which role names exist depends on
@@ -312,7 +317,7 @@ resource "anyscale_user_group_members" "analysts" {
   members       = ["alice@example.com", "bob@example.com"] # must already be organization members
 }
 
-resource "anyscale_role_binding" "analysts_viewer" {
+resource "anyscale_iam_role_grant" "analysts_viewer" {
   user_group_id = anyscale_user_group.analysts.id
   role_id       = data.anyscale_role.viewer.id
   project_id    = var.project_id # exactly one of cloud_id / project_id / organization_id
@@ -333,7 +338,7 @@ data "anyscale_organization_user" "alice" {
   email = "alice@example.com"
 }
 
-resource "anyscale_role_binding" "alice_viewer" {
+resource "anyscale_iam_role_grant" "alice_viewer" {
   user_id    = data.anyscale_organization_user.alice.user_id
   role_id    = data.anyscale_role.viewer.id
   project_id = var.project_id
@@ -351,14 +356,14 @@ group is never briefly without access.
 
 Bindings are **not authoritative**: Terraform manages only the bindings you declare, never the full set
 on a cloud, project, or organization. Declaring a binding that already exists fails with a conflict;
-`terraform import anyscale_role_binding.<name> <binding id>` to adopt it.
+`terraform import anyscale_iam_role_grant.<name> <binding id>` to adopt it.
 
-### Managing every grant on a scope: `anyscale_role_binding_policy`
+### Managing every grant on a scope: `anyscale_iam_role_binding`
 
-`anyscale_role_binding_policy` is the authoritative alternative. It owns **every direct binding on one
+`anyscale_iam_role_binding` is the authoritative alternative. It owns **every direct binding on one
 organization, cloud or project**, as a map from role ID to the users and user groups that hold it. It is
 the Terraform form of `anyscale role-binding policy generate` and `apply`. Use it when one team owns all
-access to a scope; use `anyscale_role_binding` when several owners share it.
+access to a scope; use `anyscale_iam_role_grant` when several owners share it.
 
 - **An apply revokes every direct binding the policy does not name**, including ones Anyscale grants
   itself, such as the owner binding a project or cloud creator receives. The first apply on a scope
@@ -369,15 +374,15 @@ access to a scope; use `anyscale_role_binding` when several owners share it.
 - **Bindings on a parent scope are not part of the policy** and are never touched.
 - **Name your own binding.** Anyscale refuses a policy that revokes the identity Terraform runs as, so if
   that identity holds a direct binding on the scope, list it under its role (see the
-  [example](../resources/role_binding_policy.md#example-usage)). An identity cannot grant itself a role,
+  [example](../resources/iam_role_binding.md#example-usage)). An identity cannot grant itself a role,
   so one that reaches the scope through a group needs nothing named.
-- **Never manage one scope with this resource and `anyscale_role_binding` or a CLI `policy apply`.** Each
+- **Never manage one scope with this resource and `anyscale_iam_role_grant` or a CLI `policy apply`.** Each
   revokes or re-creates the other's bindings on every apply.
 - **Destroy revokes everything Anyscale allows.** It keeps the identity's own bindings and any frozen
   binding, and warns naming what it kept; the destroy plan lists what it will revoke and keep. An
   organization policy can hold owner groups, so read that plan before destroying one.
 - **Import** with `<scope_type>/<scope_id>`, for example `project/prj_...`.
-- Like `anyscale_role_binding`, it needs a [converted organization](#organization-access-mode).
+- Like `anyscale_iam_role_grant`, it needs a [converted organization](#organization-access-mode).
 
 ### Directory-synced groups
 

@@ -3,15 +3,15 @@
 page_title: "anyscale_role Data Source - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  ~> Beta. Role bindings are enabled per organization by Anyscale while customers migrate; contact support@anyscale.com mailto:support@anyscale.com to enable them. Breaking schema changes get a deprecation first and a changelog entry. See the RBAC guide ../guides/rbac.md#role-bindings-beta.
-  Looks up a role that can be granted with anyscale_role_binding: a built-in role or one of the organization's own. Archived roles are not found, since they cannot be newly granted. The API does not check that a role suits the resource it is granted on, so a role with only organization permissions granted on a cloud is accepted and has no effect.
+  ~> Beta. Role bindings are enabled per organization by Anyscale while customers migrate; contact support@anyscale.com mailto:support@anyscale.com to enable them. Beta resources may change incompatibly; every breaking change is listed in the changelog. See the RBAC guide ../guides/rbac.md#role-bindings-beta.
+  Looks up a role that can be granted with anyscale_iam_role_grant: a built-in role or one of the organization's own. Archived roles are not found, since they cannot be newly granted. The API does not check that a role suits the resource it is granted on, so a role with only organization permissions granted on a cloud is accepted and has no effect.
 ---
 
 # anyscale_role (Data Source)
 
-~> **Beta.** Role bindings are enabled per organization by Anyscale while customers migrate; contact [support@anyscale.com](mailto:support@anyscale.com) to enable them. Breaking schema changes get a deprecation first and a changelog entry. See the [RBAC guide](../guides/rbac.md#role-bindings-beta).
+~> **Beta.** Role bindings are enabled per organization by Anyscale while customers migrate; contact [support@anyscale.com](mailto:support@anyscale.com) to enable them. Beta resources may change incompatibly; every breaking change is listed in the changelog. See the [RBAC guide](../guides/rbac.md#role-bindings-beta).
 
-Looks up a role that can be granted with `anyscale_role_binding`: a built-in role or one of the organization's own. Archived roles are not found, since they cannot be newly granted. The API does not check that a role suits the resource it is granted on, so a role with only organization permissions granted on a cloud is accepted and has no effect.
+Looks up a role that can be granted with `anyscale_iam_role_grant`: a built-in role or one of the organization's own. Archived roles are not found, since they cannot be newly granted. The API does not check that a role suits the resource it is granted on, so a role with only organization permissions granted on a cloud is accepted and has no effect.
 
 ## Example Usage
 
@@ -24,7 +24,7 @@ data "anyscale_role" "project_viewer" {
 }
 
 output "project_viewer_role_id" {
-  description = "Pass to anyscale_role_binding.role_id"
+  description = "Pass to anyscale_iam_role_grant.role_id"
   value       = data.anyscale_role.project_viewer.id
 }
 ```
@@ -40,4 +40,4 @@ output "project_viewer_role_id" {
 
 - `built_in` (Boolean) Whether Anyscale provides the role to every organization, rather than this organization defining it.
 - `description` (String) The role's description. Null when it has none.
-- `id` (String) The role ID (`rol_...`), as `anyscale_role_binding.role_id` takes it.
+- `id` (String) The role ID (`rol_...`), as `anyscale_iam_role_grant.role_id` takes it.

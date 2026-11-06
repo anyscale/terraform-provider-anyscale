@@ -57,7 +57,7 @@ func isOrgNotConvertedConflict(err error) bool {
 // different catalogs.
 func orgConvertedDetail(err error) string {
 	return extractAPIErrorDetail(err) + "\n\nThis organization has converted to role bindings, so Anyscale refuses legacy access writes. " +
-		"Manage access with anyscale_role_binding, on a user group (user_group_id) or on a user (user_id). " + orgAccessModeGuide
+		"Manage access with anyscale_iam_role_grant, on a user group (user_group_id) or on a user (user_id). " + orgAccessModeGuide
 }
 
 // orgConvertedSummary is the summary of every diagnostic for a legacy write

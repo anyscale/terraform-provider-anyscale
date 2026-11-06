@@ -81,12 +81,12 @@ func (s *byIDRetryServer) handler(t *testing.T) http.HandlerFunc {
 	}
 }
 
-func newByIDRetryResource(t *testing.T, s *byIDRetryServer) *RoleBindingResource {
+func newByIDRetryResource(t *testing.T, s *byIDRetryServer) *IAMRoleGrantResource {
 	t.Helper()
 	fastRoleBindingRetry(t)
 	server := httptest.NewServer(s.handler(t))
 	t.Cleanup(server.Close)
-	return &RoleBindingResource{client: NewClientWithToken(server.URL, "test-token")}
+	return &IAMRoleGrantResource{client: NewClientWithToken(server.URL, "test-token")}
 }
 
 func runByIDRetryDelete(t *testing.T, s *byIDRetryServer, createdAt time.Time) *resource.DeleteResponse {

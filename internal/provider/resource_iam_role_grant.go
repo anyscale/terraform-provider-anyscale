@@ -20,27 +20,27 @@ import (
 )
 
 var (
-	_ resource.Resource                     = &RoleBindingResource{}
-	_ resource.ResourceWithConfigure        = &RoleBindingResource{}
-	_ resource.ResourceWithModifyPlan       = &RoleBindingResource{}
-	_ resource.ResourceWithImportState      = &RoleBindingResource{}
-	_ resource.ResourceWithConfigValidators = &RoleBindingResource{}
+	_ resource.Resource                     = &IAMRoleGrantResource{}
+	_ resource.ResourceWithConfigure        = &IAMRoleGrantResource{}
+	_ resource.ResourceWithModifyPlan       = &IAMRoleGrantResource{}
+	_ resource.ResourceWithImportState      = &IAMRoleGrantResource{}
+	_ resource.ResourceWithConfigValidators = &IAMRoleGrantResource{}
 )
 
-// NewRoleBindingResource creates a new role binding resource.
-func NewRoleBindingResource() resource.Resource {
-	return &RoleBindingResource{}
+// NewIAMRoleGrantResource creates a new role binding resource.
+func NewIAMRoleGrantResource() resource.Resource {
+	return &IAMRoleGrantResource{}
 }
 
-// RoleBindingResource grants one role to one user group or user on one
+// IAMRoleGrantResource grants one role to one user group or user on one
 // organization, cloud or project. The API never edits a binding, so every argument forces
 // replacement.
-type RoleBindingResource struct {
+type IAMRoleGrantResource struct {
 	client *Client
 }
 
-// RoleBindingResourceModel describes the resource data model.
-type RoleBindingResourceModel struct {
+// IAMRoleGrantResourceModel describes the resource data model.
+type IAMRoleGrantResourceModel struct {
 	ID             types.String `tfsdk:"id"`
 	UserGroupID    types.String `tfsdk:"user_group_id"`
 	UserID         types.String `tfsdk:"user_id"`
@@ -56,7 +56,7 @@ type RoleBindingResourceModel struct {
 // scope returns the resource type and ID the binding is held on: whichever of
 // the three scope attributes is set. The config validator guarantees exactly
 // one is.
-func (m *RoleBindingResourceModel) scope() (resourceType, resourceID string) {
+func (m *IAMRoleGrantResourceModel) scope() (resourceType, resourceID string) {
 	switch {
 	case !m.CloudID.IsNull():
 		return roleBindingResourceCloud, m.CloudID.ValueString()
@@ -70,7 +70,7 @@ func (m *RoleBindingResourceModel) scope() (resourceType, resourceID string) {
 // principal returns the principal type and ID that holds the binding:
 // whichever of user_group_id and user_id is set. The config validator
 // guarantees exactly one is.
-func (m *RoleBindingResourceModel) principal() (principalType, principalID string) {
+func (m *IAMRoleGrantResourceModel) principal() (principalType, principalID string) {
 	if !m.UserID.IsNull() {
 		return roleBindingPrincipalUser, m.UserID.ValueString()
 	}
@@ -101,7 +101,7 @@ func isManagedRoleBindingScope(resourceType string) bool {
 // setFromAPI sets every attribute from a full binding, as create and import
 // return it. Callers check isManagedRoleBindingPrincipal and
 // isManagedRoleBindingScope first.
-func (m *RoleBindingResourceModel) setFromAPI(b *roleBindingResult) {
+func (m *IAMRoleGrantResourceModel) setFromAPI(b *roleBindingResult) {
 	m.ID = types.StringValue(b.ID)
 	m.UserGroupID = types.StringNull()
 	m.UserID = types.StringNull()
@@ -128,11 +128,11 @@ func (m *RoleBindingResourceModel) setFromAPI(b *roleBindingResult) {
 	m.CreatedAt = types.StringValue(b.CreatedAt)
 }
 
-func (r *RoleBindingResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_role_binding"
+func (r *IAMRoleGrantResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_iam_role_grant"
 }
 
-func (r *RoleBindingResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *IAMRoleGrantResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	replace := []planmodifier.String{stringplanmodifier.RequiresReplace()}
 	keep := []planmodifier.String{stringplanmodifier.UseStateForUnknown()}
 	scopeDescription := "Specify exactly one of `organization_id`, `cloud_id` or `project_id`. Changing it replaces the binding."
@@ -206,7 +206,7 @@ func (r *RoleBindingResource) Schema(ctx context.Context, req resource.SchemaReq
 	}
 }
 
-func (r *RoleBindingResource) ConfigValidators(ctx context.Context) []resource.ConfigValidator {
+func (r *IAMRoleGrantResource) ConfigValidators(ctx context.Context) []resource.ConfigValidator {
 	return []resource.ConfigValidator{
 		resourcevalidator.ExactlyOneOf(
 			path.MatchRoot("user_group_id"),
@@ -220,14 +220,14 @@ func (r *RoleBindingResource) ConfigValidators(ctx context.Context) []resource.C
 	}
 }
 
-func (r *RoleBindingResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+func (r *IAMRoleGrantResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	if client, ok := clientFromProviderData(req.ProviderData, "Unexpected Resource Configure Type", &resp.Diagnostics); ok {
 		r.client = client
 	}
 }
 
-func (r *RoleBindingResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var plan RoleBindingResourceModel
+func (r *IAMRoleGrantResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var plan IAMRoleGrantResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -274,7 +274,7 @@ func (r *RoleBindingResource) Create(ctx context.Context, req resource.CreateReq
 // addCreateNotFoundError reports a 404 from create: the feature is off, or
 // the principal or role does not exist, in which case the API's own detail says
 // which.
-func (r *RoleBindingResource) addCreateNotFoundError(ctx context.Context, diags *diag.Diagnostics, createErr error) {
+func (r *IAMRoleGrantResource) addCreateNotFoundError(ctx context.Context, diags *diag.Diagnostics, createErr error) {
 	if r.roleBindingsOnAfterNotFound(ctx, diags, "create role binding", createErr, "") {
 		AddAPIError(diags, "create role binding", createErr)
 	}
@@ -285,7 +285,7 @@ func (r *RoleBindingResource) addCreateNotFoundError(ctx context.Context, diags 
 // when the probe fails (op names the failed call) or the feature is off
 // (disabledOutcome says what happens to the binding). It reports true when the
 // feature is on, leaving the caller to say what the 404 means for its operation.
-func (r *RoleBindingResource) roleBindingsOnAfterNotFound(ctx context.Context, diags *diag.Diagnostics, op string, notFoundErr error, disabledOutcome string) bool {
+func (r *IAMRoleGrantResource) roleBindingsOnAfterNotFound(ctx context.Context, diags *diag.Diagnostics, op string, notFoundErr error, disabledOutcome string) bool {
 	enabled, probeErr := roleBindingsEnabled(ctx, r.client)
 	switch {
 	case probeErr != nil:
@@ -302,7 +302,7 @@ func (r *RoleBindingResource) roleBindingsOnAfterNotFound(ctx context.Context, d
 // role on this resource. The existing binding is looked up so the import
 // command can be copied as-is; if that lookup fails the command keeps a
 // placeholder. The existing binding is never adopted.
-func (r *RoleBindingResource) addDuplicateError(ctx context.Context, diags *diag.Diagnostics, plan *RoleBindingResourceModel, createErr error) {
+func (r *IAMRoleGrantResource) addDuplicateError(ctx context.Context, diags *diag.Diagnostics, plan *IAMRoleGrantResourceModel, createErr error) {
 	importID := "<role_binding_id>"
 	resourceType, resourceID := plan.scope()
 	principalType, principalID := plan.principal()
@@ -321,8 +321,8 @@ func (r *RoleBindingResource) addDuplicateError(ctx context.Context, diags *diag
 			extractAPIErrorDetail(createErr), importID))
 }
 
-func (r *RoleBindingResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var state RoleBindingResourceModel
+func (r *IAMRoleGrantResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var state IAMRoleGrantResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -358,7 +358,7 @@ func (r *RoleBindingResource) Read(ctx context.Context, req resource.ReadRequest
 		tflog.Warn(ctx, "Role binding not found, removing from state", map[string]any{"role_binding_id": bindingID})
 		resp.Diagnostics.AddWarning("Role Binding Revoked Outside Terraform",
 			fmt.Sprintf("Role binding %q (role %s to %s %s on %s %s) no longer exists: it was revoked outside Terraform, or the user or user group holding it was deleted. "+
-				"Terraform plans to re-create it. If a role-binding policy (anyscale_role_binding_policy or anyscale role-binding policy apply) manages this %s, "+
+				"Terraform plans to re-create it. If a role-binding policy (anyscale_iam_role_binding or anyscale role-binding policy apply) manages this %s, "+
 				"manage its grants one way only, or each apply revokes what the other grants.",
 				bindingID, state.RoleID.ValueString(), principalType, principalID, resourceType, resourceID, resourceType))
 		resp.State.RemoveResource(ctx)
@@ -382,7 +382,7 @@ func (r *RoleBindingResource) Read(ctx context.Context, req resource.ReadRequest
 // the binding is read in full. The listing decides that the grant exists; a
 // re-granted binding is new, so its by-ID read can 403 until its permission
 // propagates and is retried. If it still fails, state is left unchanged.
-func (r *RoleBindingResource) adoptRegrantedBinding(ctx context.Context, resp *resource.ReadResponse, state *RoleBindingResourceModel, newID string) {
+func (r *IAMRoleGrantResource) adoptRegrantedBinding(ctx context.Context, resp *resource.ReadResponse, state *IAMRoleGrantResourceModel, newID string) {
 	oldID := state.ID.ValueString()
 	binding, err := getRoleBindingWithRetry(ctx, r.client, newID)
 	if err != nil {
@@ -398,7 +398,7 @@ func (r *RoleBindingResource) adoptRegrantedBinding(ctx context.Context, resp *r
 		resourceType, _ := state.scope()
 		resp.Diagnostics.AddWarning("Role Binding Now Stated by a Role-Binding Policy",
 			fmt.Sprintf("Role binding %q was revoked and re-granted outside Terraform as %q (origin %q), and Terraform now tracks the new ID. "+
-				"A role-binding policy on this %s states this grant, so managing it with both anyscale_role_binding and `anyscale role-binding policy apply` "+
+				"A role-binding policy on this %s states this grant, so managing it with both anyscale_iam_role_grant and `anyscale role-binding policy apply` "+
 				"makes each revoke what the other grants. Manage the grants on this %s one way.",
 				oldID, newID, *binding.Origin, resourceType, resourceType))
 	}
@@ -406,14 +406,14 @@ func (r *RoleBindingResource) adoptRegrantedBinding(ctx context.Context, resp *r
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
 }
 
-func (r *RoleBindingResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+func (r *IAMRoleGrantResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	// Every argument forces replacement, so Terraform never plans an update.
 	resp.Diagnostics.AddError("Role Binding Cannot Be Updated",
-		"Every argument of anyscale_role_binding forces replacement, so an in-place update was not expected. Please report this issue to the provider developers.")
+		"Every argument of anyscale_iam_role_grant forces replacement, so an in-place update was not expected. Please report this issue to the provider developers.")
 }
 
-func (r *RoleBindingResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	var state RoleBindingResourceModel
+func (r *IAMRoleGrantResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var state IAMRoleGrantResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -481,7 +481,7 @@ func (r *RoleBindingResource) Delete(ctx context.Context, req resource.DeleteReq
 // handleDeleteNotFound settles a 404 met while deleting. With the feature on,
 // the binding or its principal is gone, so there is nothing left to revoke; with
 // it off, the binding stays in state.
-func (r *RoleBindingResource) handleDeleteNotFound(ctx context.Context, diags *diag.Diagnostics, bindingID string, notFoundErr error) {
+func (r *IAMRoleGrantResource) handleDeleteNotFound(ctx context.Context, diags *diag.Diagnostics, bindingID string, notFoundErr error) {
 	if r.roleBindingsOnAfterNotFound(ctx, diags, "delete role binding", notFoundErr, roleBindingsDisabledDeleteOutcome) {
 		tflog.Info(ctx, "Role binding already gone", map[string]any{"role_binding_id": bindingID, "detail": extractAPIErrorDetail(notFoundErr)})
 	}
@@ -528,7 +528,7 @@ func parseRoleBindingNaturalKey(id string) (roleBindingNaturalKey, error) {
 // ID names, through the principal listing Read uses. The API keeps at most one
 // live binding per principal, role and resource. It returns "" with
 // diagnostics when there is no such binding or the listing fails.
-func (r *RoleBindingResource) resolveRoleBindingNaturalKey(ctx context.Context, key roleBindingNaturalKey, diags *diag.Diagnostics) string {
+func (r *IAMRoleGrantResource) resolveRoleBindingNaturalKey(ctx context.Context, key roleBindingNaturalKey, diags *diag.Diagnostics) string {
 	bindings, err := listRoleBindingsForPrincipal(ctx, r.client, key.ResourceType, key.ResourceID, key.PrincipalType, key.PrincipalID)
 	if err != nil {
 		switch {
@@ -558,19 +558,19 @@ func (r *RoleBindingResource) resolveRoleBindingNaturalKey(ctx context.Context, 
 }
 
 // ModifyPlan refuses to create or change this resource on an Azure control plane.
-func (r *RoleBindingResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	refuseRBACPlanOnAzure(r.client, "anyscale_role_binding", req, resp)
+func (r *IAMRoleGrantResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	refuseRBACPlanOnAzure(r.client, "anyscale_iam_role_grant", req, resp)
 }
 
-func (r *RoleBindingResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	if refuseRBACOnAzure(r.client, "anyscale_role_binding", &resp.Diagnostics) {
+func (r *IAMRoleGrantResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	if refuseRBACOnAzure(r.client, "anyscale_iam_role_grant", &resp.Diagnostics) {
 		return
 	}
 	bindingID := req.ID
 	if !strings.HasPrefix(bindingID, "rb_") {
 		key, err := parseRoleBindingNaturalKey(bindingID)
 		if err != nil {
-			AddConfigError(&resp.Diagnostics, "Invalid Role Binding Import ID", fmt.Sprintf("%s. %s", err.Error(), roleBindingImportFormats))
+			AddConfigError(&resp.Diagnostics, "Invalid Role Grant Import ID", fmt.Sprintf("%s. %s", err.Error(), roleBindingImportFormats))
 			return
 		}
 		bindingID = r.resolveRoleBindingNaturalKey(ctx, key, &resp.Diagnostics)
@@ -599,18 +599,18 @@ func (r *RoleBindingResource) ImportState(ctx context.Context, req resource.Impo
 	}
 	if !isManagedRoleBindingPrincipal(binding.PrincipalType) {
 		AddConfigError(&resp.Diagnostics, "Role Binding Principal Not Supported",
-			fmt.Sprintf("Role binding %q is held by a %s, which anyscale_role_binding does not manage. It manages bindings held by a user group or a user.",
+			fmt.Sprintf("Role binding %q is held by a %s, which anyscale_iam_role_grant does not manage. It manages bindings held by a user group or a user.",
 				bindingID, binding.PrincipalType))
 		return
 	}
 	if !isManagedRoleBindingScope(binding.ResourceType) {
 		AddConfigError(&resp.Diagnostics, "Role Binding Scope Not Supported",
-			fmt.Sprintf("Role binding %q is held on a %s, which anyscale_role_binding does not manage. It manages bindings on an organization, cloud or project.",
+			fmt.Sprintf("Role binding %q is held on a %s, which anyscale_iam_role_grant does not manage. It manages bindings on an organization, cloud or project.",
 				bindingID, binding.ResourceType))
 		return
 	}
 
-	var state RoleBindingResourceModel
+	var state IAMRoleGrantResourceModel
 	state.setFromAPI(binding)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }

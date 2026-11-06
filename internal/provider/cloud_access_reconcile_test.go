@@ -1964,8 +1964,8 @@ func TestReconcileCloudAccess_ConvertedOrgDestroyStopsAtFirstRevoke(t *testing.T
 
 func TestCloudAccessRevokeFailureReason_Converted(t *testing.T) {
 	reason := cloudAccessRevokeFailureReason(apiStatusError(t, http.StatusConflict, testConvertedDetail))
-	if !strings.Contains(reason, "anyscale_role_binding") {
-		t.Errorf("reason %q does not name anyscale_role_binding", reason)
+	if !strings.Contains(reason, "anyscale_iam_role_grant") {
+		t.Errorf("reason %q does not name anyscale_iam_role_grant", reason)
 	}
 	if strings.Contains(reason, "auto_add_user") || strings.Contains(reason, "Policy API") {
 		t.Errorf("reason %q names the auto_add_user/Policy API blockers for a converted organization", reason)

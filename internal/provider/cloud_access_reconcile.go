@@ -838,7 +838,7 @@ func cloudAccessRevokeFailureReason(err error) string {
 	switch {
 	case isOrgConvertedConflict(err):
 		return fmt.Sprintf("%s (this organization has converted to role bindings, so Anyscale refuses legacy access writes; "+
-			"manage access with anyscale_role_binding)", detail)
+			"manage access with anyscale_iam_role_grant)", detail)
 	case strings.Contains(detail, cloudAccessAutoAddUserSubstring):
 		return fmt.Sprintf("%s (this cloud's auto_add_user setting blocks removing collaborators; it must be turned off "+
 			"before Terraform can be authoritative over this cloud's members)", detail)

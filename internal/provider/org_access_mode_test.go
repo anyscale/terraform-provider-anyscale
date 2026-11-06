@@ -83,7 +83,7 @@ func TestOrgAccessModeClassifiersIgnoreNonStatusErrors(t *testing.T) {
 
 func TestOrgConvertedDetailNamesReplacement(t *testing.T) {
 	detail := orgConvertedDetail(apiStatusError(t, http.StatusConflict, testConvertedDetail))
-	for _, want := range []string{testConvertedDetail, "anyscale_role_binding", "user_group_id", "user_id", "#organization-access-mode"} {
+	for _, want := range []string{testConvertedDetail, "anyscale_iam_role_grant", "user_group_id", "user_id", "#organization-access-mode"} {
 		if !strings.Contains(detail, want) {
 			t.Errorf("detail %q does not contain %q", detail, want)
 		}

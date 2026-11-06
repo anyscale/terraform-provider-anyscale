@@ -15,11 +15,11 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// Real-API coverage for anyscale_role_binding_policy, on a disposable project
+// Real-API coverage for anyscale_iam_role_binding, on a disposable project
 // and an empty group, so no grant reaches anyone. Needs a converted test
 // organization with role bindings enabled; skips otherwise.
 //
-//	TF_ACC=1 ANYSCALE_TEST_ORG_MODE=converted go test ./internal/acctest/ -run '^TestAccRoleBindingPolicyResource_RealAPI$' -v
+//	TF_ACC=1 ANYSCALE_TEST_ORG_MODE=converted go test ./internal/acctest/ -run '^TestAccIAMRoleBindingResource_RealAPI$' -v
 //
 // The frozen-binding and lockout paths are mock-only: no test organization can
 // produce a frozen binding, and a lockout needs the organization's owners
@@ -118,10 +118,10 @@ func realOtherBuiltInRole(t *testing.T, exclude string) string {
 	return fallback
 }
 
-// TestAccRoleBindingPolicyResource_RealAPI covers criteria 14-17: create with
+// TestAccIAMRoleBindingResource_RealAPI covers criteria 14-17: create with
 // the caller's own owner binding and a group, out-of-band drift, import, and a
 // destroy that leaves only the caller's own binding.
-func TestAccRoleBindingPolicyResource_RealAPI(t *testing.T) {
+func TestAccIAMRoleBindingResource_RealAPI(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	skipUnlessTestOrgMode(t, testOrgModeConverted, "role binding policy writes answer 409 until the organization converts")
 	PreCheck(t)
@@ -150,7 +150,7 @@ func TestAccRoleBindingPolicyResource_RealAPI(t *testing.T) {
 	groupRole := realOtherBuiltInRole(t, ownerRole)
 
 	cfg := fmt.Sprintf(`
-resource "anyscale_role_binding_policy" "test" {
+resource "anyscale_iam_role_binding" "test" {
   project_id = %q
   roles = {
     %q = {

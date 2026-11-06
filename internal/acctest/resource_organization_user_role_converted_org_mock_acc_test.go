@@ -14,7 +14,7 @@ import (
 
 // An organization converted to role bindings refuses the legacy access writes
 // with 409 and this detail. The provider must turn it into a diagnostic that
-// points at anyscale_role_binding; any other 409 keeps the generic handling.
+// points at anyscale_iam_role_grant; any other 409 keeps the generic handling.
 
 const convOrgConvertedDetail = "This organization uses role bindings. Manage access in Users & IAM or with the role bindings API."
 
@@ -25,7 +25,7 @@ const convOrgUnrecognizedDetail = "Conflict: another membership change for this 
 var (
 	convOrgSummary = regexp.MustCompile(`Organization\s+Uses\s+Role\s+Bindings`)
 	convOrgHints   = []*regexp.Regexp{
-		regexp.MustCompile(`anyscale_role_binding`),
+		regexp.MustCompile(`anyscale_iam_role_grant`),
 		regexp.MustCompile(`user_group_id`),
 		regexp.MustCompile(`\buser_id\b`),
 		regexp.MustCompile(`rbac\.md#organization-access-mode`),

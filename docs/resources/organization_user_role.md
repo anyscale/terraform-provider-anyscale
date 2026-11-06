@@ -3,7 +3,7 @@
 page_title: "anyscale_organization_user_role Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  ~> Deprecated for organizations converted to role bindings; use anyscale_role_binding there. Unconverted organizations keep using this resource. Not available on Azure, where access is managed in the Azure portal. See Legacy RBAC deprecation ../guides/rbac.md#legacy-rbac-deprecation.
+  ~> Deprecated for organizations converted to role bindings; use anyscale_iam_role_grant there. Unconverted organizations keep using this resource. Not available on Azure, where access is managed in the Azure portal. See Legacy RBAC deprecation ../guides/rbac.md#legacy-rbac-deprecation.
   Manages one organization member's organization-scope role. A converted organization ../guides/rbac.md#organization-access-mode refuses these writes.
   This resource manages the role of a user who is already a member of the organization; it does not add or remove members. Membership is managed by anyscale_organization_user.
   Destroying this resource does not revert base_role
@@ -15,7 +15,7 @@ description: |-
 
 # anyscale_organization_user_role (Resource)
 
-~> **Deprecated** for organizations converted to role bindings; use anyscale_role_binding there. Unconverted organizations keep using this resource. Not available on Azure, where access is managed in the Azure portal. See [Legacy RBAC deprecation](../guides/rbac.md#legacy-rbac-deprecation).
+~> **Deprecated** for organizations converted to role bindings; use anyscale_iam_role_grant there. Unconverted organizations keep using this resource. Not available on Azure, where access is managed in the Azure portal. See [Legacy RBAC deprecation](../guides/rbac.md#legacy-rbac-deprecation).
 
 Manages one organization member's organization-scope role. A [converted organization](../guides/rbac.md#organization-access-mode) refuses these writes.
 

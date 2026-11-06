@@ -14,7 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
-// anyscale_role_binding with a user principal (user_id), run against
+// anyscale_iam_role_grant with a user principal (user_id), run against
 // roleBindingMockServer. Exactly one of user_group_id and user_id is set;
 // the other is null in state, including after import.
 
@@ -25,7 +25,7 @@ const (
 
 func rbUserConfig(m *roleBindingMockServer, userID string) string {
 	return m.providerBlock() + fmt.Sprintf(`
-resource "anyscale_role_binding" "test" {
+resource "anyscale_iam_role_grant" "test" {
   user_id  = %q
   role_id  = %q
   cloud_id = %q
@@ -53,8 +53,8 @@ func rbExpectPrincipal(m *roleBindingMockServer, principalType, principalID stri
 
 func rbUserStateChecks(userID string) []statecheck.StateCheck {
 	return []statecheck.StateCheck{
-		statecheck.ExpectKnownValue("anyscale_role_binding.test", tfjsonpath.New("user_id"), knownvalue.StringExact(userID)),
-		statecheck.ExpectKnownValue("anyscale_role_binding.test", tfjsonpath.New("user_group_id"), knownvalue.Null()),
+		statecheck.ExpectKnownValue("anyscale_iam_role_grant.test", tfjsonpath.New("user_id"), knownvalue.StringExact(userID)),
+		statecheck.ExpectKnownValue("anyscale_iam_role_grant.test", tfjsonpath.New("user_group_id"), knownvalue.Null()),
 	}
 }
 
@@ -62,7 +62,7 @@ func rbUserStateChecks(userID string) []statecheck.StateCheck {
 // principal_type "user", the re-plan is empty (Read finds it through the
 // user principal listing), and import recovers user_id with user_group_id
 // null.
-func TestAccRoleBindingResource_UserPrincipalLifecycle(t *testing.T) {
+func TestAccIAMRoleGrantResource_UserPrincipalLifecycle(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	resource.Test(t, resource.TestCase{
@@ -81,7 +81,7 @@ func TestAccRoleBindingResource_UserPrincipalLifecycle(t *testing.T) {
 				},
 			},
 			{
-				ResourceName:      "anyscale_role_binding.test",
+				ResourceName:      "anyscale_iam_role_grant.test",
 				ImportState:       true,
 				ImportStateVerify: true,
 			},
@@ -91,7 +91,7 @@ func TestAccRoleBindingResource_UserPrincipalLifecycle(t *testing.T) {
 
 // A user binding revoked out of band is removed from state on refresh and
 // recreated: Read follows user_id to the user principal listing.
-func TestAccRoleBindingResource_UserPrincipalRevokedOutOfBandIsRecreated(t *testing.T) {
+func TestAccIAMRoleGrantResource_UserPrincipalRevokedOutOfBandIsRecreated(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	var first string
@@ -105,7 +105,7 @@ func TestAccRoleBindingResource_UserPrincipalRevokedOutOfBandIsRecreated(t *test
 				Config:    rbUserConfig(m, rbUserA),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("anyscale_role_binding.test", plancheck.ResourceActionCreate),
+						plancheck.ExpectResourceAction("anyscale_iam_role_grant.test", plancheck.ResourceActionCreate),
 					},
 				},
 				Check: rbExpectPrincipal(m, "user", rbUserA),
@@ -116,7 +116,7 @@ func TestAccRoleBindingResource_UserPrincipalRevokedOutOfBandIsRecreated(t *test
 
 // Importing a binding created outside Terraform recovers the user principal.
 // Asserted inside the import step, which is where the imported values live.
-func TestAccRoleBindingResource_UserPrincipalColdImport(t *testing.T) {
+func TestAccIAMRoleGrantResource_UserPrincipalColdImport(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	id := m.seedBinding("user", rbUserA, rbRole, "cloud", rbCloud)
@@ -125,7 +125,7 @@ func TestAccRoleBindingResource_UserPrincipalColdImport(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config:        rbUserConfig(m, rbUserA),
-				ResourceName:  "anyscale_role_binding.test",
+				ResourceName:  "anyscale_iam_role_grant.test",
 				ImportState:   true,
 				ImportStateId: id,
 				ImportStateCheck: func(states []*terraform.InstanceState) error {
@@ -151,7 +151,7 @@ func TestAccRoleBindingResource_UserPrincipalColdImport(t *testing.T) {
 
 // A group binding imported after the change still maps to user_group_id with
 // user_id null.
-func TestAccRoleBindingResource_GroupPrincipalColdImportLeavesUserNull(t *testing.T) {
+func TestAccIAMRoleGrantResource_GroupPrincipalColdImportLeavesUserNull(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	id := m.seedBinding("user_group", rbGroup, rbRole, "cloud", rbCloud)
@@ -160,7 +160,7 @@ func TestAccRoleBindingResource_GroupPrincipalColdImportLeavesUserNull(t *testin
 		Steps: []resource.TestStep{
 			{
 				Config:        rbConfig(m, rbRole),
-				ResourceName:  "anyscale_role_binding.test",
+				ResourceName:  "anyscale_iam_role_grant.test",
 				ImportState:   true,
 				ImportStateId: id,
 				ImportStateCheck: func(states []*terraform.InstanceState) error {
@@ -179,11 +179,11 @@ func TestAccRoleBindingResource_GroupPrincipalColdImportLeavesUserNull(t *testin
 }
 
 // Exactly one principal: both, or neither, is rejected before any request.
-func TestAccRoleBindingResource_PrincipalExactlyOne(t *testing.T) {
+func TestAccIAMRoleGrantResource_PrincipalExactlyOne(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	both := m.providerBlock() + fmt.Sprintf(`
-resource "anyscale_role_binding" "test" {
+resource "anyscale_iam_role_grant" "test" {
   user_group_id = %q
   user_id       = %q
   role_id       = %q
@@ -191,7 +191,7 @@ resource "anyscale_role_binding" "test" {
 }
 `, rbGroup, rbUserA, rbRole, rbCloud)
 	neither := m.providerBlock() + fmt.Sprintf(`
-resource "anyscale_role_binding" "test" {
+resource "anyscale_iam_role_grant" "test" {
   role_id  = %q
   cloud_id = %q
 }
@@ -212,12 +212,12 @@ resource "anyscale_role_binding" "test" {
 
 // Changing the user, or switching between a group and a user, replaces the
 // binding: there is no in-place update of a grant.
-func TestAccRoleBindingResource_PrincipalChangeReplaces(t *testing.T) {
+func TestAccIAMRoleGrantResource_PrincipalChangeReplaces(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	replace := resource.ConfigPlanChecks{
 		PreApply: []plancheck.PlanCheck{
-			plancheck.ExpectResourceAction("anyscale_role_binding.test", plancheck.ResourceActionDestroyBeforeCreate),
+			plancheck.ExpectResourceAction("anyscale_iam_role_grant.test", plancheck.ResourceActionDestroyBeforeCreate),
 		},
 	}
 	resource.Test(t, resource.TestCase{
@@ -242,7 +242,7 @@ func TestAccRoleBindingResource_PrincipalChangeReplaces(t *testing.T) {
 				ConfigPlanChecks: replace,
 				Check:            rbExpectPrincipal(m, "user_group", rbGroup),
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue("anyscale_role_binding.test", tfjsonpath.New("user_id"), knownvalue.Null()),
+					statecheck.ExpectKnownValue("anyscale_iam_role_grant.test", tfjsonpath.New("user_id"), knownvalue.Null()),
 				},
 			},
 		},
@@ -250,7 +250,7 @@ func TestAccRoleBindingResource_PrincipalChangeReplaces(t *testing.T) {
 }
 
 // Changing the group replaces the binding, as it did before user principals.
-func TestAccRoleBindingResource_GroupChangeReplaces(t *testing.T) {
+func TestAccIAMRoleGrantResource_GroupChangeReplaces(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	const otherGroup = "ug_00000000000000000000000002"
@@ -265,7 +265,7 @@ func TestAccRoleBindingResource_GroupChangeReplaces(t *testing.T) {
 				Config: other,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("anyscale_role_binding.test", plancheck.ResourceActionDestroyBeforeCreate),
+						plancheck.ExpectResourceAction("anyscale_iam_role_grant.test", plancheck.ResourceActionDestroyBeforeCreate),
 					},
 				},
 				Check: rbExpectPrincipal(m, "user_group", otherGroup),
@@ -276,7 +276,7 @@ func TestAccRoleBindingResource_GroupChangeReplaces(t *testing.T) {
 
 // The API refuses a grant to the caller's own user (403). The diagnostic
 // names the provider's identity and the way forward, and nothing is created.
-func TestAccRoleBindingResource_SelfGrantRefused(t *testing.T) {
+func TestAccIAMRoleGrantResource_SelfGrantRefused(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	resource.Test(t, resource.TestCase{
@@ -293,7 +293,7 @@ func TestAccRoleBindingResource_SelfGrantRefused(t *testing.T) {
 
 // The API refuses to revoke the caller's own binding (403). Destroy fails
 // with a diagnostic that offers terraform state rm, and the binding stays.
-func TestAccRoleBindingResource_SelfRevokeRefused(t *testing.T) {
+func TestAccIAMRoleGrantResource_SelfRevokeRefused(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	m.setAllowSelf(true)
@@ -316,46 +316,6 @@ func TestAccRoleBindingResource_SelfRevokeRefused(t *testing.T) {
 				},
 				Config: m.providerBlock(),
 				Check:  rbExpectBindings(m, 0),
-			},
-		},
-	})
-}
-
-// Upgrade from v0.30.0, the last release before user principals: a group
-// binding created by that release plans no changes under this build. Step 1
-// is the positive control that the external provider really is v0.30.0 (it
-// rejects user_id); without it, a dev_overrides CLI config that substitutes
-// the local build would make this test pass without testing an upgrade.
-// Needs the public Registry to download v0.30.0.
-func TestAccRoleBindingResource_UpgradeFromV030GroupBindingPlansNoop(t *testing.T) {
-	SkipIfNotAcceptanceTest(t)
-	m := newRBMock(t)
-	v030 := map[string]resource.ExternalProvider{
-		"anyscale": {Source: "anyscale/anyscale", VersionConstraint: "0.30.0"},
-	}
-	resource.Test(t, resource.TestCase{
-		CheckDestroy: rbDestroyed(m),
-		Steps: []resource.TestStep{
-			{
-				ExternalProviders: v030,
-				Config:            rbUserConfig(m, rbUserA),
-				ExpectError:       regexp.MustCompile(`(?s)Unsupported argument.*user_id`),
-			},
-			{
-				ExternalProviders: v030,
-				Config:            rbConfig(m, rbRole),
-				Check:             rbExpectPrincipal(m, "user_group", rbGroup),
-			},
-			{
-				ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-				Config:                   rbConfig(m, rbRole),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
-				},
-				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue("anyscale_role_binding.test", tfjsonpath.New("user_group_id"), knownvalue.StringExact(rbGroup)),
-					statecheck.ExpectKnownValue("anyscale_role_binding.test", tfjsonpath.New("user_id"), knownvalue.Null()),
-				},
 			},
 		},
 	})

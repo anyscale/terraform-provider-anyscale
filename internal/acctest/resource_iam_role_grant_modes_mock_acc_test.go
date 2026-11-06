@@ -50,7 +50,7 @@ func rbErrorCheck(t *testing.T, want *regexp.Regexp, forbid ...*regexp.Regexp) (
 // Positive control for the absence checks below: the duplicate diagnostic
 // does carry the import hint and "already exists", so a test that forbids
 // them is matching text the provider really emits.
-func TestAccRoleBindingResource_ModesDuplicateKeepsImportHint(t *testing.T) {
+func TestAccIAMRoleGrantResource_ModesDuplicateKeepsImportHint(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	existing := m.seedBinding("user_group", rbGroup, rbRole, "cloud", rbCloud)
@@ -74,7 +74,7 @@ func TestAccRoleBindingResource_ModesDuplicateKeepsImportHint(t *testing.T) {
 
 // An organization that has not converted refuses every role binding write
 // with 409. That is not a duplicate: no import hint, and nothing is created.
-func TestAccRoleBindingResource_NotConvertedCreate(t *testing.T) {
+func TestAccIAMRoleGrantResource_NotConvertedCreate(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	m.setUnconverted(true)
@@ -92,7 +92,7 @@ func TestAccRoleBindingResource_NotConvertedCreate(t *testing.T) {
 
 // The same refusal on destroy: the destroy fails with the conversion
 // diagnostic and the binding stays. Once the refusal lifts, it destroys.
-func TestAccRoleBindingResource_NotConvertedDelete(t *testing.T) {
+func TestAccIAMRoleGrantResource_NotConvertedDelete(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	resource.Test(t, resource.TestCase{
@@ -120,7 +120,7 @@ func TestAccRoleBindingResource_NotConvertedDelete(t *testing.T) {
 }
 
 // An archived role cannot be newly assigned (409, not a duplicate).
-func TestAccRoleBindingResource_ArchivedRoleCreate(t *testing.T) {
+func TestAccIAMRoleGrantResource_ArchivedRoleCreate(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	const archived = "rol_00000000000000000000000099"
@@ -140,7 +140,7 @@ func TestAccRoleBindingResource_ArchivedRoleCreate(t *testing.T) {
 // A revoke that would leave the organization without an Organization owner
 // is refused; the diagnostic carries the API detail and the remedy, and the
 // binding stays.
-func TestAccRoleBindingResource_LockoutDelete(t *testing.T) {
+func TestAccIAMRoleGrantResource_LockoutDelete(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	resource.Test(t, resource.TestCase{
@@ -170,7 +170,7 @@ func TestAccRoleBindingResource_LockoutDelete(t *testing.T) {
 
 // A 409 the provider does not recognize passes through with the API detail
 // and is never reported as a duplicate.
-func TestAccRoleBindingResource_UnrecognizedConflictPassesThrough(t *testing.T) {
+func TestAccIAMRoleGrantResource_UnrecognizedConflictPassesThrough(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	m.setCreateConflict("A refusal this provider has never seen.")

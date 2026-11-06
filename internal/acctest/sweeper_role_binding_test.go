@@ -15,8 +15,8 @@ import (
 )
 
 func init() {
-	resource.AddTestSweepers("anyscale_role_binding", &resource.Sweeper{
-		Name: "anyscale_role_binding",
+	resource.AddTestSweepers("anyscale_iam_role_grant", &resource.Sweeper{
+		Name: "anyscale_iam_role_grant",
 		F:    sweepRoleBindings,
 	})
 }
@@ -35,7 +35,7 @@ type sweepRoleBindingSummary struct {
 func sweepRoleBindings(_ string) error {
 	client, err := GetTestClient()
 	if err != nil {
-		log.Printf("[sweep:anyscale_role_binding] skipping: %v", err)
+		log.Printf("[sweep:anyscale_iam_role_grant] skipping: %v", err)
 		return nil
 	}
 	minAge, err := resolveSweepMinAge(defaultSweepMinAge)
@@ -53,7 +53,7 @@ func sweepRoleBindingsWithClient(ctx context.Context, client *provider.Client, c
 	switch status {
 	case http.StatusOK:
 	case http.StatusNotFound:
-		log.Printf("[sweep:anyscale_role_binding] skipping: role bindings are not enabled for this organization")
+		log.Printf("[sweep:anyscale_iam_role_grant] skipping: role bindings are not enabled for this organization")
 		return nil
 	default:
 		return fmt.Errorf("check role bindings enabled: status %d: %s", status, truncateBody(body, 256))
@@ -81,7 +81,7 @@ func sweepRoleBindingsWithClient(ctx context.Context, client *provider.Client, c
 			swept++
 		}
 	}
-	log.Printf("[sweep:anyscale_role_binding] %d candidate group(s), swept=%d failed=%d", len(candidates), swept, len(failures))
+	log.Printf("[sweep:anyscale_iam_role_grant] %d candidate group(s), swept=%d failed=%d", len(candidates), swept, len(failures))
 	if len(failures) > 0 {
 		return fmt.Errorf("role binding sweep had %d failure(s): %s", len(failures), strings.Join(failures, "; "))
 	}
@@ -112,7 +112,7 @@ func listRoleBindingsForSweep(ctx context.Context, client *provider.Client, grou
 // who may not revoke it, and only the next sweep's listing tells them apart.
 func sweepDeleteRoleBinding(ctx context.Context, client *provider.Client, b sweepRoleBindingSummary) error {
 	if isSweepDryRun() {
-		log.Printf("[sweep:anyscale_role_binding] DRY-RUN would DELETE %s (%s %s)", b.ID, b.ResourceType, b.ResourceID)
+		log.Printf("[sweep:anyscale_iam_role_grant] DRY-RUN would DELETE %s (%s %s)", b.ID, b.ResourceType, b.ResourceID)
 		return nil
 	}
 	status, body, err := sweepUserGroupRequest(ctx, client, "DELETE", "/api/v2/role_bindings/"+url.PathEscape(b.ID), nil)
@@ -122,6 +122,6 @@ func sweepDeleteRoleBinding(ctx context.Context, client *provider.Client, b swee
 	if status != http.StatusNoContent && status != http.StatusOK {
 		return fmt.Errorf("status %d: %s", status, truncateBody(body, 256))
 	}
-	log.Printf("[sweep:anyscale_role_binding] revoked %s (%s %s)", b.ID, b.ResourceType, b.ResourceID)
+	log.Printf("[sweep:anyscale_iam_role_grant] revoked %s (%s %s)", b.ID, b.ResourceType, b.ResourceID)
 	return nil
 }

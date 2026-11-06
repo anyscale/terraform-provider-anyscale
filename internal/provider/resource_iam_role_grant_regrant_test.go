@@ -84,7 +84,7 @@ func runRegrantRead(t *testing.T, s *regrantServer) (*resource.ReadResponse, []s
 	t.Helper()
 	server := httptest.NewServer(s.handler(t))
 	t.Cleanup(server.Close)
-	r := &RoleBindingResource{client: NewClientWithToken(server.URL, "test-token")}
+	r := &IAMRoleGrantResource{client: NewClientWithToken(server.URL, "test-token")}
 	state := forbiddenStateFixture(t, r, map[string]any{
 		"id":            types.StringValue(regrantOldID),
 		"user_group_id": types.StringValue(regrantGroup),

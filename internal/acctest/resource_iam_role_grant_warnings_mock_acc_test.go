@@ -5,12 +5,12 @@ import (
 	"testing"
 )
 
-// Warning-level diagnostics of anyscale_role_binding, driven through the
+// Warning-level diagnostics of anyscale_iam_role_grant, driven through the
 // terraform CLI because resource.Test does not surface warnings.
 
 // A binding revoked out of band warns on refresh, naming the role-binding
 // policy hazard, and the plan re-creates it.
-func TestAccRoleBindingResource_RevokedOutOfBandWarnsCLI(t *testing.T) {
+func TestAccIAMRoleGrantResource_RevokedOutOfBandWarnsCLI(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	run := cliDevWorkspace(t, rbConfig(m, rbRole))
@@ -27,9 +27,9 @@ func TestAccRoleBindingResource_RevokedOutOfBandWarnsCLI(t *testing.T) {
 	pmExpectWarning(t, lines, "Role Binding Revoked Outside Terraform",
 		"role "+rbRole+" to user_group "+rbGroup+" on cloud "+rbCloud,
 		"or the user or user group holding it was deleted. Terraform plans to re-create it",
-		"(anyscale_role_binding_policy or anyscale role-binding policy apply) manages this cloud")
-	if !rbPlansCreate(out, "anyscale_role_binding.test") {
-		t.Errorf("plan does not create anyscale_role_binding.test:\n%s", out)
+		"(anyscale_iam_role_binding or anyscale role-binding policy apply) manages this cloud")
+	if !rbPlansCreate(out, "anyscale_iam_role_grant.test") {
+		t.Errorf("plan does not create anyscale_iam_role_grant.test:\n%s", out)
 	}
 }
 

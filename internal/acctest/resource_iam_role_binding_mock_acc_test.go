@@ -20,13 +20,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
-// Mock acceptance tests for anyscale_role_binding_policy, through resource.Test
+// Mock acceptance tests for anyscale_iam_role_binding, through resource.Test
 // against policyMockServer. Warnings, which resource.Test does not surface, are
 // asserted through the terraform CLI in
 // resource_role_binding_policy_warnings_mock_acc_test.go.
 
 const (
-	pmAddr     = "anyscale_role_binding_policy.test"
+	pmAddr     = "anyscale_iam_role_binding.test"
 	pmProject  = "prj_policy00000000000000000001"
 	pmProject2 = "prj_policy00000000000000000002"
 	pmCloud    = "cld_policy00000000000000000001"
@@ -79,7 +79,7 @@ func pmRole(roleID string, users, groups []string) string {
 
 func pmConfig(m *policyMockServer, scopeAttr, scopeID string, roles ...string) string {
 	return m.providerBlock() + fmt.Sprintf(`
-resource "anyscale_role_binding_policy" "test" {
+resource "anyscale_iam_role_binding" "test" {
   %s = %q
   roles = {
 %s  }
@@ -169,18 +169,18 @@ func pmRolesCheck(roles map[string][2][]string) statecheck.StateCheck {
 
 // Criterion 1: exactly one scope, and every roles entry names a principal
 // with no empty set; changing the scope replaces the policy.
-func TestAccRoleBindingPolicyResource_PlanTimeValidation(t *testing.T) {
+func TestAccIAMRoleBindingResource_PlanTimeValidation(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	twoScopes := m.providerBlock() + fmt.Sprintf(`
-resource "anyscale_role_binding_policy" "test" {
+resource "anyscale_iam_role_binding" "test" {
   project_id = %q
   cloud_id   = %q
   roles      = {}
 }
 `, pmProject, pmCloud)
 	noScope := m.providerBlock() + `
-resource "anyscale_role_binding_policy" "test" {
+resource "anyscale_iam_role_binding" "test" {
   roles = {}
 }
 `
@@ -211,7 +211,7 @@ resource "anyscale_role_binding_policy" "test" {
 	}
 }
 
-func TestAccRoleBindingPolicyResource_ScopeChangeReplaces(t *testing.T) {
+func TestAccIAMRoleBindingResource_ScopeChangeReplaces(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	m.seed("user", policyMockCaller, pmOwner, "project", pmProject2)
@@ -235,7 +235,7 @@ func TestAccRoleBindingPolicyResource_ScopeChangeReplaces(t *testing.T) {
 
 // Criterion 2: create sends one PUT with the full policy, sets state from
 // generate, and plans empty afterwards.
-func TestAccRoleBindingPolicyResource_CreateOnePut(t *testing.T) {
+func TestAccIAMRoleBindingResource_CreateOnePut(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	cfg := pmConfig(m, "project_id", pmProject,
@@ -283,8 +283,8 @@ func TestAccRoleBindingPolicyResource_CreateOnePut(t *testing.T) {
 
 // Criterion 3: create on a scope that already holds grants the policy does not
 // name dry-runs at plan time and revokes them on apply. The warning text is
-// asserted in TestAccRoleBindingPolicyResource_CreateTakeoverWarningCLI.
-func TestAccRoleBindingPolicyResource_CreateTakeover(t *testing.T) {
+// asserted in TestAccIAMRoleBindingResource_CreateTakeoverWarningCLI.
+func TestAccIAMRoleBindingResource_CreateTakeover(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	m.seed("user", pmBob, pmReader, "project", pmProject)
@@ -316,7 +316,7 @@ func TestAccRoleBindingPolicyResource_CreateTakeover(t *testing.T) {
 
 // Criterion 4: dry-run refusals fail the plan with the server's text plus what
 // to do about it.
-func TestAccRoleBindingPolicyResource_DryRunRefusals(t *testing.T) {
+func TestAccIAMRoleBindingResource_DryRunRefusals(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	resource.Test(t, resource.TestCase{
@@ -364,7 +364,7 @@ func TestAccRoleBindingPolicyResource_DryRunRefusals(t *testing.T) {
 // The own-binding hint and the frozen lookup both read a binding by id, so
 // both retry: the hint still names the entry, and destroy still keeps the
 // frozen binding.
-func TestAccRoleBindingPolicyResource_ByIDLookupsRetryPropagation(t *testing.T) {
+func TestAccIAMRoleBindingResource_ByIDLookupsRetryPropagation(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	m.setGetDenials(2)
@@ -386,8 +386,8 @@ func TestAccRoleBindingPolicyResource_ByIDLookupsRetryPropagation(t *testing.T) 
 }
 
 // Criterion 5: with the scope unknown at plan, no dry run is made. The warning
-// is asserted in TestAccRoleBindingPolicyResource_UnknownScopeWarningCLI.
-func TestAccRoleBindingPolicyResource_UnknownScopeSkipsDryRun(t *testing.T) {
+// is asserted in TestAccIAMRoleBindingResource_UnknownScopeWarningCLI.
+func TestAccIAMRoleBindingResource_UnknownScopeSkipsDryRun(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	cfg := m.providerBlock() + fmt.Sprintf(`
@@ -395,7 +395,7 @@ resource "terraform_data" "scope" {
   input = %q
 }
 
-resource "anyscale_role_binding_policy" "test" {
+resource "anyscale_iam_role_binding" "test" {
   project_id = terraform_data.scope.output
   roles = {
 %s  }
@@ -427,7 +427,7 @@ resource "anyscale_role_binding_policy" "test" {
 
 // Criterion 6: adding and removing principals updates in place, and the PUT
 // carries the whole new policy.
-func TestAccRoleBindingPolicyResource_UpdateInPlace(t *testing.T) {
+func TestAccIAMRoleBindingResource_UpdateInPlace(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	updated := []string{
@@ -464,7 +464,7 @@ func TestAccRoleBindingPolicyResource_UpdateInPlace(t *testing.T) {
 
 // Criterion 7: a binding added outside Terraform plans its removal; one revoked
 // outside Terraform plans its return.
-func TestAccRoleBindingPolicyResource_Drift(t *testing.T) {
+func TestAccIAMRoleBindingResource_Drift(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	cfg := pmConfig(m, "project_id", pmProject, pmBase()...)
@@ -513,7 +513,7 @@ func (m *policyMockServer) bindingsOn(scopeType, scopeID string) []policyMockBin
 
 // Criterion 8: a cold import by project/<id> recovers the bindings, and a
 // config naming them plans no change.
-func TestAccRoleBindingPolicyResource_ImportNoOp(t *testing.T) {
+func TestAccIAMRoleBindingResource_ImportNoOp(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	m.seed("user_group", pmGroupA, pmReader, "project", pmProject)
@@ -562,7 +562,7 @@ func TestAccRoleBindingPolicyResource_ImportNoOp(t *testing.T) {
 	})
 }
 
-func TestAccRoleBindingPolicyResource_ImportMalformedID(t *testing.T) {
+func TestAccIAMRoleBindingResource_ImportMalformedID(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	cfg := pmConfig(m, "project_id", pmProject, pmBase()...)
@@ -577,7 +577,7 @@ func TestAccRoleBindingPolicyResource_ImportMalformedID(t *testing.T) {
 }
 
 // Criterion 9: destroy keeps the caller's own bindings and revokes the rest.
-func TestAccRoleBindingPolicyResource_DestroyKeepsOwnBindings(t *testing.T) {
+func TestAccIAMRoleBindingResource_DestroyKeepsOwnBindings(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	resource.Test(t, resource.TestCase{
@@ -608,7 +608,7 @@ func pmFrozenRoles(m *policyMockServer, n int) []string {
 
 // Criterion 9: each frozen refusal adds the named binding and retries; ten are
 // kept, and the rest of the policy is revoked.
-func TestAccRoleBindingPolicyResource_DestroyKeepsFrozenBindings(t *testing.T) {
+func TestAccIAMRoleBindingResource_DestroyKeepsFrozenBindings(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	frozen := pmFrozenRoles(m, 10)
@@ -627,7 +627,7 @@ func TestAccRoleBindingPolicyResource_DestroyKeepsFrozenBindings(t *testing.T) {
 
 // Criterion 9: the eleventh frozen refusal is an error, and nothing is
 // revoked.
-func TestAccRoleBindingPolicyResource_DestroyFrozenRetryBound(t *testing.T) {
+func TestAccIAMRoleBindingResource_DestroyFrozenRetryBound(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	frozen := pmFrozenRoles(m, 11)
@@ -658,7 +658,7 @@ func TestAccRoleBindingPolicyResource_DestroyFrozenRetryBound(t *testing.T) {
 
 // Criterion 10: a destroy the API refuses as an organization lockout fails at
 // plan time, before anything is applied.
-func TestAccRoleBindingPolicyResource_DestroyPlanLockout(t *testing.T) {
+func TestAccIAMRoleBindingResource_DestroyPlanLockout(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	cfg := pmConfig(m, "organization_id", pmOrg, pmRole(pmOwner, nil, []string{pmGroupB}))
@@ -688,7 +688,7 @@ func TestAccRoleBindingPolicyResource_DestroyPlanLockout(t *testing.T) {
 
 // Criterion 11: a 403 on generate with the scope also 403 removes the policy
 // from state; with the scope still readable it is an error and state stays.
-func TestAccRoleBindingPolicyResource_ReadForbidden(t *testing.T) {
+func TestAccIAMRoleBindingResource_ReadForbidden(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	cfg := pmConfig(m, "project_id", pmProject, pmBase()...)
@@ -707,7 +707,7 @@ func TestAccRoleBindingPolicyResource_ReadForbidden(t *testing.T) {
 			{
 				PreConfig:    func() { m.setNoIAM("project", pmProject, true) },
 				RefreshState: true,
-				ExpectError:  regexp.MustCompile(`(?s)Role Binding Policy Not Readable.*no\s+longer\s+manages\s+IAM`),
+				ExpectError:  regexp.MustCompile(`(?s)Role Binding Not Readable.*no\s+longer\s+manages\s+IAM`),
 			},
 			{
 				// State was kept: with access back, the plan is empty.
@@ -732,7 +732,7 @@ func TestAccRoleBindingPolicyResource_ReadForbidden(t *testing.T) {
 
 // Criterion 12: role bindings off is the disabled error and keeps state; an
 // unconverted organization is an error naming conversion.
-func TestAccRoleBindingPolicyResource_FlagOffKeepsState(t *testing.T) {
+func TestAccIAMRoleBindingResource_FlagOffKeepsState(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	cfg := pmConfig(m, "project_id", pmProject, pmBase()...)
@@ -758,7 +758,7 @@ func TestAccRoleBindingPolicyResource_FlagOffKeepsState(t *testing.T) {
 	})
 }
 
-func TestAccRoleBindingPolicyResource_UnconvertedOrg(t *testing.T) {
+func TestAccIAMRoleBindingResource_UnconvertedOrg(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	m.setUnconverted(true)
@@ -776,18 +776,18 @@ func TestAccRoleBindingPolicyResource_UnconvertedOrg(t *testing.T) {
 
 // Criterion 13: the data source reads the same shape, and a 403 is an error
 // whether the scope is gone or access was lost.
-func TestAccRoleBindingPolicyDataSource_Reads(t *testing.T) {
+func TestAccIAMRoleBindingDataSource_Reads(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	m.seed("user_group", pmGroupA, pmReader, "project", pmProject)
 	m.seed("user", pmAlice, pmReader, "project", pmProject)
 	cfg := m.providerBlock() + fmt.Sprintf(`
-data "anyscale_role_binding_policy" "test" {
+data "anyscale_iam_role_binding" "test" {
   project_id = %q
 }
 `, pmProject)
-	const addr = "data.anyscale_role_binding_policy.test"
-	notReadable := regexp.MustCompile(`Role Binding Policy Not Readable`)
+	const addr = "data.anyscale_iam_role_binding.test"
+	notReadable := regexp.MustCompile(`Role Binding Not Readable`)
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
@@ -821,7 +821,7 @@ data "anyscale_role_binding_policy" "test" {
 	})
 }
 
-func TestAccRoleBindingPolicyDataSource_FlagOff(t *testing.T) {
+func TestAccIAMRoleBindingDataSource_FlagOff(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	m.setFlagOff(true)
@@ -830,7 +830,7 @@ func TestAccRoleBindingPolicyDataSource_FlagOff(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: m.providerBlock() + fmt.Sprintf(`
-data "anyscale_role_binding_policy" "test" {
+data "anyscale_iam_role_binding" "test" {
   cloud_id = %q
 }
 `, pmCloud),
@@ -843,7 +843,7 @@ data "anyscale_role_binding_policy" "test" {
 // On an Azure control plane the policy refuses create, update and import at
 // plan time, still destroys, and plans empty on unchanged state; the data
 // source refuses to read.
-func TestAccRoleBindingPolicyResource_AzureBlocked_MockServer(t *testing.T) {
+func TestAccIAMRoleBindingResource_AzureBlocked_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	var azure atomic.Bool
@@ -855,14 +855,14 @@ func TestAccRoleBindingPolicyResource_AzureBlocked_MockServer(t *testing.T) {
 	})
 }
 
-func TestAccRoleBindingPolicyDataSource_AzureBlocked_MockServer(t *testing.T) {
+func TestAccIAMRoleBindingDataSource_AzureBlocked_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	var azure atomic.Bool
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: azureClassifiedFactories(&azure),
 		Steps: azureDataSourceSteps(&azure, m.providerBlock()+fmt.Sprintf(`
-data "anyscale_role_binding_policy" "test" {
+data "anyscale_iam_role_binding" "test" {
   project_id = %q
 }
 `, pmProject)),
@@ -872,7 +872,7 @@ data "anyscale_role_binding_policy" "test" {
 // A PUT that succeeded is kept in state even when the read-back fails: the
 // create errors, Terraform records the resource as tainted, and the next plan
 // replaces it rather than creating it as if nothing had been applied.
-func TestAccRoleBindingPolicyResource_ReadBackFailureKeepsTaintedState(t *testing.T) {
+func TestAccIAMRoleBindingResource_ReadBackFailureKeepsTaintedState(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	cfg := pmConfig(m, "project_id", pmProject, pmBase()...)
