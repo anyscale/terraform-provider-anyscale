@@ -6,11 +6,11 @@ variable "project_id" {
   type        = string
 }
 
-data "anyscale_role_binding_policy" "project" {
+data "anyscale_iam_role_binding" "project" {
   project_id = var.project_id
 }
 
 output "project_role_ids" {
   description = "Roles held directly on the project"
-  value       = keys(data.anyscale_role_binding_policy.project.roles)
+  value       = keys(data.anyscale_iam_role_binding.project.roles)
 }
