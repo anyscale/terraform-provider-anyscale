@@ -203,7 +203,7 @@ resource "anyscale_iam_role_grant" "test" {
 				ResourceName:  "anyscale_iam_role_grant.test",
 				ImportState:   true,
 				ImportStateId: id,
-				ExpectError:   regexp.MustCompile(`(?s)Role Binding Scope Not Supported.*held on a dataset`),
+				ExpectError:   regexp.MustCompile(`(?s)Role Grant Scope Not Supported.*held on a dataset`),
 			},
 		},
 	})

@@ -305,7 +305,7 @@ func TestAccIAMRoleGrantResource_SelfRevokeRefused(t *testing.T) {
 			{
 				PreConfig:   func() { m.setAllowSelf(false) },
 				Config:      m.providerBlock(),
-				ExpectError: regexp.MustCompile(`(?s)Cannot Revoke the Provider's Own Role Binding.*terraform\s+state\s+rm`),
+				ExpectError: regexp.MustCompile(`(?s)Cannot Revoke the Provider's Own Role Grant.*terraform\s+state\s+rm`),
 			},
 			{
 				PreConfig: func() {

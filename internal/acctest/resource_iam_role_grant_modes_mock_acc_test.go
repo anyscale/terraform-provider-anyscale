@@ -55,7 +55,7 @@ func TestAccIAMRoleGrantResource_ModesDuplicateKeepsImportHint(t *testing.T) {
 	m := newRBMock(t)
 	existing := m.seedBinding("user_group", rbGroup, rbRole, "cloud", rbCloud)
 	check, assertCalled := rbErrorCheck(t,
-		regexp.MustCompile(`Role Binding Already Exists`))
+		regexp.MustCompile(`Role Grant Already Exists`))
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		ErrorCheck: func(err error) error {
