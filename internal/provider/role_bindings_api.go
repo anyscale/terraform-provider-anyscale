@@ -14,7 +14,7 @@ import (
 // roleBindingsBetaBanner opens the MarkdownDescription of the role binding
 // resource and the role data source. The policy it links to is written once,
 // in the RBAC guide.
-const roleBindingsBetaBanner = "~> **Beta.** Role bindings are enabled per organization by Anyscale while customers migrate; contact [support@anyscale.com](mailto:support@anyscale.com) to enable them. Breaking schema changes get a deprecation first and a changelog entry. See the [RBAC guide](../guides/rbac.md#role-bindings-beta).\n\n"
+const roleBindingsBetaBanner = "~> **Beta.** Role bindings are enabled per organization by Anyscale while customers migrate; contact [support@anyscale.com](mailto:support@anyscale.com) to enable them. Beta resources may change incompatibly; every breaking change is listed in the changelog. See the [RBAC guide](../guides/rbac.md#role-bindings-beta).\n\n"
 
 const (
 	roleBindingsBasePath = "/api/v2/role_bindings"

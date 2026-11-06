@@ -102,7 +102,7 @@ func withAzureDestroyCheck(steps []resource.TestStep, addr string) []resource.Te
 	return steps
 }
 
-func TestAccRoleBindingResource_AzureBlocked_MockServer(t *testing.T) {
+func TestAccIAMRoleGrantResource_AzureBlocked_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRoleBindingLifecycleMock(t)
 	var azure atomic.Bool
@@ -110,14 +110,14 @@ func TestAccRoleBindingResource_AzureBlocked_MockServer(t *testing.T) {
 	// Azure too and would mask whether the resource itself refuses.
 	cfg := func(roleID string) string {
 		return m.providerBlock() + fmt.Sprintf(`
-resource "anyscale_role_binding" "test" {
+resource "anyscale_iam_role_grant" "test" {
   user_group_id = %q
   role_id       = %q
   cloud_id      = %q
 }
 `, rbMockGroup, roleID, rbMockCloud)
 	}
-	const addr = "anyscale_role_binding.test"
+	const addr = "anyscale_iam_role_grant.test"
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: azureClassifiedFactories(&azure),
 		CheckDestroy: func(*terraform.State) error {

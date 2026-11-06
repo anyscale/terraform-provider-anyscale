@@ -3,7 +3,7 @@
 page_title: "anyscale_cloud_access Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  ~> Deprecated for organizations converted to role bindings; use anyscale_role_binding there. Unconverted organizations keep using this resource. Not available on Azure, where access is managed in the Azure portal. See Legacy RBAC deprecation ../guides/rbac.md#legacy-rbac-deprecation.
+  ~> Deprecated for organizations converted to role bindings; use anyscale_iam_role_grant there. Unconverted organizations keep using this resource. Not available on Azure, where access is managed in the Azure portal. See Legacy RBAC deprecation ../guides/rbac.md#legacy-rbac-deprecation.
   Manages the complete member list of one Anyscale cloud: cloud roles, deny roles, and each member's project roles on the projects your configuration names. A converted organization ../guides/rbac.md#organization-access-mode refuses these writes.
   ~> This resource is authoritative. Any member not declared in member is revoked, including people granted access in the Anyscale console and including on the first apply; those members appear nowhere in plan output. Read the RBAC guide ../guides/rbac.md before your first apply against a production cloud.
   A clean plan is not proof that nobody has unintended access: organization admins and your own identity are invisible to this resource, project roles are compared only for the projects you name, and a console role change between writer and owner is not detected. Only manage a given cloud from one Terraform state, and put lifecycle { prevent_destroy = true } on production clouds. A project role for a member with no cloud role is a plan-time error.
@@ -12,7 +12,7 @@ description: |-
 
 # anyscale_cloud_access (Resource)
 
-~> **Deprecated** for organizations converted to role bindings; use anyscale_role_binding there. Unconverted organizations keep using this resource. Not available on Azure, where access is managed in the Azure portal. See [Legacy RBAC deprecation](../guides/rbac.md#legacy-rbac-deprecation).
+~> **Deprecated** for organizations converted to role bindings; use anyscale_iam_role_grant there. Unconverted organizations keep using this resource. Not available on Azure, where access is managed in the Azure portal. See [Legacy RBAC deprecation](../guides/rbac.md#legacy-rbac-deprecation).
 
 Manages the **complete** member list of one Anyscale cloud: cloud roles, deny roles, and each member's project roles on the projects your configuration names. A [converted organization](../guides/rbac.md#organization-access-mode) refuses these writes.
 

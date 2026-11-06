@@ -34,7 +34,7 @@ var (
 	// The detail must route the practitioner to the replacement surface. \s+
 	// between words because Terraform wraps diagnostic detail lines.
 	cloudAccessConvertedDetailWants = []*regexp.Regexp{
-		regexp.MustCompile(`anyscale_role_binding`),
+		regexp.MustCompile(`anyscale_iam_role_grant`),
 		regexp.MustCompile(`user_group_id`),
 		regexp.MustCompile(`\buser_id\b`),
 		regexp.MustCompile(`rbac\.md#organization-access-mode`),

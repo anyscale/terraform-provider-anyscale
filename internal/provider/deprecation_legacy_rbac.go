@@ -15,13 +15,13 @@ const (
 	legacyRBACAttributeNote = "See " + legacyRBACGuideLink + ". "
 
 	// legacyRBACResourceDeprecation is for the resources that write legacy access.
-	legacyRBACResourceDeprecation = "Deprecated for organizations converted to role bindings; use anyscale_role_binding there. " +
+	legacyRBACResourceDeprecation = "Deprecated for organizations converted to role bindings; use anyscale_iam_role_grant there. " +
 		"Unconverted organizations keep using this resource. Not available on Azure, where access is managed in the Azure portal."
 
 	// legacyAutoAddUserDeprecation is for anyscale_cloud.auto_add_user, the one legacy write
 	// that is an attribute.
 	legacyAutoAddUserDeprecation = "Deprecated for organizations converted to role bindings; bind a role to the All users group " +
-		"on the cloud with anyscale_role_binding there. Unconverted organizations keep using it. " +
+		"on the cloud with anyscale_iam_role_grant there. Unconverted organizations keep using it. " +
 		"Not available on Azure, where access is managed in the Azure portal."
 
 	// legacyAutoAddUserReadDeprecation is for the data sources' read-only auto_add_user.

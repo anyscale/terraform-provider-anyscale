@@ -12,17 +12,17 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
-// Import of anyscale_role_binding by its natural key,
+// Import of anyscale_iam_role_grant by its natural key,
 // <scope_type>/<scope_id>/<principal_type>/<principal_id>/<role_id>, in
 // addition to the rb_ id. The key resolves to the existing binding's rb_ id;
 // import never creates one. rb_ import stays covered by
-// TestAccRoleBindingResource_ImportMapsScope and _MockLifecycle.
+// TestAccIAMRoleGrantResource_ImportMapsScope and _MockLifecycle.
 
 var rbCompositeFormatErr = regexp.MustCompile(`(?s)rb_.*<scope_type>/<scope_id>/<principal_type>/<principal_id>/<role_id>`)
 
 func rbScopedConfig(m *roleBindingMockServer, principalAttr, principalID, scopeAttr, scopeID string) string {
 	return m.providerBlock() + fmt.Sprintf(`
-resource "anyscale_role_binding" "test" {
+resource "anyscale_iam_role_grant" "test" {
   %s = %q
   role_id = %q
   %s = %q
@@ -33,7 +33,7 @@ resource "anyscale_role_binding" "test" {
 // Test A: the composite key recovers the existing binding, for each principal
 // type and scope type. Asserted inside the import step, where the imported
 // values live; the other principal attribute is null.
-func TestAccRoleBindingResource_CompositeImportRecoversBinding(t *testing.T) {
+func TestAccIAMRoleGrantResource_CompositeImportRecoversBinding(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	cases := []struct {
 		name, principalType, principalAttr, principalID, otherAttr, scopeType, scopeAttr, scopeID string
@@ -52,7 +52,7 @@ func TestAccRoleBindingResource_CompositeImportRecoversBinding(t *testing.T) {
 				Steps: []resource.TestStep{
 					{
 						Config:        rbScopedConfig(m, tc.principalAttr, tc.principalID, tc.scopeAttr, tc.scopeID),
-						ResourceName:  "anyscale_role_binding.test",
+						ResourceName:  "anyscale_iam_role_grant.test",
 						ImportState:   true,
 						ImportStateId: key,
 						ImportStateCheck: func(states []*terraform.InstanceState) error {
@@ -84,7 +84,7 @@ func TestAccRoleBindingResource_CompositeImportRecoversBinding(t *testing.T) {
 
 // The import-block form with a composite id, as a practitioner would write
 // it: the plan imports the existing binding with no changes.
-func TestAccRoleBindingResource_CompositeImportBlock(t *testing.T) {
+func TestAccIAMRoleGrantResource_CompositeImportBlock(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	want := m.seedBinding("user_group", rbGroup, rbRole, "cloud", rbCloud)
@@ -92,22 +92,22 @@ func TestAccRoleBindingResource_CompositeImportBlock(t *testing.T) {
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				ResourceName:    "anyscale_role_binding.test",
+				ResourceName:    "anyscale_iam_role_grant.test",
 				ImportState:     true,
 				ImportStateKind: resource.ImportBlockWithID,
-				ImportStateId:   "anyscale_role_binding.test",
+				ImportStateId:   "anyscale_iam_role_grant.test",
 				Config: rbConfig(m, rbRole) + fmt.Sprintf(`
 import {
-  to = anyscale_role_binding.test
+  to = anyscale_iam_role_grant.test
   id = "cloud/%s/user_group/%s/%s"
 }
 `, rbCloud, rbGroup, rbRole),
 				ImportStateConfigExact: true,
 				ImportPlanChecks: resource.ImportPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("anyscale_role_binding.test", plancheck.ResourceActionNoop),
-						plancheck.ExpectKnownValue("anyscale_role_binding.test", tfjsonpath.New("id"), knownvalue.StringExact(want)),
-						plancheck.ExpectKnownValue("anyscale_role_binding.test", tfjsonpath.New("user_id"), knownvalue.Null()),
+						plancheck.ExpectResourceAction("anyscale_iam_role_grant.test", plancheck.ResourceActionNoop),
+						plancheck.ExpectKnownValue("anyscale_iam_role_grant.test", tfjsonpath.New("id"), knownvalue.StringExact(want)),
+						plancheck.ExpectKnownValue("anyscale_iam_role_grant.test", tfjsonpath.New("user_id"), knownvalue.Null()),
 					},
 				},
 			},
@@ -117,7 +117,7 @@ import {
 
 // The principal holds a different role on the scope: no binding matches, so
 // import fails and nothing is created.
-func TestAccRoleBindingResource_CompositeImportNoMatch(t *testing.T) {
+func TestAccIAMRoleGrantResource_CompositeImportNoMatch(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	m.seedBinding("user_group", rbGroup, "rol_00000000000000000000000077", "cloud", rbCloud)
@@ -126,7 +126,7 @@ func TestAccRoleBindingResource_CompositeImportNoMatch(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config:        rbConfig(m, rbRole),
-				ResourceName:  "anyscale_role_binding.test",
+				ResourceName:  "anyscale_iam_role_grant.test",
 				ImportState:   true,
 				ImportStateId: fmt.Sprintf("cloud/%s/user_group/%s/%s", rbCloud, rbGroup, rbRole),
 				ExpectError:   regexp.MustCompile(`(?i)no\s+role\s+binding\s+grants`),
@@ -142,7 +142,7 @@ func TestAccRoleBindingResource_CompositeImportNoMatch(t *testing.T) {
 }
 
 // The match is found past the first page of the principal listing.
-func TestAccRoleBindingResource_CompositeImportWalksEveryPage(t *testing.T) {
+func TestAccIAMRoleGrantResource_CompositeImportWalksEveryPage(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	for i := 0; i < 60; i++ {
@@ -155,7 +155,7 @@ func TestAccRoleBindingResource_CompositeImportWalksEveryPage(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config:        rbConfig(m, rbRole),
-				ResourceName:  "anyscale_role_binding.test",
+				ResourceName:  "anyscale_iam_role_grant.test",
 				ImportState:   true,
 				ImportStateId: fmt.Sprintf("cloud/%s/user_group/%s/%s", rbCloud, rbGroup, rbRole),
 				ImportStateCheck: func(states []*terraform.InstanceState) error {
@@ -171,7 +171,7 @@ func TestAccRoleBindingResource_CompositeImportWalksEveryPage(t *testing.T) {
 
 // With the feature off, a composite import gets the flag-off diagnostic, as
 // Read does, not a no-match error.
-func TestAccRoleBindingResource_CompositeImportFlagOff(t *testing.T) {
+func TestAccIAMRoleGrantResource_CompositeImportFlagOff(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	m.setFlagOff(true)
@@ -180,7 +180,7 @@ func TestAccRoleBindingResource_CompositeImportFlagOff(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config:        rbConfig(m, rbRole),
-				ResourceName:  "anyscale_role_binding.test",
+				ResourceName:  "anyscale_iam_role_grant.test",
 				ImportState:   true,
 				ImportStateId: fmt.Sprintf("cloud/%s/user_group/%s/%s", rbCloud, rbGroup, rbRole),
 				ExpectError:   rbFlagOffErr,
@@ -191,7 +191,7 @@ func TestAccRoleBindingResource_CompositeImportFlagOff(t *testing.T) {
 
 // A malformed id is a config error that names both accepted formats, and
 // reaches no write route.
-func TestAccRoleBindingResource_CompositeImportMalformed(t *testing.T) {
+func TestAccIAMRoleGrantResource_CompositeImportMalformed(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	for name, id := range map[string]string{
 		"four_parts":      fmt.Sprintf("cloud/%s/user_group/%s", rbCloud, rbGroup),
@@ -211,7 +211,7 @@ func TestAccRoleBindingResource_CompositeImportMalformed(t *testing.T) {
 				Steps: []resource.TestStep{
 					{
 						Config:        rbConfig(m, rbRole),
-						ResourceName:  "anyscale_role_binding.test",
+						ResourceName:  "anyscale_iam_role_grant.test",
 						ImportState:   true,
 						ImportStateId: id,
 						ExpectError:   rbCompositeFormatErr,

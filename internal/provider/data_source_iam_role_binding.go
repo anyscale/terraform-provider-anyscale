@@ -14,33 +14,33 @@ import (
 )
 
 var (
-	_ datasource.DataSource                     = &RoleBindingPolicyDataSource{}
-	_ datasource.DataSourceWithConfigure        = &RoleBindingPolicyDataSource{}
-	_ datasource.DataSourceWithConfigValidators = &RoleBindingPolicyDataSource{}
+	_ datasource.DataSource                     = &IAMRoleBindingDataSource{}
+	_ datasource.DataSourceWithConfigure        = &IAMRoleBindingDataSource{}
+	_ datasource.DataSourceWithConfigValidators = &IAMRoleBindingDataSource{}
 )
 
-// NewRoleBindingPolicyDataSource creates a new role binding policy data source.
-func NewRoleBindingPolicyDataSource() datasource.DataSource {
-	return &RoleBindingPolicyDataSource{}
+// NewIAMRoleBindingDataSource creates a new role binding policy data source.
+func NewIAMRoleBindingDataSource() datasource.DataSource {
+	return &IAMRoleBindingDataSource{}
 }
 
-// RoleBindingPolicyDataSource reads every direct role binding on one scope.
-type RoleBindingPolicyDataSource struct {
+// IAMRoleBindingDataSource reads every direct role binding on one scope.
+type IAMRoleBindingDataSource struct {
 	client *Client
 }
 
-func (d *RoleBindingPolicyDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_role_binding_policy"
+func (d *IAMRoleBindingDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_iam_role_binding"
 }
 
-func (d *RoleBindingPolicyDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+func (d *IAMRoleBindingDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	scopeDescription := "Specify exactly one of `organization_id`, `cloud_id` or `project_id`."
 	idSet := func(description string) schema.SetAttribute {
 		return schema.SetAttribute{ElementType: types.StringType, Computed: true, MarkdownDescription: description}
 	}
 	resp.Schema = schema.Schema{
 		MarkdownDescription: roleBindingsBetaBanner +
-			"Reads every direct role binding on one organization, cloud or project, in the shape `anyscale_role_binding_policy` takes. " +
+			"Reads every direct role binding on one organization, cloud or project, in the shape `anyscale_iam_role_binding` takes. " +
 			"Bindings held on a parent scope are not included. Reading requires managing IAM on the scope.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -76,7 +76,7 @@ func (d *RoleBindingPolicyDataSource) Schema(ctx context.Context, req datasource
 	}
 }
 
-func (d *RoleBindingPolicyDataSource) ConfigValidators(ctx context.Context) []datasource.ConfigValidator {
+func (d *IAMRoleBindingDataSource) ConfigValidators(ctx context.Context) []datasource.ConfigValidator {
 	return []datasource.ConfigValidator{
 		datasourcevalidator.ExactlyOneOf(
 			path.MatchRoot("organization_id"),
@@ -86,14 +86,14 @@ func (d *RoleBindingPolicyDataSource) ConfigValidators(ctx context.Context) []da
 	}
 }
 
-func (d *RoleBindingPolicyDataSource) Configure(ctx context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+func (d *IAMRoleBindingDataSource) Configure(ctx context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
 	if client, ok := clientFromProviderData(req.ProviderData, "Unexpected Data Source Configure Type", &resp.Diagnostics); ok {
 		d.client = client
 	}
 }
 
-func (d *RoleBindingPolicyDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
-	if refuseRBACOnAzure(d.client, roleBindingPolicyTypeName, &resp.Diagnostics) {
+func (d *IAMRoleBindingDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	if refuseRBACOnAzure(d.client, iamRoleBindingTypeName, &resp.Diagnostics) {
 		return
 	}
 	var config RoleBindingPolicyModel
@@ -110,7 +110,7 @@ func (d *RoleBindingPolicyDataSource) Read(ctx context.Context, req datasource.R
 		case isHTTPStatus(err, http.StatusForbidden):
 			// A data source has no state to drop, so a deleted scope and lost
 			// access are both errors.
-			resp.Diagnostics.AddError("Role Binding Policy Not Readable",
+			resp.Diagnostics.AddError("Role Binding Not Readable",
 				"The Anyscale API refused to read the role bindings on "+scopeType+" "+scopeID+" (HTTP 403): "+extractAPIErrorDetail(err)+
 					" The "+scopeType+" does not exist, or this identity does not manage IAM on it.")
 		case isRoleBindingsDisabled(err):

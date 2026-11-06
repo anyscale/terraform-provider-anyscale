@@ -23,27 +23,27 @@ import (
 )
 
 var (
-	_ resource.Resource                     = &RoleBindingPolicyResource{}
-	_ resource.ResourceWithConfigure        = &RoleBindingPolicyResource{}
-	_ resource.ResourceWithModifyPlan       = &RoleBindingPolicyResource{}
-	_ resource.ResourceWithImportState      = &RoleBindingPolicyResource{}
-	_ resource.ResourceWithConfigValidators = &RoleBindingPolicyResource{}
+	_ resource.Resource                     = &IAMRoleBindingResource{}
+	_ resource.ResourceWithConfigure        = &IAMRoleBindingResource{}
+	_ resource.ResourceWithModifyPlan       = &IAMRoleBindingResource{}
+	_ resource.ResourceWithImportState      = &IAMRoleBindingResource{}
+	_ resource.ResourceWithConfigValidators = &IAMRoleBindingResource{}
 )
 
-const roleBindingPolicyTypeName = "anyscale_role_binding_policy"
+const iamRoleBindingTypeName = "anyscale_iam_role_binding"
 
 // roleBindingPolicyMaxFrozenRetries bounds how many frozen bindings destroy
 // adds to the policy it keeps before giving up.
 const roleBindingPolicyMaxFrozenRetries = 10
 
-// NewRoleBindingPolicyResource creates a new role binding policy resource.
-func NewRoleBindingPolicyResource() resource.Resource {
-	return &RoleBindingPolicyResource{}
+// NewIAMRoleBindingResource creates a new role binding policy resource.
+func NewIAMRoleBindingResource() resource.Resource {
+	return &IAMRoleBindingResource{}
 }
 
-// RoleBindingPolicyResource manages every direct role binding on one scope,
+// IAMRoleBindingResource manages every direct role binding on one scope,
 // authoritatively, through the policy generate and apply API.
-type RoleBindingPolicyResource struct {
+type IAMRoleBindingResource struct {
 	client *Client
 }
 
@@ -110,11 +110,11 @@ func (policyRoleEntryValidator) ValidateObject(ctx context.Context, req validato
 		"Set at least one of user_ids or user_group_ids. The API ignores a role with no principals, so the entry would plan a change on every run; remove it to grant the role to nobody.")
 }
 
-func (r *RoleBindingPolicyResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_role_binding_policy"
+func (r *IAMRoleBindingResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_iam_role_binding"
 }
 
-func (r *RoleBindingPolicyResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *IAMRoleBindingResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	replace := []planmodifier.String{stringplanmodifier.RequiresReplace()}
 	scopeDescription := "Specify exactly one of `organization_id`, `cloud_id` or `project_id`. Changing it replaces the policy."
 	idSet := func(description string) schema.SetAttribute {
@@ -133,8 +133,8 @@ func (r *RoleBindingPolicyResource) Schema(ctx context.Context, req resource.Sch
 		MarkdownDescription: roleBindingsBetaBanner +
 			"Manages every direct role binding on one organization, cloud or project. Authoritative: an apply revokes any direct binding on the scope that `roles` does not name, " +
 			"including ones Anyscale grants itself, such as a project or cloud creator's owner binding. " +
-			"Never combine it with `anyscale_role_binding` or `anyscale role-binding policy apply` on the same scope. " +
-			"Destroy, import and the first-apply behavior are in the [RBAC guide](../guides/rbac.md#managing-every-grant-on-a-scope-anyscale_role_binding_policy). " +
+			"Never combine it with `anyscale_iam_role_grant` or `anyscale role-binding policy apply` on the same scope. " +
+			"Destroy, import and the first-apply behavior are in the [RBAC guide](../guides/rbac.md#managing-every-grant-on-a-scope-anyscale_iam_role_binding). " +
 			"Requires an organization [converted to role bindings](../guides/rbac.md#organization-access-mode).",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -178,7 +178,7 @@ func (r *RoleBindingPolicyResource) Schema(ctx context.Context, req resource.Sch
 	}
 }
 
-func (r *RoleBindingPolicyResource) ConfigValidators(ctx context.Context) []resource.ConfigValidator {
+func (r *IAMRoleBindingResource) ConfigValidators(ctx context.Context) []resource.ConfigValidator {
 	return []resource.ConfigValidator{
 		resourcevalidator.ExactlyOneOf(
 			path.MatchRoot("organization_id"),
@@ -188,7 +188,7 @@ func (r *RoleBindingPolicyResource) ConfigValidators(ctx context.Context) []reso
 	}
 }
 
-func (r *RoleBindingPolicyResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+func (r *IAMRoleBindingResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	if client, ok := clientFromProviderData(req.ProviderData, "Unexpected Resource Configure Type", &resp.Diagnostics); ok {
 		r.client = client
 	}
@@ -221,8 +221,8 @@ func policyRolesKnown(roles types.Map) bool {
 	return true
 }
 
-func (r *RoleBindingPolicyResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if refuseRBACPlanOnAzure(r.client, roleBindingPolicyTypeName, req, resp) || r.client == nil {
+func (r *IAMRoleBindingResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if refuseRBACPlanOnAzure(r.client, iamRoleBindingTypeName, req, resp) || r.client == nil {
 		return
 	}
 	if req.Plan.Raw.IsNull() {
@@ -252,7 +252,7 @@ func (r *RoleBindingPolicyResource) ModifyPlan(ctx context.Context, req resource
 
 	if scopeID.IsUnknown() {
 		if creating {
-			resp.Diagnostics.AddWarning("Role Binding Policy Not Checked at Plan",
+			resp.Diagnostics.AddWarning("Role Binding Not Checked at Plan",
 				fmt.Sprintf("The %s ID is not known until apply, so this plan cannot check the policy or list the bindings the first apply revokes. "+
 					"Anyscale grants the identity that creates a project or cloud its owner role on it; name that binding in roles, or the first apply fails with HTTP 403.",
 					scopeType))
@@ -278,7 +278,7 @@ func (r *RoleBindingPolicyResource) ModifyPlan(ctx context.Context, req resource
 	if !creating {
 		// The plan diff already shows the revokes the config asked for, which
 		// are the policy's own grants. A grant made outside it is likely
-		// someone else's, such as an anyscale_role_binding fighting this
+		// someone else's, such as an anyscale_iam_role_grant fighting this
 		// policy: refresh pulls it into state, so it plans as a revoke.
 		if outside := grantedOutsidePolicy(result.Removed); len(outside) > 0 {
 			resp.Diagnostics.AddWarning("Policy Revokes Role Bindings Granted Outside It",
@@ -297,7 +297,7 @@ func (r *RoleBindingPolicyResource) ModifyPlan(ctx context.Context, req resource
 // planDestroy dry-runs the policy destroy applies, so a refusal fails the plan
 // and the plan lists what destroy revokes. A scope that cannot be read is left
 // to Delete, which tells a deleted scope from lost access.
-func (r *RoleBindingPolicyResource) planDestroy(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+func (r *IAMRoleBindingResource) planDestroy(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	var state RoleBindingPolicyModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
@@ -326,7 +326,7 @@ func (r *RoleBindingPolicyResource) planDestroy(ctx context.Context, req resourc
 	}
 	if outside := grantedOutsidePolicy(result.Removed); len(outside) > 0 {
 		detail += "\n\nThese revoked grants were made outside this policy:\n" + describePolicyBindings(outside) +
-			"\nIf any of these is an anyscale_role_binding in any configuration, this scope is managed twice: destroying the policy revokes that resource's grant until its next apply re-creates it."
+			"\nIf any of these is an anyscale_iam_role_grant in any configuration, this scope is managed twice: destroying the policy revokes that resource's grant until its next apply re-creates it."
 	}
 	resp.Diagnostics.AddWarning("Destroy Revokes Role Bindings", detail)
 }
@@ -337,7 +337,7 @@ func (r *RoleBindingPolicyResource) planDestroy(ctx context.Context, req resourc
 // roleBindingPolicyMaxFrozenRetries times. It returns every binding kept, the
 // frozen ones among them, and the apply result, or false after adding the
 // diagnostic.
-func (r *RoleBindingPolicyResource) applyDestroyPolicy(ctx context.Context, diags *diag.Diagnostics, scopeType, scopeID string, current *roleBindingPolicy, dryRun bool, outcome string) (kept, frozenKept []roleBindingPolicyBinding, _ *roleBindingPolicyApplyResult, _ bool) {
+func (r *IAMRoleBindingResource) applyDestroyPolicy(ctx context.Context, diags *diag.Diagnostics, scopeType, scopeID string, current *roleBindingPolicy, dryRun bool, outcome string) (kept, frozenKept []roleBindingPolicyBinding, _ *roleBindingPolicyApplyResult, _ bool) {
 	caller, err := fetchCloudAccessCallerIdentity(ctx, r.client)
 	if err != nil {
 		diags.AddError("Could Not Identify the Provider Identity",
@@ -389,7 +389,7 @@ func (r *RoleBindingPolicyResource) applyDestroyPolicy(ctx context.Context, diag
 		}
 		if !isManagedRoleBindingPrincipal(frozen.PrincipalType) {
 			diags.AddError("Frozen Role Binding Principal Not Supported",
-				withOutcome(fmt.Sprintf("%s It is held by a %s, which anyscale_role_binding_policy cannot name.", extractAPIErrorDetail(err), frozen.PrincipalType), outcome))
+				withOutcome(fmt.Sprintf("%s It is held by a %s, which anyscale_iam_role_binding cannot name.", extractAPIErrorDetail(err), frozen.PrincipalType), outcome))
 			return nil, nil, nil, false
 		}
 		tflog.Info(ctx, "Keeping a frozen role binding on destroy", map[string]any{"role_binding_id": frozen.ID})
@@ -401,7 +401,7 @@ func (r *RoleBindingPolicyResource) applyDestroyPolicy(ctx context.Context, diag
 // writePolicy applies the planned policy and sets plan's roles from the
 // generated policy that results. applied reports whether the PUT succeeded;
 // ok, whether the read-back did too.
-func (r *RoleBindingPolicyResource) writePolicy(ctx context.Context, plan *RoleBindingPolicyModel, diags *diag.Diagnostics, op string) (applied, ok bool) {
+func (r *IAMRoleBindingResource) writePolicy(ctx context.Context, plan *RoleBindingPolicyModel, diags *diag.Diagnostics, op string) (applied, ok bool) {
 	scopeType, scopeIDValue := plan.scope()
 	scopeID := scopeIDValue.ValueString()
 	grants, d := policyGrantsFromModel(ctx, plan.Roles)
@@ -443,7 +443,7 @@ func policyRolesValue(current *roleBindingPolicy, diags *diag.Diagnostics) (type
 	return roles, !d.HasError()
 }
 
-func (r *RoleBindingPolicyResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+func (r *IAMRoleBindingResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan RoleBindingPolicyModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
@@ -456,13 +456,13 @@ func (r *RoleBindingPolicyResource) Create(ctx context.Context, req resource.Cre
 // nothing, so no state is saved. A PUT that succeeded is saved even when the
 // read-back fails, from the plan, so Terraform keeps (on create, as tainted)
 // the policy it just enforced instead of forgetting it.
-func (r *RoleBindingPolicyResource) writeAndSetState(ctx context.Context, plan *RoleBindingPolicyModel, diags *diag.Diagnostics, state *tfsdk.State) {
+func (r *IAMRoleBindingResource) writeAndSetState(ctx context.Context, plan *RoleBindingPolicyModel, diags *diag.Diagnostics, state *tfsdk.State) {
 	if applied, _ := r.writePolicy(ctx, plan, diags, "apply role binding policy"); applied {
 		diags.Append(state.Set(ctx, plan)...)
 	}
 }
 
-func (r *RoleBindingPolicyResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+func (r *IAMRoleBindingResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan RoleBindingPolicyModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
@@ -496,7 +496,7 @@ func policyNotFound(ctx context.Context, client *Client, diags *diag.Diagnostics
 // 404; gone=false with a nil error when the scope still reads, which means the
 // caller lost IAM on it. An organization has no read of its own and is never
 // gone.
-func (r *RoleBindingPolicyResource) scopeGoneAfterForbidden(ctx context.Context, scopeType, scopeID string) (gone bool, scopeErr error) {
+func (r *IAMRoleBindingResource) scopeGoneAfterForbidden(ctx context.Context, scopeType, scopeID string) (gone bool, scopeErr error) {
 	readPath := roleBindingPolicyScopeReadPath(scopeType, scopeID)
 	if readPath == "" {
 		return false, nil
@@ -512,12 +512,12 @@ func (r *RoleBindingPolicyResource) scopeGoneAfterForbidden(ctx context.Context,
 }
 
 func addPolicyNotReadableError(diags *diag.Diagnostics, scopeType, scopeID string, err error, outcome string) {
-	diags.AddError("Role Binding Policy Not Readable",
+	diags.AddError("Role Binding Not Readable",
 		withOutcome(fmt.Sprintf("The Anyscale API refused to read the role bindings on %s %q (HTTP 403): %s The %s still exists, so this identity no longer manages IAM on it.",
 			scopeType, scopeID, extractAPIErrorDetail(err), scopeType), outcome))
 }
 
-func (r *RoleBindingPolicyResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+func (r *IAMRoleBindingResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var state RoleBindingPolicyModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
@@ -558,7 +558,7 @@ func (r *RoleBindingPolicyResource) Read(ctx context.Context, req resource.ReadR
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func (r *RoleBindingPolicyResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+func (r *IAMRoleBindingResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var state RoleBindingPolicyModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
@@ -601,13 +601,13 @@ func (r *RoleBindingPolicyResource) Delete(ctx context.Context, req resource.Del
 // roleBindingPolicyImportFormat names the accepted import ID, for diagnostics.
 const roleBindingPolicyImportFormat = "Import a role binding policy by `<scope_type>/<scope_id>`, where scope_type is organization, cloud or project, for example `project/prj_abc123`."
 
-func (r *RoleBindingPolicyResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	if refuseRBACOnAzure(r.client, roleBindingPolicyTypeName, &resp.Diagnostics) {
+func (r *IAMRoleBindingResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	if refuseRBACOnAzure(r.client, iamRoleBindingTypeName, &resp.Diagnostics) {
 		return
 	}
 	parts := strings.Split(req.ID, "/")
 	if len(parts) != 2 || parts[1] == "" || !isManagedRoleBindingScope(parts[0]) {
-		AddConfigError(&resp.Diagnostics, "Invalid Role Binding Policy Import ID",
+		AddConfigError(&resp.Diagnostics, "Invalid Role Binding Import ID",
 			fmt.Sprintf("%q is not a valid import ID. %s", req.ID, roleBindingPolicyImportFormat))
 		return
 	}

@@ -58,7 +58,7 @@ resource "anyscale_cloud_access" "test" {
   cloud_id = "cld_deprecation_check"
   member   = { "a@example.com" = { base_role = "readonly" } }
 }
-`, legacyRBACDeprecationText, "anyscale_role_binding", "Azure")
+`, legacyRBACDeprecationText, "anyscale_iam_role_grant", "Azure")
 }
 
 func TestAccOrganizationUserRoleResource_DeprecationWarningFires(t *testing.T) {
@@ -68,7 +68,7 @@ resource "anyscale_organization_user_role" "test" {
   email     = "a@example.com"
   base_role = "collaborator"
 }
-`, legacyRBACDeprecationText, "anyscale_role_binding", "Azure")
+`, legacyRBACDeprecationText, "anyscale_iam_role_grant", "Azure")
 }
 
 func TestAccCloudResource_AutoAddUserDeprecationWarningFires(t *testing.T) {

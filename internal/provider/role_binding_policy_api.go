@@ -47,7 +47,7 @@ type roleBindingPolicyBinding struct {
 	ResourceType  string  `json:"resource_type"`
 	ResourceID    string  `json:"resource_id"`
 	// Origin is the path that made the grant: "declarative" for a policy
-	// apply, "imperative" for a direct grant (anyscale_role_binding, the
+	// apply, "imperative" for a direct grant (anyscale_iam_role_grant, the
 	// console, a CLI grant). Absent on a dry run's added entries and on older
 	// bindings.
 	Origin *string `json:"origin"`
@@ -72,7 +72,7 @@ func grantedOutsidePolicy(bs []roleBindingPolicyBinding) []roleBindingPolicyBind
 // policyMixHint closes a warning listing grants a policy revokes but may not
 // have made. Neither resource can see the other's config, so it names the
 // hazard rather than detecting it.
-const policyMixHint = "If any of these is an anyscale_role_binding in any configuration, this scope is managed twice: " +
+const policyMixHint = "If any of these is an anyscale_iam_role_grant in any configuration, this scope is managed twice: " +
 	"remove one of the two before applying, or each apply revokes what the other grants."
 
 type roleBindingPolicyApplyResult struct {
@@ -253,7 +253,7 @@ func policyGrantsFromAPI(policy *roleBindingPolicy) (policyGrants, error) {
 	for _, role := range policy.Roles {
 		for _, p := range role.Principals {
 			if !isManagedRoleBindingPrincipal(p.PrincipalType) {
-				return nil, fmt.Errorf("role %q is held by %s %q, a principal type anyscale_role_binding_policy cannot represent (it manages user and user_group)",
+				return nil, fmt.Errorf("role %q is held by %s %q, a principal type anyscale_iam_role_binding cannot represent (it manages user and user_group)",
 					role.RoleID, p.PrincipalType, p.PrincipalID)
 			}
 			g.add(role.RoleID, p.PrincipalType, p.PrincipalID)

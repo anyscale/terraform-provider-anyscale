@@ -12,12 +12,12 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// Real-API coverage for anyscale_role_binding and anyscale_role. Role
+// Real-API coverage for anyscale_iam_role_grant and anyscale_role. Role
 // bindings are behind a feature flag; these tests skip when the test org does
 // not have it, and run unchanged once it does. They bind a role to a fresh
 // group with no members, so the grant reaches no one.
 //
-//	TF_ACC=1 go test ./internal/acctest/ -run '^TestAccRoleBindingResource_RealAPI$' -v
+//	TF_ACC=1 go test ./internal/acctest/ -run '^TestAccIAMRoleGrantResource_RealAPI$' -v
 
 // skipIfRoleBindingsDisabled skips when the org does not have role bindings,
 // which every role_bindings and roles route reports as a 404. Any other
@@ -95,7 +95,7 @@ data "anyscale_role" "test" {
 `, groupName, roleName)
 	if withBinding {
 		cfg += fmt.Sprintf(`
-resource "anyscale_role_binding" "test" {
+resource "anyscale_iam_role_grant" "test" {
   user_group_id = anyscale_user_group.test.id
   role_id       = data.anyscale_role.test.id
   cloud_id      = %q
@@ -105,11 +105,11 @@ resource "anyscale_role_binding" "test" {
 	return cfg
 }
 
-// TestAccRoleBindingResource_RealAPI binds a built-in role to an empty group
+// TestAccIAMRoleGrantResource_RealAPI binds a built-in role to an empty group
 // on the test cloud, imports it, recreates it after an out-of-band revoke, and
 // destroys only the binding while the group still exists, so the revoke is
 // observed through the provider's own Delete rather than a group cascade.
-func TestAccRoleBindingResource_RealAPI(t *testing.T) {
+func TestAccIAMRoleGrantResource_RealAPI(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	skipUnlessTestOrgMode(t, testOrgModeConverted, "role binding writes answer 409 until the organization converts")
 	PreCheck(t)
@@ -134,9 +134,9 @@ func TestAccRoleBindingResource_RealAPI(t *testing.T) {
 				}
 				return nil
 			}
-			b, ok := s.RootModule().Resources["anyscale_role_binding.test"]
+			b, ok := s.RootModule().Resources["anyscale_iam_role_grant.test"]
 			if !ok {
-				return fmt.Errorf("anyscale_role_binding.test not in state")
+				return fmt.Errorf("anyscale_iam_role_grant.test not in state")
 			}
 			bindingID = b.Primary.ID
 			for _, id := range ids {
@@ -158,7 +158,7 @@ func TestAccRoleBindingResource_RealAPI(t *testing.T) {
 				Check:  inAPI(true),
 			},
 			{
-				ResourceName:      "anyscale_role_binding.test",
+				ResourceName:      "anyscale_iam_role_grant.test",
 				ImportState:       true,
 				ImportStateVerify: true,
 			},
@@ -171,7 +171,7 @@ func TestAccRoleBindingResource_RealAPI(t *testing.T) {
 				Config: testAccRoleBindingConfig(groupName, roleName, cloudID, true),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("anyscale_role_binding.test", plancheck.ResourceActionCreate),
+						plancheck.ExpectResourceAction("anyscale_iam_role_grant.test", plancheck.ResourceActionCreate),
 					},
 				},
 				Check: inAPI(true),
@@ -180,7 +180,7 @@ func TestAccRoleBindingResource_RealAPI(t *testing.T) {
 				Config: testAccRoleBindingConfig(groupName, roleName, cloudID, false),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("anyscale_role_binding.test", plancheck.ResourceActionDestroy),
+						plancheck.ExpectResourceAction("anyscale_iam_role_grant.test", plancheck.ResourceActionDestroy),
 					},
 				},
 				Check: inAPI(false),

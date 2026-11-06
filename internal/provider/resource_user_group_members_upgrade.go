@@ -11,7 +11,7 @@ import (
 var _ resource.ResourceWithUpgradeState = &UserGroupMembersResource{}
 
 // UpgradeState implements the v0 -> v1 migration: group_id was renamed to
-// user_group_id, the name anyscale_role_binding uses for the same value.
+// user_group_id, the name anyscale_iam_role_grant uses for the same value.
 // Nothing else changed, so existing state carries over without a re-import.
 func (r *UserGroupMembersResource) UpgradeState(ctx context.Context) map[int64]resource.StateUpgrader {
 	return map[int64]resource.StateUpgrader{

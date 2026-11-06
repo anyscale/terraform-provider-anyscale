@@ -43,7 +43,7 @@ func (d *RoleDataSource) Metadata(ctx context.Context, req datasource.MetadataRe
 func (d *RoleDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: roleBindingsBetaBanner +
-			"Looks up a role that can be granted with `anyscale_role_binding`: a built-in role or one of the organization's own. " +
+			"Looks up a role that can be granted with `anyscale_iam_role_grant`: a built-in role or one of the organization's own. " +
 			"Archived roles are not found, since they cannot be newly granted. " +
 			"The API does not check that a role suits the resource it is granted on, so a role with only organization permissions granted on a cloud is accepted and has no effect.",
 		Attributes: map[string]schema.Attribute{
@@ -54,7 +54,7 @@ func (d *RoleDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 			},
 			"id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The role ID (`rol_...`), as `anyscale_role_binding.role_id` takes it.",
+				MarkdownDescription: "The role ID (`rol_...`), as `anyscale_iam_role_grant.role_id` takes it.",
 			},
 			"description": schema.StringAttribute{
 				Computed:            true,

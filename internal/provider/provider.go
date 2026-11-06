@@ -212,8 +212,8 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewSystemClusterResource,
 		NewUserGroupResource,
 		NewUserGroupMembersResource,
-		NewRoleBindingResource,
-		NewRoleBindingPolicyResource,
+		NewIAMRoleGrantResource,
+		NewIAMRoleBindingResource,
 		NewRuntimeEnvPackageResource,
 	}
 }
@@ -249,7 +249,7 @@ func (p *AnyscaleProvider) DataSources(ctx context.Context) []func() datasource.
 		NewUserGroupDataSource,
 		NewUserGroupsDataSource,
 		NewRoleDataSource,
-		NewRoleBindingPolicyDataSource,
+		NewIAMRoleBindingDataSource,
 	}
 }
 

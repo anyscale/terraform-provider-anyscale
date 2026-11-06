@@ -15,7 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
-// Read, Delete and Create error-path tests for anyscale_role_binding, run
+// Read, Delete and Create error-path tests for anyscale_iam_role_grant, run
 // through resource.Test against roleBindingMockServer. They pin how the
 // resource tells "the binding is gone" (remove from state) apart from "the
 // feature is off" or "the caller lost access" (error, keep state), which every
@@ -43,7 +43,7 @@ func newRBMock(t *testing.T) *roleBindingMockServer {
 
 func rbConfig(m *roleBindingMockServer, roleID string) string {
 	return m.providerBlock() + fmt.Sprintf(`
-resource "anyscale_role_binding" "test" {
+resource "anyscale_iam_role_grant" "test" {
   user_group_id = %q
   role_id       = %q
   cloud_id      = %q
@@ -54,9 +54,9 @@ resource "anyscale_role_binding" "test" {
 // rbCaptureID records the binding ID in state.
 func rbCaptureID(id *string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		rs, ok := s.RootModule().Resources["anyscale_role_binding.test"]
+		rs, ok := s.RootModule().Resources["anyscale_iam_role_grant.test"]
 		if !ok {
-			return fmt.Errorf("anyscale_role_binding.test not in state")
+			return fmt.Errorf("anyscale_iam_role_grant.test not in state")
 		}
 		*id = rs.Primary.ID
 		return nil
@@ -95,7 +95,7 @@ func rbDestroyed(m *roleBindingMockServer) resource.TestCheckFunc {
 
 // Flag off: every route 404s, including the probe. Read must error and keep
 // state; step 3's empty plan proves the binding was not removed.
-func TestAccRoleBindingResource_FlagOffKeepsState(t *testing.T) {
+func TestAccIAMRoleGrantResource_FlagOffKeepsState(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	resource.Test(t, resource.TestCase{
@@ -123,7 +123,7 @@ func TestAccRoleBindingResource_FlagOffKeepsState(t *testing.T) {
 
 // Revoked out of band: the listing omits the ID, so refresh removes it and
 // the plan recreates it.
-func TestAccRoleBindingResource_RevokedOutOfBandIsRecreated(t *testing.T) {
+func TestAccIAMRoleGrantResource_RevokedOutOfBandIsRecreated(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	var first, second string
@@ -137,7 +137,7 @@ func TestAccRoleBindingResource_RevokedOutOfBandIsRecreated(t *testing.T) {
 				Config:    rbConfig(m, rbRole),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("anyscale_role_binding.test", plancheck.ResourceActionCreate),
+						plancheck.ExpectResourceAction("anyscale_iam_role_grant.test", plancheck.ResourceActionCreate),
 					},
 				},
 				Check: resource.ComposeTestCheckFunc(
@@ -158,7 +158,7 @@ func TestAccRoleBindingResource_RevokedOutOfBandIsRecreated(t *testing.T) {
 // Re-granted out of band under a new ID, as a role-binding policy apply does:
 // refresh tracks the new ID instead of dropping the binding, so the plan is
 // empty and nothing is created (a create would 409 as a duplicate).
-func TestAccRoleBindingResource_RegrantedOutOfBandIsAdopted(t *testing.T) {
+func TestAccIAMRoleGrantResource_RegrantedOutOfBandIsAdopted(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	var first, regranted, second string
@@ -174,7 +174,7 @@ func TestAccRoleBindingResource_RegrantedOutOfBandIsAdopted(t *testing.T) {
 					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
 				},
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue("anyscale_role_binding.test", tfjsonpath.New("origin"), knownvalue.StringExact("declarative")),
+					statecheck.ExpectKnownValue("anyscale_iam_role_grant.test", tfjsonpath.New("origin"), knownvalue.StringExact("declarative")),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					rbCaptureID(&second),
@@ -198,7 +198,7 @@ func TestAccRoleBindingResource_RegrantedOutOfBandIsAdopted(t *testing.T) {
 // settle whether the listing then answers with an empty page or a 404, so both
 // are pinned: refresh removes the binding and sends no DELETE. In the 404 case
 // the roles probe's 200 is what rules out the flag being off.
-func TestAccRoleBindingResource_DeletedGroupIsRemoved(t *testing.T) {
+func TestAccIAMRoleGrantResource_DeletedGroupIsRemoved(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	for _, tc := range []struct {
 		name  string
@@ -228,7 +228,7 @@ func TestAccRoleBindingResource_DeletedGroupIsRemoved(t *testing.T) {
 
 // The listing 404s and the probe fails some other way: neither "gone" nor
 // "flag off" is established, so Read must fail closed and keep state.
-func TestAccRoleBindingResource_ProbeFailureFailsClosed(t *testing.T) {
+func TestAccIAMRoleGrantResource_ProbeFailureFailsClosed(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	m.setGroupGone404(true)
@@ -258,7 +258,7 @@ func TestAccRoleBindingResource_ProbeFailureFailsClosed(t *testing.T) {
 
 // A deleted cloud fails the listing's IAM check with 403 before any 404 the
 // service could give. Read must error with the state-rm hint and keep state.
-func TestAccRoleBindingResource_DeletedScopeKeepsStateWithHint(t *testing.T) {
+func TestAccIAMRoleGrantResource_DeletedScopeKeepsStateWithHint(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	resource.Test(t, resource.TestCase{
@@ -285,7 +285,7 @@ func TestAccRoleBindingResource_DeletedScopeKeepsStateWithHint(t *testing.T) {
 
 // Read walks every page. The managed binding is last of 61 on the scope, so a
 // Read that checks only the first page (50) removes it and plans a create.
-func TestAccRoleBindingResource_ReadWalksEveryPage(t *testing.T) {
+func TestAccIAMRoleGrantResource_ReadWalksEveryPage(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	for i := range 60 {
@@ -309,7 +309,7 @@ func TestAccRoleBindingResource_ReadWalksEveryPage(t *testing.T) {
 
 // A duplicate grant is 409. The error must carry an import hint naming the
 // existing binding, found with one listing call, and nothing is adopted.
-func TestAccRoleBindingResource_Duplicate409NamesExistingID(t *testing.T) {
+func TestAccIAMRoleGrantResource_Duplicate409NamesExistingID(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	existing := m.seedBinding("user_group", rbGroup, rbRole, "cloud", rbCloud)
@@ -326,7 +326,7 @@ func TestAccRoleBindingResource_Duplicate409NamesExistingID(t *testing.T) {
 
 // If the listing that would name the existing binding fails, the 409 still
 // errors with the generic import hint.
-func TestAccRoleBindingResource_Duplicate409GenericHintWhenListingFails(t *testing.T) {
+func TestAccIAMRoleGrantResource_Duplicate409GenericHintWhenListingFails(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	m.seedBinding("user_group", rbGroup, rbRole, "cloud", rbCloud)
@@ -343,7 +343,7 @@ func TestAccRoleBindingResource_Duplicate409GenericHintWhenListingFails(t *testi
 }
 
 // Flag off at create: the flag-off diagnostic, not a generic 404.
-func TestAccRoleBindingResource_FlagOffOnCreate(t *testing.T) {
+func TestAccIAMRoleGrantResource_FlagOffOnCreate(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	m.setFlagOff(true)
@@ -357,7 +357,7 @@ func TestAccRoleBindingResource_FlagOffOnCreate(t *testing.T) {
 
 // DELETE answers 403 for a binding revoked between refresh and delete. The
 // re-list finds it gone, so the destroy succeeds.
-func TestAccRoleBindingResource_DeleteRevokedConcurrentlySucceeds(t *testing.T) {
+func TestAccIAMRoleGrantResource_DeleteRevokedConcurrentlySucceeds(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	resource.Test(t, resource.TestCase{
@@ -376,7 +376,7 @@ func TestAccRoleBindingResource_DeleteRevokedConcurrentlySucceeds(t *testing.T) 
 
 // DELETE answers 403 while the binding is still listed: a real permission
 // loss. The destroy must fail, and the binding is still there.
-func TestAccRoleBindingResource_DeleteDeniedErrors(t *testing.T) {
+func TestAccIAMRoleGrantResource_DeleteDeniedErrors(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	resource.Test(t, resource.TestCase{
@@ -404,7 +404,7 @@ func TestAccRoleBindingResource_DeleteDeniedErrors(t *testing.T) {
 }
 
 // Import maps resource_type to the one scope attribute that matches it.
-func TestAccRoleBindingResource_ImportMapsScope(t *testing.T) {
+func TestAccIAMRoleGrantResource_ImportMapsScope(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	for _, scope := range []struct{ rt, attr, id string }{
 		{"organization", "organization_id", "org_00000000000000000000000001"},
@@ -415,7 +415,7 @@ func TestAccRoleBindingResource_ImportMapsScope(t *testing.T) {
 			m := newRBMock(t)
 			id := m.seedBinding("user_group", rbGroup, rbRole, scope.rt, scope.id)
 			cfg := m.providerBlock() + fmt.Sprintf(`
-resource "anyscale_role_binding" "test" {
+resource "anyscale_iam_role_grant" "test" {
   user_group_id = %q
   role_id       = %q
   %s = %q
@@ -427,7 +427,7 @@ resource "anyscale_role_binding" "test" {
 				Steps: []resource.TestStep{
 					{
 						Config:        cfg,
-						ResourceName:  "anyscale_role_binding.test",
+						ResourceName:  "anyscale_iam_role_grant.test",
 						ImportState:   true,
 						ImportStateId: id,
 						ImportStateCheck: func(states []*terraform.InstanceState) error {
@@ -456,7 +456,7 @@ resource "anyscale_role_binding" "test" {
 }
 
 // Exactly one scope attribute is required, checked at plan time with no API call.
-func TestAccRoleBindingResource_ScopeExactlyOne(t *testing.T) {
+func TestAccIAMRoleGrantResource_ScopeExactlyOne(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	for name, scopes := range map[string]string{
@@ -469,7 +469,7 @@ func TestAccRoleBindingResource_ScopeExactlyOne(t *testing.T) {
 				Steps: []resource.TestStep{
 					{
 						Config: m.providerBlock() + fmt.Sprintf(`
-resource "anyscale_role_binding" "test" {
+resource "anyscale_iam_role_grant" "test" {
   user_group_id = %q
   role_id       = %q
   %s

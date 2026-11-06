@@ -13,7 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
-// Happy-path lifecycle tests for anyscale_role_binding and anyscale_role,
+// Happy-path lifecycle tests for anyscale_iam_role_grant and anyscale_role,
 // run through resource.Test against roleBindingMockServer. They need no
 // credentials. The read contract (revoked vs feature off vs 403 vs 409) is
 // covered in resource_role_binding_readcontract_mock_acc_test.go.
@@ -43,7 +43,7 @@ data "anyscale_role" "test" {
   name = %q
 }
 
-resource "anyscale_role_binding" "test" {
+resource "anyscale_iam_role_grant" "test" {
   user_group_id = %q
   role_id       = data.anyscale_role.test.id
   %s
@@ -56,9 +56,9 @@ resource "anyscale_role_binding" "test" {
 // that only planned a change cannot pass it.
 func rbExpectBackend(m *roleBindingMockServer, roleID, resourceType, resourceID string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		rs, ok := s.RootModule().Resources["anyscale_role_binding.test"]
+		rs, ok := s.RootModule().Resources["anyscale_iam_role_grant.test"]
 		if !ok {
-			return fmt.Errorf("anyscale_role_binding.test not in state")
+			return fmt.Errorf("anyscale_iam_role_grant.test not in state")
 		}
 		m.mu.Lock()
 		defer m.mu.Unlock()
@@ -78,7 +78,7 @@ func rbExpectBackend(m *roleBindingMockServer, roleID, resourceType, resourceID 
 	}
 }
 
-func TestAccRoleBindingResource_MockLifecycle(t *testing.T) {
+func TestAccIAMRoleGrantResource_MockLifecycle(t *testing.T) {
 	m := newRoleBindingLifecycleMock(t)
 	cloudScope := fmt.Sprintf("cloud_id = %q", rbMockCloud)
 	projectScope := fmt.Sprintf("project_id = %q", rbMockProject)
@@ -99,13 +99,13 @@ func TestAccRoleBindingResource_MockLifecycle(t *testing.T) {
 					statecheck.ExpectKnownValue("data.anyscale_role.test", tfjsonpath.New("id"), knownvalue.StringExact(rbMockViewer)),
 					statecheck.ExpectKnownValue("data.anyscale_role.test", tfjsonpath.New("built_in"), knownvalue.Bool(true)),
 					statecheck.ExpectKnownValue("data.anyscale_role.test", tfjsonpath.New("description"), knownvalue.StringExact("Reads projects on a cloud.")),
-					statecheck.ExpectKnownValue("anyscale_role_binding.test", tfjsonpath.New("id"), knownvalue.StringRegexp(regexp.MustCompile(`^rb_`))),
-					statecheck.ExpectKnownValue("anyscale_role_binding.test", tfjsonpath.New("cloud_id"), knownvalue.StringExact(rbMockCloud)),
-					statecheck.ExpectKnownValue("anyscale_role_binding.test", tfjsonpath.New("project_id"), knownvalue.Null()),
-					statecheck.ExpectKnownValue("anyscale_role_binding.test", tfjsonpath.New("organization_id"), knownvalue.Null()),
-					statecheck.ExpectKnownValue("anyscale_role_binding.test", tfjsonpath.New("origin"), knownvalue.StringExact("imperative")),
-					statecheck.ExpectKnownValue("anyscale_role_binding.test", tfjsonpath.New("created_by"), knownvalue.StringExact(roleBindingMockCaller)),
-					statecheck.ExpectKnownValue("anyscale_role_binding.test", tfjsonpath.New("created_at"), knownvalue.NotNull()),
+					statecheck.ExpectKnownValue("anyscale_iam_role_grant.test", tfjsonpath.New("id"), knownvalue.StringRegexp(regexp.MustCompile(`^rb_`))),
+					statecheck.ExpectKnownValue("anyscale_iam_role_grant.test", tfjsonpath.New("cloud_id"), knownvalue.StringExact(rbMockCloud)),
+					statecheck.ExpectKnownValue("anyscale_iam_role_grant.test", tfjsonpath.New("project_id"), knownvalue.Null()),
+					statecheck.ExpectKnownValue("anyscale_iam_role_grant.test", tfjsonpath.New("organization_id"), knownvalue.Null()),
+					statecheck.ExpectKnownValue("anyscale_iam_role_grant.test", tfjsonpath.New("origin"), knownvalue.StringExact("imperative")),
+					statecheck.ExpectKnownValue("anyscale_iam_role_grant.test", tfjsonpath.New("created_by"), knownvalue.StringExact(roleBindingMockCaller)),
+					statecheck.ExpectKnownValue("anyscale_iam_role_grant.test", tfjsonpath.New("created_at"), knownvalue.NotNull()),
 				},
 			},
 			{
@@ -118,7 +118,7 @@ func TestAccRoleBindingResource_MockLifecycle(t *testing.T) {
 			},
 			{
 				// Import by binding ID recovers every attribute, with no ignores.
-				ResourceName:      "anyscale_role_binding.test",
+				ResourceName:      "anyscale_iam_role_grant.test",
 				ImportState:       true,
 				ImportStateVerify: true,
 			},
@@ -127,7 +127,7 @@ func TestAccRoleBindingResource_MockLifecycle(t *testing.T) {
 				Config: rbMockConfig(m, "writer", cloudScope),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("anyscale_role_binding.test", plancheck.ResourceActionDestroyBeforeCreate),
+						plancheck.ExpectResourceAction("anyscale_iam_role_grant.test", plancheck.ResourceActionDestroyBeforeCreate),
 					},
 				},
 				Check: rbExpectBackend(m, rbMockWriter, "cloud", rbMockCloud),
@@ -137,7 +137,7 @@ func TestAccRoleBindingResource_MockLifecycle(t *testing.T) {
 				Config: rbMockConfig(m, "writer", projectScope),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("anyscale_role_binding.test", plancheck.ResourceActionDestroyBeforeCreate),
+						plancheck.ExpectResourceAction("anyscale_iam_role_grant.test", plancheck.ResourceActionDestroyBeforeCreate),
 					},
 				},
 				Check: rbExpectBackend(m, rbMockWriter, "project", rbMockProject),
@@ -146,7 +146,7 @@ func TestAccRoleBindingResource_MockLifecycle(t *testing.T) {
 	})
 }
 
-func TestAccRoleBindingResource_MockScopeValidation(t *testing.T) {
+func TestAccIAMRoleGrantResource_MockScopeValidation(t *testing.T) {
 	m := newRoleBindingLifecycleMock(t)
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
@@ -186,7 +186,7 @@ data "anyscale_role" "test" {
 // A binding on a scope the resource does not model must be refused at
 // import, never recorded as an organization binding: Read would then list
 // the wrong scope and drop it, or the next apply would grant it on the org.
-func TestAccRoleBindingResource_MockImportUnsupportedScope(t *testing.T) {
+func TestAccIAMRoleGrantResource_MockImportUnsupportedScope(t *testing.T) {
 	m := newRoleBindingLifecycleMock(t)
 	id := m.seedBinding("user_group", rbMockGroup, rbMockViewer, "dataset", "dst_aaaaaaaaaaaaaaaaaaaaaaaaaa")
 	resource.Test(t, resource.TestCase{
@@ -194,13 +194,13 @@ func TestAccRoleBindingResource_MockImportUnsupportedScope(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: m.providerBlock() + fmt.Sprintf(`
-resource "anyscale_role_binding" "test" {
+resource "anyscale_iam_role_grant" "test" {
   user_group_id   = %q
   role_id         = %q
   organization_id = "org_aaaaaaaaaaaaaaaaaaaaaaaaaa"
 }
 `, rbMockGroup, rbMockViewer),
-				ResourceName:  "anyscale_role_binding.test",
+				ResourceName:  "anyscale_iam_role_grant.test",
 				ImportState:   true,
 				ImportStateId: id,
 				ExpectError:   regexp.MustCompile(`(?s)Role Binding Scope Not Supported.*held on a dataset`),

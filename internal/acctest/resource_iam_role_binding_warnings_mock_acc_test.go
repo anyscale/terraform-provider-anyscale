@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Warning-level diagnostics of anyscale_role_binding_policy, driven through the
+// Warning-level diagnostics of anyscale_iam_role_binding, driven through the
 // terraform CLI (a real plan and apply against a freshly built provider)
 // because resource.Test does not surface warnings.
 
@@ -54,7 +54,7 @@ func pmRunOK(t *testing.T, run func(args ...string) ([]tfApplyJSONLine, string, 
 }
 
 // Criterion 3: the create plan names each grant the first apply revokes.
-func TestAccRoleBindingPolicyResource_CreateTakeoverWarningCLI(t *testing.T) {
+func TestAccIAMRoleBindingResource_CreateTakeoverWarningCLI(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	m.seed("user", pmBob, pmReader, "project", pmProject)
@@ -66,7 +66,7 @@ func TestAccRoleBindingPolicyResource_CreateTakeoverWarningCLI(t *testing.T) {
 		"which the roles map does not name:",
 		"role "+pmReader+" to user "+pmBob,
 		"role "+pmWriter+" to user_group "+pmGroupB,
-		"is an anyscale_role_binding in any configuration, this scope is managed twice")
+		"is an anyscale_iam_role_grant in any configuration, this scope is managed twice")
 	if real, dry := pmApplyBodies(t, m.takeRequests()); len(real) != 0 || len(dry) == 0 {
 		t.Errorf("plan made %d applies and %d dry runs, want 0 and at least 1", len(real), len(dry))
 	}
@@ -107,7 +107,7 @@ func pmUpdatePlan(t *testing.T, m *policyMockServer, config string, seed func())
 }
 
 // B: an update that revokes a direct grant warns, listing exactly it.
-func TestAccRoleBindingPolicyResource_UpdateRevokesOutsideGrantWarningCLI(t *testing.T) {
+func TestAccIAMRoleBindingResource_UpdateRevokesOutsideGrantWarningCLI(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	lines := pmUpdatePlan(t, m, pmConfig(m, "project_id", pmProject, pmBase()...), func() {
@@ -129,7 +129,7 @@ func TestAccRoleBindingPolicyResource_UpdateRevokesOutsideGrantWarningCLI(t *tes
 
 // C: an update that drops a principal the policy granted revokes only a
 // declarative grant, which the plan diff shows; it does not warn.
-func TestAccRoleBindingPolicyResource_UpdateRevokesOwnGrantNoWarningCLI(t *testing.T) {
+func TestAccIAMRoleBindingResource_UpdateRevokesOwnGrantNoWarningCLI(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	run, rewrite := cliDevWorkspaceEditable(t, pmConfig(m, "project_id", pmProject,
@@ -148,7 +148,7 @@ func TestAccRoleBindingPolicyResource_UpdateRevokesOwnGrantNoWarningCLI(t *testi
 }
 
 // D: with both kinds revoked, the warning lists only the direct grant.
-func TestAccRoleBindingPolicyResource_UpdateMixedRevokesWarningCLI(t *testing.T) {
+func TestAccIAMRoleBindingResource_UpdateMixedRevokesWarningCLI(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	run, rewrite := cliDevWorkspaceEditable(t, pmConfig(m, "project_id", pmProject,
@@ -171,7 +171,7 @@ func TestAccRoleBindingPolicyResource_UpdateMixedRevokesWarningCLI(t *testing.T)
 }
 
 // E: a revoked grant with no origin counts as granted outside the policy.
-func TestAccRoleBindingPolicyResource_UpdateRevokesOriginlessGrantWarningCLI(t *testing.T) {
+func TestAccIAMRoleBindingResource_UpdateRevokesOriginlessGrantWarningCLI(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	lines := pmUpdatePlan(t, m, pmConfig(m, "project_id", pmProject, pmBase()...), func() {
@@ -188,7 +188,7 @@ func TestAccRoleBindingPolicyResource_UpdateRevokesOriginlessGrantWarningCLI(t *
 
 // Criterion 5: with the scope unknown at plan, the plan warns once and makes
 // no dry run.
-func TestAccRoleBindingPolicyResource_UnknownScopeWarningCLI(t *testing.T) {
+func TestAccIAMRoleBindingResource_UnknownScopeWarningCLI(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	run := cliDevWorkspace(t, m.providerBlock()+fmt.Sprintf(`
@@ -196,7 +196,7 @@ resource "terraform_data" "scope" {
   input = %q
 }
 
-resource "anyscale_role_binding_policy" "test" {
+resource "anyscale_iam_role_binding" "test" {
   project_id = terraform_data.scope.output
   roles = {
 %s  }
@@ -204,7 +204,7 @@ resource "anyscale_role_binding_policy" "test" {
 `, pmProject, strings.Join(pmBase(), "")))
 
 	lines := pmRunOK(t, run, "plan", "-json")
-	pmExpectWarning(t, lines, "Role Binding Policy Not Checked at Plan", "owner role", "HTTP 403")
+	pmExpectWarning(t, lines, "Role Binding Not Checked at Plan", "owner role", "HTTP 403")
 	if w := pmProviderWarnings(lines); len(w) != 1 {
 		t.Errorf("want exactly one warning, got %d: %v", len(w), w)
 	}
@@ -215,7 +215,7 @@ resource "anyscale_role_binding_policy" "test" {
 
 // Criterion 9: destroy's plan lists what it revokes, and destroy warns naming
 // every binding it kept: the caller's own and each frozen one.
-func TestAccRoleBindingPolicyResource_DestroyWarningsCLI(t *testing.T) {
+func TestAccIAMRoleBindingResource_DestroyWarningsCLI(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	m.seedFrozen("user", pmBob, pmWriter, "project", pmProject)
@@ -241,7 +241,7 @@ func TestAccRoleBindingPolicyResource_DestroyWarningsCLI(t *testing.T) {
 
 // Criterion 11: a policy whose project is gone is removed from state with the
 // treated-as-deleted warning.
-func TestAccRoleBindingPolicyResource_ScopeGoneWarningCLI(t *testing.T) {
+func TestAccIAMRoleBindingResource_ScopeGoneWarningCLI(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	run := cliDevWorkspace(t, pmConfig(m, "project_id", pmProject, pmBase()...))
@@ -290,7 +290,7 @@ func pmExpectDestroyPlanWarning(t *testing.T, lines []tfApplyJSONLine, revoked, 
 
 // A frozen 409 in the destroy plan's dry run keeps the binding: the plan
 // succeeds and warns naming it, even when nothing else is revoked.
-func TestAccRoleBindingPolicyResource_DestroyPlanKeepsFrozenCLI(t *testing.T) {
+func TestAccIAMRoleBindingResource_DestroyPlanKeepsFrozenCLI(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	m.seedFrozen("user", pmBob, pmWriter, "project", pmProject)
@@ -321,12 +321,12 @@ func pmExpectNoMixHint(t *testing.T, lines []tfApplyJSONLine) {
 // A destroy that revokes a grant made outside the policy names it and warns
 // that the scope may be managed twice; the policy's own grants stay out of
 // that list.
-func TestAccRoleBindingPolicyResource_DestroyMixHintCLI(t *testing.T) {
+func TestAccIAMRoleBindingResource_DestroyMixHintCLI(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	run := cliDevWorkspace(t, pmConfig(m, "project_id", pmProject, pmBase()...))
 	pmRunOK(t, run, "apply", "-auto-approve", "-json")
-	// Granted directly after the apply, as anyscale_role_binding would.
+	// Granted directly after the apply, as anyscale_iam_role_grant would.
 	m.seed("user", pmBob, pmWriter, "project", pmProject)
 
 	lines := pmRunOK(t, run, "plan", "-destroy", "-json")
