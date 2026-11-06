@@ -12,7 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// Real-API coverage for anyscale_iam_role_grant and anyscale_role. Role
+// Real-API coverage for anyscale_iam_role_grant and anyscale_iam_role. Role
 // bindings are behind a feature flag; these tests skip when the test org does
 // not have it, and run unchanged once it does. They bind a role to a fresh
 // group with no members, so the grant reaches no one.
@@ -89,7 +89,7 @@ resource "anyscale_user_group" "test" {
   name = %q
 }
 
-data "anyscale_role" "test" {
+data "anyscale_iam_role" "test" {
   name = %q
 }
 `, groupName, roleName)
@@ -97,7 +97,7 @@ data "anyscale_role" "test" {
 		cfg += fmt.Sprintf(`
 resource "anyscale_iam_role_grant" "test" {
   user_group_id = anyscale_user_group.test.id
-  role_id       = data.anyscale_role.test.id
+  role_id       = data.anyscale_iam_role.test.id
   cloud_id      = %q
 }
 `, cloudID)

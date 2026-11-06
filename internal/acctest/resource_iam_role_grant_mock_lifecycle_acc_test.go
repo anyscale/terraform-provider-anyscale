@@ -13,7 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
-// Happy-path lifecycle tests for anyscale_iam_role_grant and anyscale_role,
+// Happy-path lifecycle tests for anyscale_iam_role_grant and anyscale_iam_role,
 // run through resource.Test against roleBindingMockServer. They need no
 // credentials. The read contract (revoked vs feature off vs 403 vs 409) is
 // covered in resource_role_binding_readcontract_mock_acc_test.go.
@@ -39,13 +39,13 @@ func newRoleBindingLifecycleMock(t *testing.T) *roleBindingMockServer {
 // as an HCL attribute line.
 func rbMockConfig(m *roleBindingMockServer, roleName, scope string) string {
 	return m.providerBlock() + fmt.Sprintf(`
-data "anyscale_role" "test" {
+data "anyscale_iam_role" "test" {
   name = %q
 }
 
 resource "anyscale_iam_role_grant" "test" {
   user_group_id = %q
-  role_id       = data.anyscale_role.test.id
+  role_id       = data.anyscale_iam_role.test.id
   %s
 }
 `, roleName, rbMockGroup, scope)
@@ -96,9 +96,9 @@ func TestAccIAMRoleGrantResource_MockLifecycle(t *testing.T) {
 				Config: rbMockConfig(m, "project_viewer", cloudScope),
 				Check:  rbExpectBackend(m, rbMockViewer, "cloud", rbMockCloud),
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue("data.anyscale_role.test", tfjsonpath.New("id"), knownvalue.StringExact(rbMockViewer)),
-					statecheck.ExpectKnownValue("data.anyscale_role.test", tfjsonpath.New("built_in"), knownvalue.Bool(true)),
-					statecheck.ExpectKnownValue("data.anyscale_role.test", tfjsonpath.New("description"), knownvalue.StringExact("Reads projects on a cloud.")),
+					statecheck.ExpectKnownValue("data.anyscale_iam_role.test", tfjsonpath.New("id"), knownvalue.StringExact(rbMockViewer)),
+					statecheck.ExpectKnownValue("data.anyscale_iam_role.test", tfjsonpath.New("built_in"), knownvalue.Bool(true)),
+					statecheck.ExpectKnownValue("data.anyscale_iam_role.test", tfjsonpath.New("description"), knownvalue.StringExact("Reads projects on a cloud.")),
 					statecheck.ExpectKnownValue("anyscale_iam_role_grant.test", tfjsonpath.New("id"), knownvalue.StringRegexp(regexp.MustCompile(`^rb_`))),
 					statecheck.ExpectKnownValue("anyscale_iam_role_grant.test", tfjsonpath.New("cloud_id"), knownvalue.StringExact(rbMockCloud)),
 					statecheck.ExpectKnownValue("anyscale_iam_role_grant.test", tfjsonpath.New("project_id"), knownvalue.Null()),
@@ -166,14 +166,14 @@ func TestAccIAMRoleGrantResource_MockScopeValidation(t *testing.T) {
 	}
 }
 
-func TestAccRoleDataSource_MockCaseMismatch(t *testing.T) {
+func TestAccIAMRoleDataSource_MockCaseMismatch(t *testing.T) {
 	m := newRoleBindingLifecycleMock(t)
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: m.providerBlock() + `
-data "anyscale_role" "test" {
+data "anyscale_iam_role" "test" {
   name = "Project_Viewer"
 }
 `,

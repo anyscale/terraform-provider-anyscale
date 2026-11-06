@@ -43,6 +43,12 @@ func TestRegistryTypeNames(t *testing.T) {
 
 	wantDataSources := map[string]bool{
 		"anyscale_iam_role_binding": false,
+		"anyscale_iam_role":         false,
+	}
+
+	neverDataSources := []string{
+		"anyscale_role_binding_policy",
+		"anyscale_role",
 	}
 
 	for _, f := range p.DataSources(context.Background()) {
@@ -51,8 +57,10 @@ func TestRegistryTypeNames(t *testing.T) {
 		if _, ok := wantDataSources[resp.TypeName]; ok {
 			wantDataSources[resp.TypeName] = true
 		}
-		if resp.TypeName == "anyscale_role_binding_policy" {
-			t.Errorf("registry exposes removed data source type %q", resp.TypeName)
+		for _, n := range neverDataSources {
+			if resp.TypeName == n {
+				t.Errorf("registry exposes removed data source type %q", n)
+			}
 		}
 	}
 	for name, seen := range wantDataSources {

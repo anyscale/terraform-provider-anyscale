@@ -9,11 +9,11 @@ variable "cloud_name" {
 }
 
 # Exact, case-sensitive role names; they can differ per environment.
-data "anyscale_role" "project_owner" {
+data "anyscale_iam_role" "project_owner" {
   name = "Project owner"
 }
 
-data "anyscale_role" "project_reader" {
+data "anyscale_iam_role" "project_reader" {
   name = "Project reader"
 }
 
@@ -43,10 +43,10 @@ resource "anyscale_iam_role_binding" "project" {
     # project. The API refuses to revoke it. Do not copy this entry
     # onto a project created by someone else: an identity cannot
     # grant itself a role, so the apply fails with a 403.
-    (data.anyscale_role.project_owner.id) = {
+    (data.anyscale_iam_role.project_owner.id) = {
       user_ids = [data.anyscale_user.me.id]
     }
-    (data.anyscale_role.project_reader.id) = {
+    (data.anyscale_iam_role.project_reader.id) = {
       user_group_ids = [anyscale_user_group.analysts.id]
     }
   }

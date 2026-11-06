@@ -164,7 +164,7 @@ func (r *IAMRoleGrantResource) Schema(ctx context.Context, req resource.SchemaRe
 			},
 			"role_id": schema.StringAttribute{
 				Required: true,
-				MarkdownDescription: "The role to grant (`rol_...`); look one up by name with the `anyscale_role` data source. " +
+				MarkdownDescription: "The role to grant (`rol_...`); look one up by name with the `anyscale_iam_role` data source. " +
 					"Changing it replaces the binding, leaving the principal without the role in between unless the resource sets `lifecycle { create_before_destroy = true }`.",
 				PlanModifiers: replace,
 				Validators:    []validator.String{stringvalidator.LengthAtLeast(1)},

@@ -95,7 +95,7 @@ implicit extra one.
 - `anyscale_runtime_env_package` packages `./app`, and `anyscale_service` runs it as a Ray Serve
   hello-world on the built image. Apply waits for `RUNNING`; destroy terminates the service.
 - `anyscale_cloud_iam_mapping` maps jobs and services to Cloud B's own node role (a no-op at runtime).
-- Data sources `anyscale_cloud_iam_mapping` and `anyscale_role` (`project_viewer`); `anyscale_system_cluster` is gated (below).
+- Data sources `anyscale_cloud_iam_mapping` and `anyscale_iam_role` (`project_viewer`); `anyscale_system_cluster` is gated (below).
 
 **Gated (zero instances unless you set the variable):**
 

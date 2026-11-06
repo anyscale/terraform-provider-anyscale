@@ -162,7 +162,7 @@ func (r *IAMRoleBindingResource) Schema(ctx context.Context, req resource.Schema
 			},
 			"roles": schema.MapNestedAttribute{
 				Required: true,
-				MarkdownDescription: "Every direct binding on the scope, keyed by role ID (`rol_...`; look one up with the `anyscale_role` data source). " +
+				MarkdownDescription: "Every direct binding on the scope, keyed by role ID (`rol_...`; look one up with the `anyscale_iam_role` data source). " +
 					"`{}` revokes every binding the API allows. The API refuses to revoke the provider identity's own binding, so name it to keep it.",
 				Validators: []validator.Map{mapvalidator.KeysAre(stringvalidator.LengthAtLeast(1))},
 				NestedObject: schema.NestedAttributeObject{

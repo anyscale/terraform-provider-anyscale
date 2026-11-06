@@ -248,7 +248,7 @@ func (p *AnyscaleProvider) DataSources(ctx context.Context) []func() datasource.
 		NewUserDataSource,
 		NewUserGroupDataSource,
 		NewUserGroupsDataSource,
-		NewRoleDataSource,
+		NewIAMRoleDataSource,
 		NewIAMRoleBindingDataSource,
 	}
 }

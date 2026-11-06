@@ -27,11 +27,11 @@ variable "cloud_name" {
 }
 
 # Exact, case-sensitive role names; they can differ per environment.
-data "anyscale_role" "project_owner" {
+data "anyscale_iam_role" "project_owner" {
   name = "Project owner"
 }
 
-data "anyscale_role" "project_reader" {
+data "anyscale_iam_role" "project_reader" {
   name = "Project reader"
 }
 
@@ -61,10 +61,10 @@ resource "anyscale_iam_role_binding" "project" {
     # project. The API refuses to revoke it. Do not copy this entry
     # onto a project created by someone else: an identity cannot
     # grant itself a role, so the apply fails with a 403.
-    (data.anyscale_role.project_owner.id) = {
+    (data.anyscale_iam_role.project_owner.id) = {
       user_ids = [data.anyscale_user.me.id]
     }
-    (data.anyscale_role.project_reader.id) = {
+    (data.anyscale_iam_role.project_reader.id) = {
       user_group_ids = [anyscale_user_group.analysts.id]
     }
   }
@@ -76,7 +76,7 @@ resource "anyscale_iam_role_binding" "project" {
 
 ### Required
 
-- `roles` (Attributes Map) Every direct binding on the scope, keyed by role ID (`rol_...`; look one up with the `anyscale_role` data source). `{}` revokes every binding the API allows. The API refuses to revoke the provider identity's own binding, so name it to keep it. (see [below for nested schema](#nestedatt--roles))
+- `roles` (Attributes Map) Every direct binding on the scope, keyed by role ID (`rol_...`; look one up with the `anyscale_iam_role` data source). `{}` revokes every binding the API allows. The API refuses to revoke the provider identity's own binding, so name it to keep it. (see [below for nested schema](#nestedatt--roles))
 
 ### Optional
 
