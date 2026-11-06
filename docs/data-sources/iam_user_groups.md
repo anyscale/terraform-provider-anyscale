@@ -3,13 +3,13 @@
 page_title: "anyscale_iam_user_groups Data Source - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  ~> Beta. User groups are a Beta feature. Beta resources may change incompatibly; every breaking change is listed in the changelog. Pin the provider version if you depend on these resources, and read the changelog before upgrading. See the RBAC guide ../guides/rbac.md#user-groups-beta.
+  ~> Beta. User groups are a Beta feature. Beta resources may change incompatibly; every breaking change is listed in the changelog. See the RBAC guide ../guides/rbac.md#user-groups-beta.
   Lists the user groups in the token's organization. Use anyscale_iam_user_group for a group's members and organization role.
 ---
 
 # anyscale_iam_user_groups (Data Source)
 
-~> **Beta.** User groups are a Beta feature. Beta resources may change incompatibly; every breaking change is listed in the changelog. Pin the provider version if you depend on these resources, and read the changelog before upgrading. See the [RBAC guide](../guides/rbac.md#user-groups-beta).
+~> **Beta.** User groups are a Beta feature. Beta resources may change incompatibly; every breaking change is listed in the changelog. See the [RBAC guide](../guides/rbac.md#user-groups-beta).
 
 Lists the user groups in the token's organization. Use `anyscale_iam_user_group` for a group's members and organization role.
 

@@ -3,13 +3,13 @@
 page_title: "anyscale_iam_user_group Data Source - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  ~> Beta. User groups are a Beta feature. Beta resources may change incompatibly; every breaking change is listed in the changelog. Pin the provider version if you depend on these resources, and read the changelog before upgrading. See the RBAC guide ../guides/rbac.md#user-groups-beta.
+  ~> Beta. User groups are a Beta feature. Beta resources may change incompatibly; every breaking change is listed in the changelog. See the RBAC guide ../guides/rbac.md#user-groups-beta.
   Reads one user group by ID or name, including groups synced from an identity provider (SCIM), which the user group resources cannot manage.
 ---
 
 # anyscale_iam_user_group (Data Source)
 
-~> **Beta.** User groups are a Beta feature. Beta resources may change incompatibly; every breaking change is listed in the changelog. Pin the provider version if you depend on these resources, and read the changelog before upgrading. See the [RBAC guide](../guides/rbac.md#user-groups-beta).
+~> **Beta.** User groups are a Beta feature. Beta resources may change incompatibly; every breaking change is listed in the changelog. See the [RBAC guide](../guides/rbac.md#user-groups-beta).
 
 Reads one user group by ID or name, including groups synced from an identity provider (SCIM), which the user group resources cannot manage.
 

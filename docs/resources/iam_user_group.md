@@ -3,13 +3,13 @@
 page_title: "anyscale_iam_user_group Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  ~> Beta. User groups are a Beta feature. Beta resources may change incompatibly; every breaking change is listed in the changelog. Pin the provider version if you depend on these resources, and read the changelog before upgrading. See the RBAC guide ../guides/rbac.md#user-groups-beta.
+  ~> Beta. User groups are a Beta feature. Beta resources may change incompatibly; every breaking change is listed in the changelog. See the RBAC guide ../guides/rbac.md#user-groups-beta.
   Manages an Anyscale user group in the token's organization; manage its members with anyscale_user_group_members. Destroying the group first removes every member, including members added outside Terraform. Groups synced from an identity provider (SCIM) cannot be managed or imported; read them with the anyscale_iam_user_group data source.
 ---
 
 # anyscale_iam_user_group (Resource)
 
-~> **Beta.** User groups are a Beta feature. Beta resources may change incompatibly; every breaking change is listed in the changelog. Pin the provider version if you depend on these resources, and read the changelog before upgrading. See the [RBAC guide](../guides/rbac.md#user-groups-beta).
+~> **Beta.** User groups are a Beta feature. Beta resources may change incompatibly; every breaking change is listed in the changelog. See the [RBAC guide](../guides/rbac.md#user-groups-beta).
 
 Manages an Anyscale user group in the token's organization; manage its members with `anyscale_user_group_members`. Destroying the group first removes every member, including members added outside Terraform. Groups synced from an identity provider (SCIM) cannot be managed or imported; read them with the `anyscale_iam_user_group` data source.
 

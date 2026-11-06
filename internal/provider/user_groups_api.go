@@ -15,7 +15,7 @@ import (
 // userGroupsBetaBanner opens the MarkdownDescription of every user group
 // resource and data source. The policy it links to is written once, in the
 // RBAC guide, rather than repeated per attribute.
-const userGroupsBetaBanner = "~> **Beta.** User groups are a Beta feature. Beta resources may change incompatibly; every breaking change is listed in the changelog. Pin the provider version if you depend on these resources, and read the changelog before upgrading. See the [RBAC guide](../guides/rbac.md#user-groups-beta).\n\n"
+const userGroupsBetaBanner = "~> **Beta.** User groups are a Beta feature. Beta resources may change incompatibly; every breaking change is listed in the changelog. See the [RBAC guide](../guides/rbac.md#user-groups-beta).\n\n"
 
 const userGroupsBasePath = "/api/v2/user_groups"
 
