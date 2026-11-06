@@ -55,10 +55,10 @@ data "anyscale_user_groups" "all" {
   depends_on = [anyscale_user_group.team]
 }
 
-# --- anyscale_role_binding (gated by enable_role_binding) ---------------------------------------
+# --- anyscale_iam_role_grant (gated by enable_role_binding) ---------------------------------------
 # Beta. Only organizations converted to role bindings accept it; others answer 409. Gives every
 # member of the group the built-in project_viewer role on Cloud B's project.
-resource "anyscale_role_binding" "team_project_viewer" {
+resource "anyscale_iam_role_grant" "team_project_viewer" {
   count = var.enable_role_binding ? 1 : 0
 
   user_group_id = anyscale_user_group.team[0].id

@@ -105,7 +105,7 @@ implicit extra one.
 | `org_user_email` | `anyscale_organization_user` and its data source | An existing member's email (a non-member gets a real invitation) |
 | `enable_user_groups` | `anyscale_user_group`, `anyscale_user_group_members`, and the `anyscale_user_group` / `anyscale_user_groups` data sources | User groups enabled for your org (org-wide objects behind a feature flag) |
 | `user_group_member_emails` | Group membership | Each email must be an accepted org member |
-| `enable_role_binding` | `anyscale_role_binding` | `enable_user_groups`, and an org on role bindings (converted); legacy orgs answer `409` |
+| `enable_role_binding` | `anyscale_iam_role_grant` | `enable_user_groups`, and an org on role bindings (converted); legacy orgs answer `409` |
 
 **Excluded (never declared here):**
 

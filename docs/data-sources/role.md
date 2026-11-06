@@ -24,7 +24,7 @@ data "anyscale_role" "project_viewer" {
 }
 
 output "project_viewer_role_id" {
-  description = "Pass to anyscale_role_binding.role_id"
+  description = "Pass to anyscale_iam_role_grant.role_id"
   value       = data.anyscale_role.project_viewer.id
 }
 ```
