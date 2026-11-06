@@ -65,7 +65,8 @@ names per object for a release cycle with no one to migrate.
 3. Renamed acceptance tests match the CI shard regex and are seen running in the shard log.
 4. User-group sweeping still works (`make sweep-dry-run`).
 5. `git grep -nP 'anyscale_(role|user_group|user_group_members|user_groups)\b'` finds no reference
-   to an old type outside `CHANGELOG.md` and `.changelog/`. Use `-P`: with `-E`, `\b` matches nothing
+   to an old type outside `CHANGELOG.md`, `.changelog/` and `docs/decisions/` (historical records
+   keep the names they were written with). Use `-P`: with `-E`, `\b` matches nothing
    and the check passes vacuously.
 6. `make check`, `make docs`, `make docs-validate` and `make validate-examples` pass.
 7. All renames ship together in v0.38.0.
