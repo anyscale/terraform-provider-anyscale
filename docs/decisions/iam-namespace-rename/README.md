@@ -20,6 +20,12 @@ no deprecation period, no `moved {}` support.
 Each type is a pure rename. Schema, attribute names, IDs, import ID formats, validation, CRUD
 behavior and schema version are unchanged.
 
+One consequence is removed rather than renamed: the `anyscale_user_group_members` v0→v1 state
+upgrader (v0.30.0's `group_id` → `user_group_id`). State written under the old type name cannot
+reach `anyscale_iam_user_group_members`; import and create write version 1 directly. The upgrader
+and its tests go away with the rename, and the schema stays at version 1 because a schema version
+is never lowered.
+
 ## Rationale
 
 - **No customer can hold state for these types.** Roles are read behind the role-definition flag
@@ -69,7 +75,8 @@ names per object for a release cycle with no one to migrate.
    to an old type outside `CHANGELOG.md`, `.changelog/`, `docs/decisions/` and `docs/deferred/`
    (historical records keep the names they were written with). The only expected hits are the
    removed-name lists in `internal/provider/provider_registry_test.go`, which must name the old
-   types. Use `-P`: with `-E`, `\b` matches nothing
+   types, and the schema-version comment in `resource_iam_user_group_members.go`, which explains
+   why no state under the old type can reach the new one. Use `-P`: with `-E`, `\b` matches nothing
    and the check passes vacuously.
 6. `make check`, `make docs`, `make docs-validate` and `make validate-examples` pass.
 7. All renames ship together in v0.38.0.

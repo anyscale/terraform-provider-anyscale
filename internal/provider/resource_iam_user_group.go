@@ -30,7 +30,7 @@ func NewIAMUserGroupResource() resource.Resource {
 }
 
 // IAMUserGroupResource manages an Anyscale-managed user group. Membership is a
-// separate resource (anyscale_user_group_members).
+// separate resource (anyscale_iam_user_group_members).
 type IAMUserGroupResource struct {
 	client *Client
 }
@@ -48,7 +48,7 @@ func (r *IAMUserGroupResource) Metadata(ctx context.Context, req resource.Metada
 func (r *IAMUserGroupResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: userGroupsBetaBanner +
-			"Manages an Anyscale user group in the token's organization; manage its members with `anyscale_user_group_members`. " +
+			"Manages an Anyscale user group in the token's organization; manage its members with `anyscale_iam_user_group_members`. " +
 			"Destroying the group first removes every member, including members added outside Terraform. " +
 			"Groups synced from an identity provider (SCIM) cannot be managed or imported; read them with the `anyscale_iam_user_group` data source.",
 		Attributes: map[string]schema.Attribute{

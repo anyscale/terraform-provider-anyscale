@@ -154,7 +154,7 @@ resource "anyscale_iam_user_group" "test" {
 	})
 }
 
-func TestAccUserGroupMembersResource_AzureBlocked_MockServer(t *testing.T) {
+func TestAccIAMUserGroupMembersResource_AzureBlocked_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t, ugUserA, ugUserB)
 	user := "user"
@@ -164,13 +164,13 @@ func TestAccUserGroupMembersResource_AzureBlocked_MockServer(t *testing.T) {
 	var azure atomic.Bool
 	cfg := func(members string) string {
 		return m.providerBlock() + fmt.Sprintf(`
-resource "anyscale_user_group_members" "test" {
+resource "anyscale_iam_user_group_members" "test" {
   user_group_id = %q
   members       = [%s]
 }
 `, groupID, members)
 	}
-	const addr = "anyscale_user_group_members.test"
+	const addr = "anyscale_iam_user_group_members.test"
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: azureClassifiedFactories(&azure),
 		CheckDestroy: func(*terraform.State) error {

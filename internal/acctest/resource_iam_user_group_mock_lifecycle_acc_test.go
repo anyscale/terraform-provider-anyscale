@@ -38,7 +38,7 @@ resource "anyscale_iam_user_group" "test" {
 			quoted[i] = fmt.Sprintf("%q", e)
 		}
 		cfg += fmt.Sprintf(`
-resource "anyscale_user_group_members" "test" {
+resource "anyscale_iam_user_group_members" "test" {
   user_group_id = anyscale_iam_user_group.test.id
   members       = [%s]
 }
@@ -84,9 +84,9 @@ func ugClearWrites(m *userGroupMockServer) resource.TestCheckFunc {
 	}
 }
 
-// TestAccUserGroupMembersResource_MockLifecycle walks create, a case-only
+// TestAccIAMUserGroupMembersResource_MockLifecycle walks create, a case-only
 // edit, out-of-band drift in both directions, emptying the set, and destroy.
-func TestAccUserGroupMembersResource_MockLifecycle(t *testing.T) {
+func TestAccIAMUserGroupMembersResource_MockLifecycle(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t, ugUserA, ugUserB, ugUserC)
 	const name = "tfacc-ug-mock-life"
@@ -128,9 +128,9 @@ func TestAccUserGroupMembersResource_MockLifecycle(t *testing.T) {
 					ugClearWrites(m),
 				),
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue("anyscale_user_group_members.test", tfjsonpath.New("members"),
+					statecheck.ExpectKnownValue("anyscale_iam_user_group_members.test", tfjsonpath.New("members"),
 						knownvalue.SetExact([]knownvalue.Check{knownvalue.StringExact("Alice@Example.com"), knownvalue.StringExact("bob@example.com")})),
-					statecheck.CompareValuePairs("anyscale_user_group_members.test", tfjsonpath.New("id"),
+					statecheck.CompareValuePairs("anyscale_iam_user_group_members.test", tfjsonpath.New("id"),
 						"anyscale_iam_user_group.test", tfjsonpath.New("id"), compare.ValuesSame()),
 				},
 				ConfigPlanChecks: resource.ConfigPlanChecks{
@@ -142,7 +142,7 @@ func TestAccUserGroupMembersResource_MockLifecycle(t *testing.T) {
 				// writes nothing.
 				Config: ugMockConfig(m, name, "ALICE@example.com", "bob@example.com"),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply:             []plancheck.PlanCheck{plancheck.ExpectResourceAction("anyscale_user_group_members.test", plancheck.ResourceActionUpdate)},
+					PreApply:             []plancheck.PlanCheck{plancheck.ExpectResourceAction("anyscale_iam_user_group_members.test", plancheck.ResourceActionUpdate)},
 					PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -156,7 +156,7 @@ func TestAccUserGroupMembersResource_MockLifecycle(t *testing.T) {
 				PreConfig: func() { m.setMember(groupID, ugUserC.UserID, true) },
 				Config:    ugMockConfig(m, name, "ALICE@example.com", "bob@example.com"),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction("anyscale_user_group_members.test", plancheck.ResourceActionUpdate)},
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction("anyscale_iam_user_group_members.test", plancheck.ResourceActionUpdate)},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					ugExpectMembers(m, ugUserA.UserID, ugUserB.UserID),
@@ -168,7 +168,7 @@ func TestAccUserGroupMembersResource_MockLifecycle(t *testing.T) {
 				PreConfig: func() { m.setMember(groupID, ugUserB.UserID, false) },
 				Config:    ugMockConfig(m, name, "ALICE@example.com", "bob@example.com"),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction("anyscale_user_group_members.test", plancheck.ResourceActionUpdate)},
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction("anyscale_iam_user_group_members.test", plancheck.ResourceActionUpdate)},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					ugExpectMembers(m, ugUserA.UserID, ugUserB.UserID),
@@ -206,9 +206,9 @@ func TestAccUserGroupMembersResource_MockLifecycle(t *testing.T) {
 	})
 }
 
-// TestAccUserGroupMembersResource_MockServiceAccountMember: a service account
+// TestAccIAMUserGroupMembersResource_MockServiceAccountMember: a service account
 // declared by email resolves and is added like a user.
-func TestAccUserGroupMembersResource_MockServiceAccountMember(t *testing.T) {
+func TestAccIAMUserGroupMembersResource_MockServiceAccountMember(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	robot := userGroupMockUser{
 		UserID: "usr_rrrrrrrrrrrrrrrrrrrrrrrrrr", IdentityID: "ide_rrrrrrrrrrrrrrrrrrrrrrrrrr",
@@ -266,9 +266,9 @@ func TestAccIAMUserGroupResource_MockDestroyRemovesMembersFirst(t *testing.T) {
 	})
 }
 
-// TestAccUserGroupMembersResource_MockEmptySet: members = [] is a valid,
+// TestAccIAMUserGroupMembersResource_MockEmptySet: members = [] is a valid,
 // distinct configuration from omitting the resource.
-func TestAccUserGroupMembersResource_MockEmptySet(t *testing.T) {
+func TestAccIAMUserGroupMembersResource_MockEmptySet(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t, ugUserA)
 	resource.Test(t, resource.TestCase{
@@ -278,7 +278,7 @@ func TestAccUserGroupMembersResource_MockEmptySet(t *testing.T) {
 				Config: ugMockConfig(m, "tfacc-ug-mock-empty", []string{}...),
 				Check:  ugExpectMembers(m),
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue("anyscale_user_group_members.test", tfjsonpath.New("members"), knownvalue.SetSizeExact(0)),
+					statecheck.ExpectKnownValue("anyscale_iam_user_group_members.test", tfjsonpath.New("members"), knownvalue.SetSizeExact(0)),
 				},
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
@@ -288,12 +288,12 @@ func TestAccUserGroupMembersResource_MockEmptySet(t *testing.T) {
 	})
 }
 
-// TestAccUserGroupMembersResource_MockImport is Test A of the import pair:
+// TestAccIAMUserGroupMembersResource_MockImport is Test A of the import pair:
 // what import actually recovers, asserted inside the import step. Import has
 // no config spelling to prefer, so it recovers the emails as the backend returns them (lowercase);
 // that divergence from the mixed-case config is the one ignored field, and it
 // is asserted explicitly rather than excluded silently.
-func TestAccUserGroupMembersResource_MockImport(t *testing.T) {
+func TestAccIAMUserGroupMembersResource_MockImport(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t, ugUserA, ugUserB)
 	resource.Test(t, resource.TestCase{
@@ -301,7 +301,7 @@ func TestAccUserGroupMembersResource_MockImport(t *testing.T) {
 		Steps: []resource.TestStep{
 			{Config: ugMockConfig(m, "tfacc-ug-mock-import", "Alice@Example.com", "bob@example.com")},
 			{
-				ResourceName:            "anyscale_user_group_members.test",
+				ResourceName:            "anyscale_iam_user_group_members.test",
 				ImportState:             true,
 				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: []string{"members"},
@@ -337,11 +337,11 @@ func TestAccUserGroupMembersResource_MockImport(t *testing.T) {
 	})
 }
 
-// TestAccUserGroupMembersResource_MockImportedShapePlansClean is Test B of the
+// TestAccIAMUserGroupMembersResource_MockImportedShapePlansClean is Test B of the
 // import pair: plan against the state shape import produces (lowercase
 // emails) with a mixed-case config. It must be an in-place update that writes
 // nothing, never a replacement.
-func TestAccUserGroupMembersResource_MockImportedShapePlansClean(t *testing.T) {
+func TestAccIAMUserGroupMembersResource_MockImportedShapePlansClean(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t, ugUserA)
 	resource.Test(t, resource.TestCase{
@@ -351,7 +351,7 @@ func TestAccUserGroupMembersResource_MockImportedShapePlansClean(t *testing.T) {
 			{
 				Config: ugMockConfig(m, "tfacc-ug-mock-shape", "Alice@Example.com"),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply:             []plancheck.PlanCheck{plancheck.ExpectResourceAction("anyscale_user_group_members.test", plancheck.ResourceActionUpdate)},
+					PreApply:             []plancheck.PlanCheck{plancheck.ExpectResourceAction("anyscale_iam_user_group_members.test", plancheck.ResourceActionUpdate)},
 					PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
 				},
 				Check: ugExpectNoWrites(m),
@@ -360,10 +360,10 @@ func TestAccUserGroupMembersResource_MockImportedShapePlansClean(t *testing.T) {
 	})
 }
 
-// TestAccUserGroupMembersResource_MockGroupDeletedOutOfBand: when the group
+// TestAccIAMUserGroupMembersResource_MockGroupDeletedOutOfBand: when the group
 // disappears, both resources leave state on refresh and are planned for
 // creation, rather than the members resource failing the refresh.
-func TestAccUserGroupMembersResource_MockGroupDeletedOutOfBand(t *testing.T) {
+func TestAccIAMUserGroupMembersResource_MockGroupDeletedOutOfBand(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t, ugUserA)
 	const name = "tfacc-ug-mock-oob"
@@ -377,7 +377,7 @@ func TestAccUserGroupMembersResource_MockGroupDeletedOutOfBand(t *testing.T) {
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction("anyscale_iam_user_group.test", plancheck.ResourceActionCreate),
-						plancheck.ExpectResourceAction("anyscale_user_group_members.test", plancheck.ResourceActionCreate),
+						plancheck.ExpectResourceAction("anyscale_iam_user_group_members.test", plancheck.ResourceActionCreate),
 					},
 				},
 				Check: ugExpectMembers(m, ugUserA.UserID),
@@ -386,10 +386,10 @@ func TestAccUserGroupMembersResource_MockGroupDeletedOutOfBand(t *testing.T) {
 	})
 }
 
-// TestAccUserGroupMembersResource_MockUnresolvableEmails: an email that is not
+// TestAccIAMUserGroupMembersResource_MockUnresolvableEmails: an email that is not
 // an org member fails the apply naming every such email, and nothing is
 // written.
-func TestAccUserGroupMembersResource_MockUnresolvableEmails(t *testing.T) {
+func TestAccIAMUserGroupMembersResource_MockUnresolvableEmails(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t, ugUserA)
 	resource.Test(t, resource.TestCase{
@@ -409,10 +409,10 @@ func TestAccUserGroupMembersResource_MockUnresolvableEmails(t *testing.T) {
 	}
 }
 
-// TestAccUserGroupMembersResource_MockDepartedMember: a member who left the
+// TestAccIAMUserGroupMembersResource_MockDepartedMember: a member who left the
 // org drops out of the backend's listing, so the next plan proposes re-adding
 // them and the apply fails clearly instead of claiming success.
-func TestAccUserGroupMembersResource_MockDepartedMember(t *testing.T) {
+func TestAccIAMUserGroupMembersResource_MockDepartedMember(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t, ugUserA, ugUserB)
 	const name = "tfacc-ug-mock-departed"
@@ -441,9 +441,9 @@ func TestAccUserGroupMembersResource_MockDepartedMember(t *testing.T) {
 	})
 }
 
-// TestAccUserGroupMembersResource_MockDuplicateCaseRejected: two spellings of
+// TestAccIAMUserGroupMembersResource_MockDuplicateCaseRejected: two spellings of
 // one address resolve to one member and could never converge.
-func TestAccUserGroupMembersResource_MockDuplicateCaseRejected(t *testing.T) {
+func TestAccIAMUserGroupMembersResource_MockDuplicateCaseRejected(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t, ugUserA)
 	resource.Test(t, resource.TestCase{
@@ -487,7 +487,7 @@ resource "anyscale_iam_user_group" "test" {
 			},
 			{
 				Config: m.providerBlock() + fmt.Sprintf(`
-resource "anyscale_user_group_members" "test" {
+resource "anyscale_iam_user_group_members" "test" {
   user_group_id = %q
   members  = ["alice@example.com"]
 }

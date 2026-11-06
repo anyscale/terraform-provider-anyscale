@@ -1,0 +1,4 @@
+```
+release-note:breaking-change
+resource/anyscale_user_group_members: `anyscale_user_group_members` is removed and renamed to `anyscale_iam_user_group_members`; update the resource type in your configuration.
+```

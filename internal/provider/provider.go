@@ -211,7 +211,7 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewSchedulerConfigResource,
 		NewSystemClusterResource,
 		NewIAMUserGroupResource,
-		NewUserGroupMembersResource,
+		NewIAMUserGroupMembersResource,
 		NewIAMRoleGrantResource,
 		NewIAMRoleBindingResource,
 		NewRuntimeEnvPackageResource,

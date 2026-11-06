@@ -196,7 +196,7 @@ func TestResolveIdentityForEmail_AmbiguousEmailNamesBothRecords(t *testing.T) {
 	}
 }
 
-// The resolver behind anyscale_user_group_members lists the whole organization
+// The resolver behind anyscale_iam_user_group_members lists the whole organization
 // once; it must list service accounts too.
 func TestResolveOrgUserIDsByEmail_ResolvesServiceAccount(t *testing.T) {
 	client, queries := newOrgCollaboratorAccountTypeMock(t, accountTypeUser, accountTypeSA)

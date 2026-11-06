@@ -16,14 +16,16 @@ func TestRegistryTypeNames(t *testing.T) {
 	p := &AnyscaleProvider{}
 
 	wantResources := map[string]bool{
-		"anyscale_iam_role_grant":   false,
-		"anyscale_iam_role_binding": false,
-		"anyscale_iam_user_group":   false,
+		"anyscale_iam_role_grant":         false,
+		"anyscale_iam_role_binding":       false,
+		"anyscale_iam_user_group":         false,
+		"anyscale_iam_user_group_members": false,
 	}
 	neverResources := []string{
 		"anyscale_role_binding",
 		"anyscale_role_binding_policy",
 		"anyscale_user_group",
+		"anyscale_user_group_members",
 	}
 
 	for _, f := range p.Resources(context.Background()) {

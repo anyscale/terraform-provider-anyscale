@@ -26,7 +26,7 @@ resource "anyscale_iam_user_group" "analysts" {
 
 # Who is in the group. AUTHORITATIVE: anyone not listed is removed from
 # the group. Each email must already belong to your organization.
-resource "anyscale_user_group_members" "analysts" {
+resource "anyscale_iam_user_group_members" "analysts" {
   user_group_id = anyscale_iam_user_group.analysts.id
   members = [
     "alice@example.com",

@@ -26,7 +26,7 @@ data "anyscale_organization_user" "member" {
   email = anyscale_organization_user.member[0].email
 }
 
-# --- anyscale_iam_user_group + anyscale_user_group_members (gated by enable_user_groups) --------
+# --- anyscale_iam_user_group + anyscale_iam_user_group_members (gated by enable_user_groups) --------
 # Beta, and enabled per organization. The members list is authoritative: anyone in the group who
 # is not listed is removed. Each email must belong to an accepted member.
 resource "anyscale_iam_user_group" "team" {
@@ -35,7 +35,7 @@ resource "anyscale_iam_user_group" "team" {
   name = "${var.name_prefix}-team"
 }
 
-resource "anyscale_user_group_members" "team" {
+resource "anyscale_iam_user_group_members" "team" {
   count = var.enable_user_groups ? 1 : 0
 
   user_group_id = anyscale_iam_user_group.team[0].id
@@ -46,7 +46,7 @@ data "anyscale_iam_user_group" "team" {
   count = var.enable_user_groups ? 1 : 0
 
   # Read after the members are written, so the data source shows them.
-  id = anyscale_user_group_members.team[0].user_group_id
+  id = anyscale_iam_user_group_members.team[0].user_group_id
 }
 
 data "anyscale_iam_user_groups" "all" {

@@ -7,7 +7,7 @@ scratch. User-facing behavior is in the "User groups (Alpha)" and "Role bindings
 ## Shipped (Alpha)
 
 `anyscale_iam_user_group` (create, rename, delete; renamed from `anyscale_user_group` in v0.38.0),
-`anyscale_user_group_members` (authoritative member
+`anyscale_iam_user_group_members` (authoritative member
 list keyed by email), and the `anyscale_iam_user_group` / `anyscale_iam_user_groups` data sources, over
 `/api/v2/user_groups`. Both the Anyscale API and the provider schema may change before Beta.
 
