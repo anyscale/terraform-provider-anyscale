@@ -13,7 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
-// Happy-path lifecycle tests for anyscale_iam_role_grant and anyscale_role,
+// Happy-path lifecycle tests for anyscale_iam_role_grant and anyscale_iam_role,
 // run through resource.Test against roleBindingMockServer. They need no
 // credentials. The read contract (revoked vs feature off vs 403 vs 409) is
 // covered in resource_role_binding_readcontract_mock_acc_test.go.

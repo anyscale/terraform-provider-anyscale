@@ -12,7 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// Real-API coverage for anyscale_iam_role_grant and anyscale_role. Role
+// Real-API coverage for anyscale_iam_role_grant and anyscale_iam_role. Role
 // bindings are behind a feature flag; these tests skip when the test org does
 // not have it, and run unchanged once it does. They bind a role to a fresh
 // group with no members, so the grant reaches no one.
