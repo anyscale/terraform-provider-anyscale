@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.37.0] - 2026-11-06
+
+### Breaking Changes
+
+- resource/anyscale_role_binding: `anyscale_role_binding` is removed and renamed to `anyscale_iam_role_grant`; update the resource type in your configuration.
+- resource/anyscale_role_binding_policy: `anyscale_role_binding_policy` is removed and renamed to `anyscale_iam_role_binding`, which is authoritative over every direct grant on its scope; update the resource type in your configuration.
+- data-source/anyscale_role_binding_policy: `anyscale_role_binding_policy` is removed and renamed to `anyscale_iam_role_binding`; update the data source type in your configuration, keeping the same scope arguments.
+
 ## [0.36.1] - 2026-11-06
 
 ### Added
@@ -1365,7 +1373,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.36.1...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.37.0...HEAD
+[0.37.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.37.0
 [0.36.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.36.1
 [0.36.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.36.0
 [0.35.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.35.0
