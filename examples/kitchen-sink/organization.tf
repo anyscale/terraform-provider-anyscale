@@ -62,6 +62,6 @@ resource "anyscale_iam_role_grant" "team_project_viewer" {
   count = var.enable_role_binding ? 1 : 0
 
   user_group_id = anyscale_user_group.team[0].id
-  role_id       = data.anyscale_role.project_viewer[0].id
+  role_id       = data.anyscale_iam_role.project_viewer[0].id
   project_id    = anyscale_project.b.id
 }

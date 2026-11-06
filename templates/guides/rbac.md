@@ -21,7 +21,7 @@ Read this before writing configuration that spans more than one scope.
 | Organization membership | [`anyscale_organization_user`](../resources/organization_user.md) | Whether the user is under Terraform management. It cannot create a member - people join by invitation - but declaring it adopts an existing member with no API call. Destroying it removes nobody: it cancels only a still-pending invitation this resource itself sent. |
 | Organization role | [`anyscale_organization_user_role`](../resources/organization_user_role.md) | One user's `base_role` and `deny_roles` in the organization. Authoritative over that one user's role - not over who is a member. |
 | User groups (Beta) | [`anyscale_user_group`](../resources/user_group.md), [`anyscale_user_group_members`](../resources/user_group_members.md) | A group's name, and its **entire** member list. Not what the group may access - see role bindings, next row. See [User groups (Beta)](#user-groups-beta). |
-| Role grants (Beta) | [`anyscale_iam_role_grant`](../resources/iam_role_grant.md), [`anyscale_iam_role_binding`](../resources/iam_role_binding.md), [`anyscale_role`](../data-sources/role.md) data source | One role held by one user group or one user on one cloud, project, or the organization (`anyscale_iam_role_grant`), or every direct role binding on a scope (`anyscale_iam_role_binding`). **Converted organizations only** - see [Organization access mode](#organization-access-mode). See [Role bindings (Beta)](#role-bindings-beta). |
+| Role grants (Beta) | [`anyscale_iam_role_grant`](../resources/iam_role_grant.md), [`anyscale_iam_role_binding`](../resources/iam_role_binding.md), [`anyscale_iam_role`](../data-sources/iam_role.md) data source | One role held by one user group or one user on one cloud, project, or the organization (`anyscale_iam_role_grant`), or every direct role binding on a scope (`anyscale_iam_role_binding`). **Converted organizations only** - see [Organization access mode](#organization-access-mode). See [Role bindings (Beta)](#role-bindings-beta). |
 
 `anyscale_organization_user_role` uses the word "authoritative" to mean: authoritative over the one row
 it manages, never over a whole population - see
@@ -203,7 +203,7 @@ organization is unconverted until an admin converts it.
 is managed with Azure role-based access control in the Azure portal, in either mode. When the
 provider's API URL is one of these hosts, creating, changing or importing `anyscale_iam_role_grant`,
 `anyscale_user_group`, `anyscale_user_group_members` or
-`anyscale_organization_user_role`, reading the `anyscale_role`, `anyscale_user_group` or
+`anyscale_organization_user_role`, reading the `anyscale_iam_role`, `anyscale_user_group` or
 `anyscale_user_groups` data sources, and setting `anyscale_cloud.auto_add_user` fail at plan with "RBAC
 Is Managed in Azure". Destroying one, or a plan with no changes, still works. A custom or proxied URL in
 front of an Azure control plane is not detected.
@@ -237,7 +237,7 @@ Role-binding writes are refused until the organization converts, so the move hap
 ```hcl
 locals {
   grants = {
-    analysts = { group = anyscale_user_group.analysts.id, role = data.anyscale_role.viewer.id }
+    analysts = { group = anyscale_user_group.analysts.id, role = data.anyscale_iam_role.viewer.id }
   }
 }
 
@@ -299,12 +299,12 @@ so someone tracing an `rb_` ID from the console or API lands on the grant resour
 
 `anyscale_iam_role_grant` grants **one role to one user group or one user on one scope** - exactly one of
 `user_group_id` or `user_id`, and exactly one of `cloud_id`,
-`project_id`, or `organization_id`. Look up the role with the [`anyscale_role`](../data-sources/role.md)
+`project_id`, or `organization_id`. Look up the role with the [`anyscale_iam_role`](../data-sources/iam_role.md)
 data source, which resolves a role by its exact, case-sensitive `name`. Which role names exist depends on
 your organization; ask support@anyscale.com which built-in roles are enabled.
 
 ```hcl
-data "anyscale_role" "viewer" {
+data "anyscale_iam_role" "viewer" {
   name = "project_viewer" # exact, case-sensitive; archived roles are not found
 }
 
@@ -319,7 +319,7 @@ resource "anyscale_user_group_members" "analysts" {
 
 resource "anyscale_iam_role_grant" "analysts_viewer" {
   user_group_id = anyscale_user_group.analysts.id
-  role_id       = data.anyscale_role.viewer.id
+  role_id       = data.anyscale_iam_role.viewer.id
   project_id    = var.project_id # exactly one of cloud_id / project_id / organization_id
 }
 ```
@@ -340,7 +340,7 @@ data "anyscale_organization_user" "alice" {
 
 resource "anyscale_iam_role_grant" "alice_viewer" {
   user_id    = data.anyscale_organization_user.alice.user_id
-  role_id    = data.anyscale_role.viewer.id
+  role_id    = data.anyscale_iam_role.viewer.id
   project_id = var.project_id
 }
 ```

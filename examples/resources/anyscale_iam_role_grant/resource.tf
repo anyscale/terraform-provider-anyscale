@@ -16,7 +16,7 @@ variable "org_role_name" {
   type        = string
 }
 
-data "anyscale_role" "project_viewer" {
+data "anyscale_iam_role" "project_viewer" {
   name = "project_viewer" # exact, case-sensitive
 }
 
@@ -38,7 +38,7 @@ resource "anyscale_user_group_members" "analysts" {
 # project.
 resource "anyscale_iam_role_grant" "analysts_project_viewer" {
   user_group_id = anyscale_user_group.analysts.id
-  role_id       = data.anyscale_role.project_viewer.id
+  role_id       = data.anyscale_iam_role.project_viewer.id
   # exactly one of cloud_id, project_id, organization_id
   project_id = var.project_id
 
@@ -57,13 +57,13 @@ data "anyscale_user_group" "okta_admins" {
 
 data "anyscale_organization" "current" {}
 
-data "anyscale_role" "org_role" {
+data "anyscale_iam_role" "org_role" {
   name = var.org_role_name
 }
 
 resource "anyscale_iam_role_grant" "okta_admins_org" {
   user_group_id   = data.anyscale_user_group.okta_admins.id
-  role_id         = data.anyscale_role.org_role.id
+  role_id         = data.anyscale_iam_role.org_role.id
   organization_id = data.anyscale_organization.current.id
 }
 
@@ -76,6 +76,6 @@ data "anyscale_organization_user" "carol" {
 
 resource "anyscale_iam_role_grant" "carol_project_viewer" {
   user_id    = data.anyscale_organization_user.carol.user_id
-  role_id    = data.anyscale_role.project_viewer.id
+  role_id    = data.anyscale_iam_role.project_viewer.id
   project_id = var.project_id
 }
