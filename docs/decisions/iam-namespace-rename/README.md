@@ -20,6 +20,12 @@ no deprecation period, no `moved {}` support.
 Each type is a pure rename. Schema, attribute names, IDs, import ID formats, validation, CRUD
 behavior and schema version are unchanged.
 
+One consequence is removed rather than renamed: the `anyscale_user_group_members` v0→v1 state
+upgrader (v0.30.0's `group_id` → `user_group_id`). State written under the old type name cannot
+reach `anyscale_iam_user_group_members`; import and create write version 1 directly. The upgrader
+and its tests go away with the rename, and the schema stays at version 1 because a schema version
+is never lowered.
+
 ## Rationale
 
 - **No customer can hold state for these types.** Roles are read behind the role-definition flag
