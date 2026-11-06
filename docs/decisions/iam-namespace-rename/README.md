@@ -64,9 +64,12 @@ names per object for a release cycle with no one to migrate.
 2. A unit test asserts the old type names are absent from the provider's resources and data sources.
 3. Renamed acceptance tests match the CI shard regex and are seen running in the shard log.
 4. User-group sweeping still works (`make sweep-dry-run`).
-5. `git grep -nP 'anyscale_(role|user_group|user_group_members|user_groups)\b'` finds no reference
-   to an old type outside `CHANGELOG.md`, `.changelog/` and `docs/decisions/` (historical records
-   keep the names they were written with). Use `-P`: with `-E`, `\b` matches nothing
+5. `git grep -nP 'anyscale_(role|user_group|user_group_members|user_groups)\b' -- . ':!CHANGELOG.md'
+   ':!.changelog' ':!docs/decisions' ':!docs/deferred'` finds no reference
+   to an old type outside `CHANGELOG.md`, `.changelog/`, `docs/decisions/` and `docs/deferred/`
+   (historical records keep the names they were written with). The only expected hits are the
+   removed-name lists in `internal/provider/provider_registry_test.go`, which must name the old
+   types. Use `-P`: with `-E`, `\b` matches nothing
    and the check passes vacuously.
 6. `make check`, `make docs`, `make docs-validate` and `make validate-examples` pass.
 7. All renames ship together in v0.38.0.
