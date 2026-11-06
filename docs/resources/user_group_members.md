@@ -3,13 +3,13 @@
 page_title: "anyscale_user_group_members Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  ~> Beta. User groups are a Beta feature. Breaking schema changes get a deprecation first and a changelog entry. See the RBAC guide ../guides/rbac.md#user-groups-beta.
+  ~> Beta. User groups are a Beta feature. Beta resources may change incompatibly; every breaking change is listed in the changelog. See the RBAC guide ../guides/rbac.md#user-groups-beta.
   Manages the complete member list of an Anyscale user group. This resource is authoritative: members added outside Terraform are removed on the next apply, and destroying it empties the group without deleting it. Use at most one per group. Directory-synced (SCIM) groups are rejected, because their identity provider owns membership. Do not manage the "All users" group of a converted organization ../guides/rbac.md#organization-access-mode with this resource.
 ---
 
 # anyscale_user_group_members (Resource)
 
-~> **Beta.** User groups are a Beta feature. Breaking schema changes get a deprecation first and a changelog entry. See the [RBAC guide](../guides/rbac.md#user-groups-beta).
+~> **Beta.** User groups are a Beta feature. Beta resources may change incompatibly; every breaking change is listed in the changelog. See the [RBAC guide](../guides/rbac.md#user-groups-beta).
 
 Manages the complete member list of an Anyscale user group. This resource is authoritative: members added outside Terraform are removed on the next apply, and destroying it empties the group without deleting it. Use at most one per group. Directory-synced (SCIM) groups are rejected, because their identity provider owns membership. Do not manage the "All users" group of a [converted organization](../guides/rbac.md#organization-access-mode) with this resource.
 
@@ -20,12 +20,12 @@ Manages the complete member list of an Anyscale user group. This resource is aut
 # AUTHORITATIVE: anyone in the group who is not listed in `members` is
 # removed, including people added in the Anyscale console. Declare
 # exactly one anyscale_user_group_members per group.
-resource "anyscale_user_group" "ml_platform" {
+resource "anyscale_iam_user_group" "ml_platform" {
   name = "ml-platform"
 }
 
 resource "anyscale_user_group_members" "ml_platform" {
-  user_group_id = anyscale_user_group.ml_platform.id
+  user_group_id = anyscale_iam_user_group.ml_platform.id
 
   # Each email must already belong to your organization; invite people
   # first with anyscale_organization_invitation and wait for them to

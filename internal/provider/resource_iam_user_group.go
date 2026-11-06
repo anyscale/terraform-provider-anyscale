@@ -18,39 +18,39 @@ import (
 )
 
 var (
-	_ resource.Resource                = &UserGroupResource{}
-	_ resource.ResourceWithConfigure   = &UserGroupResource{}
-	_ resource.ResourceWithModifyPlan  = &UserGroupResource{}
-	_ resource.ResourceWithImportState = &UserGroupResource{}
+	_ resource.Resource                = &IAMUserGroupResource{}
+	_ resource.ResourceWithConfigure   = &IAMUserGroupResource{}
+	_ resource.ResourceWithModifyPlan  = &IAMUserGroupResource{}
+	_ resource.ResourceWithImportState = &IAMUserGroupResource{}
 )
 
-// NewUserGroupResource creates a new user group resource.
-func NewUserGroupResource() resource.Resource {
-	return &UserGroupResource{}
+// NewIAMUserGroupResource creates a new user group resource.
+func NewIAMUserGroupResource() resource.Resource {
+	return &IAMUserGroupResource{}
 }
 
-// UserGroupResource manages an Anyscale-managed user group. Membership is a
+// IAMUserGroupResource manages an Anyscale-managed user group. Membership is a
 // separate resource (anyscale_user_group_members).
-type UserGroupResource struct {
+type IAMUserGroupResource struct {
 	client *Client
 }
 
-// UserGroupResourceModel describes the resource data model.
-type UserGroupResourceModel struct {
+// IAMUserGroupResourceModel describes the resource data model.
+type IAMUserGroupResourceModel struct {
 	ID   types.String `tfsdk:"id"`
 	Name types.String `tfsdk:"name"`
 }
 
-func (r *UserGroupResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_user_group"
+func (r *IAMUserGroupResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_iam_user_group"
 }
 
-func (r *UserGroupResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *IAMUserGroupResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: userGroupsBetaBanner +
 			"Manages an Anyscale user group in the token's organization; manage its members with `anyscale_user_group_members`. " +
 			"Destroying the group first removes every member, including members added outside Terraform. " +
-			"Groups synced from an identity provider (SCIM) cannot be managed or imported; read them with the `anyscale_user_group` data source.",
+			"Groups synced from an identity provider (SCIM) cannot be managed or imported; read them with the `anyscale_iam_user_group` data source.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
@@ -71,14 +71,14 @@ func (r *UserGroupResource) Schema(ctx context.Context, req resource.SchemaReque
 	}
 }
 
-func (r *UserGroupResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+func (r *IAMUserGroupResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	if client, ok := clientFromProviderData(req.ProviderData, "Unexpected Resource Configure Type", &resp.Diagnostics); ok {
 		r.client = client
 	}
 }
 
-func (r *UserGroupResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var plan UserGroupResourceModel
+func (r *IAMUserGroupResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var plan IAMUserGroupResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -104,7 +104,7 @@ func (r *UserGroupResource) Create(ctx context.Context, req resource.CreateReque
 // addDuplicateNameError reports a 409 from create. The existing group's ID is
 // looked up so the import command can be copied as-is; if that lookup fails
 // the command keeps a placeholder. The create is never retried.
-func (r *UserGroupResource) addDuplicateNameError(ctx context.Context, diags *diag.Diagnostics, name string, createErr error) {
+func (r *IAMUserGroupResource) addDuplicateNameError(ctx context.Context, diags *diag.Diagnostics, name string, createErr error) {
 	importID := "<group_id>"
 	if existing, err := findUserGroupByName(ctx, r.client, name); err == nil && existing != nil {
 		importID = existing.ID
@@ -122,8 +122,8 @@ func (r *UserGroupResource) addDuplicateNameError(ctx context.Context, diags *di
 			extractAPIErrorDetail(createErr), importID))
 }
 
-func (r *UserGroupResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var state UserGroupResourceModel
+func (r *IAMUserGroupResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var state IAMUserGroupResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -150,8 +150,8 @@ func (r *UserGroupResource) Read(ctx context.Context, req resource.ReadRequest, 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func (r *UserGroupResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var plan, state UserGroupResourceModel
+func (r *IAMUserGroupResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan, state IAMUserGroupResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
@@ -172,8 +172,8 @@ func (r *UserGroupResource) Update(ctx context.Context, req resource.UpdateReque
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-func (r *UserGroupResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	var state UserGroupResourceModel
+func (r *IAMUserGroupResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var state IAMUserGroupResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -198,12 +198,12 @@ func (r *UserGroupResource) Delete(ctx context.Context, req resource.DeleteReque
 }
 
 // ModifyPlan refuses to create or change this resource on an Azure control plane.
-func (r *UserGroupResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	refuseRBACPlanOnAzure(r.client, "anyscale_user_group", req, resp)
+func (r *IAMUserGroupResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	refuseRBACPlanOnAzure(r.client, "anyscale_iam_user_group", req, resp)
 }
 
-func (r *UserGroupResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	if refuseRBACOnAzure(r.client, "anyscale_user_group", &resp.Diagnostics) {
+func (r *IAMUserGroupResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	if refuseRBACOnAzure(r.client, "anyscale_iam_user_group", &resp.Diagnostics) {
 		return
 	}
 	groupID := req.ID

@@ -6,8 +6,9 @@ scratch. User-facing behavior is in the "User groups (Alpha)" and "Role bindings
 
 ## Shipped (Alpha)
 
-`anyscale_user_group` (create, rename, delete), `anyscale_user_group_members` (authoritative member
-list keyed by email), and the `anyscale_user_group` / `anyscale_user_groups` data sources, over
+`anyscale_iam_user_group` (create, rename, delete; renamed from `anyscale_user_group` in v0.38.0),
+`anyscale_user_group_members` (authoritative member
+list keyed by email), and the `anyscale_iam_user_group` / `anyscale_iam_user_groups` data sources, over
 `/api/v2/user_groups`. Both the Anyscale API and the provider schema may change before Beta.
 
 Two earlier blockers no longer apply:
@@ -35,7 +36,7 @@ member write path, tests create their own groups, so that failure mode no longer
    role-bindings API (cloud `write|readonly`, project `owner|write|readonly`, organization
    `owner|collaborator`). Its full-replace authority would also collide with `anyscale_cloud_access`,
    which already refuses to fight group bindings. Group grants ship instead as granular, immutable
-   `anyscale_role_binding` resources (Alpha, behind a feature flag), which can grant any built-in or
+   `anyscale_iam_role_grant` resources (Alpha, behind a feature flag; named `anyscale_role_binding` when this was written, renamed in v0.37.0), which can grant any built-in or
    organization role (where the newer cloud roles `project_viewer`, `compute_config_viewer`, and
    `workload_operator` are expected to live; not yet observed) and never own a resource's whole
    binding set. If a whole-set resource is ever wanted, it must own every direct binding per
@@ -48,7 +49,7 @@ member write path, tests create their own groups, so that failure mode no longer
 
 - **Group delete does not revoke what the group's membership derived.** It soft-deletes the group and
   its memberships but does not touch the role bindings the group wrote, and a later policy write can
-  carry the dead group's id forward. `anyscale_user_group` therefore empties the group before deleting
+  carry the dead group's id forward. `anyscale_iam_user_group` therefore empties the group before deleting
   it. That a removed member actually loses access is not yet confirmed by a real write probe.
 - **Deleting a directory-synced group is not guarded by the API** (rename is, with a 409). The provider
   guards it by refusing to manage `scim` groups.

@@ -48,7 +48,7 @@ resource "anyscale_project" "team" {
   cloud_id = data.anyscale_cloud.this.id
 }
 
-resource "anyscale_user_group" "analysts" {
+resource "anyscale_iam_user_group" "analysts" {
   name = "analysts"
 }
 
@@ -65,7 +65,7 @@ resource "anyscale_iam_role_binding" "project" {
       user_ids = [data.anyscale_user.me.id]
     }
     (data.anyscale_iam_role.project_reader.id) = {
-      user_group_ids = [anyscale_user_group.analysts.id]
+      user_group_ids = [anyscale_iam_user_group.analysts.id]
     }
   }
 }

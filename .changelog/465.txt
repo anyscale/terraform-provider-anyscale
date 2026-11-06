@@ -1,0 +1,12 @@
+```
+release-note:breaking-change
+resource/anyscale_user_group: `anyscale_user_group` is removed and renamed to `anyscale_iam_user_group`; update the resource type in your configuration.
+```
+```
+release-note:breaking-change
+data-source/anyscale_user_group: `anyscale_user_group` is removed and renamed to `anyscale_iam_user_group`; update the data source type in your configuration, keeping the same arguments.
+```
+```
+release-note:breaking-change
+data-source/anyscale_user_groups: `anyscale_user_groups` is removed and renamed to `anyscale_iam_user_groups`; update the data source type in your configuration, keeping the same arguments.
+```

@@ -16,7 +16,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// Real-API coverage for anyscale_user_group. These tests create and delete
+// Real-API coverage for anyscale_iam_user_group. These tests create and delete
 // only groups they name with UniqueName; no group carries a role and no user
 // is added, so they are safe in the shared test org and run in the ordinary
 // acctest-resource shard. Membership tests that touch a real person live in
@@ -24,7 +24,7 @@ import (
 
 func testAccUserGroupConfig(name string) string {
 	return fmt.Sprintf(`
-resource "anyscale_user_group" "test" {
+resource "anyscale_iam_user_group" "test" {
   name = %q
 }
 `, name)
@@ -128,9 +128,9 @@ func testAccCheckUserGroupInAPI(addr, wantName string, captured *string) resourc
 	}
 }
 
-// TestAccUserGroupResource_basic covers create, an in-place rename (PATCH,
+// TestAccIAMUserGroupResource_basic covers create, an in-place rename (PATCH,
 // never a replacement: the ID must survive), a clean refresh, and import.
-func TestAccUserGroupResource_basic(t *testing.T) {
+func TestAccIAMUserGroupResource_basic(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
@@ -141,13 +141,13 @@ func TestAccUserGroupResource_basic(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		CheckDestroy:             NewAPIDestroyCheck("anyscale_user_group", "/api/v2/user_groups/%s"),
+		CheckDestroy:             NewAPIDestroyCheck("anyscale_iam_user_group", "/api/v2/user_groups/%s"),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccUserGroupConfig(name),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_user_group.test", "name", name),
-					testAccCheckUserGroupInAPI("anyscale_user_group.test", name, &firstID),
+					resource.TestCheckResourceAttr("anyscale_iam_user_group.test", "name", name),
+					testAccCheckUserGroupInAPI("anyscale_iam_user_group.test", name, &firstID),
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
@@ -157,13 +157,13 @@ func TestAccUserGroupResource_basic(t *testing.T) {
 				Config: testAccUserGroupConfig(renamed),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("anyscale_user_group.test", plancheck.ResourceActionUpdate),
+						plancheck.ExpectResourceAction("anyscale_iam_user_group.test", plancheck.ResourceActionUpdate),
 					},
 					PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_user_group.test", "name", renamed),
-					testAccCheckUserGroupInAPI("anyscale_user_group.test", renamed, &secondID),
+					resource.TestCheckResourceAttr("anyscale_iam_user_group.test", "name", renamed),
+					testAccCheckUserGroupInAPI("anyscale_iam_user_group.test", renamed, &secondID),
 					func(*terraform.State) error {
 						if firstID != secondID {
 							return fmt.Errorf("rename changed the group ID from %s to %s", firstID, secondID)
@@ -173,7 +173,7 @@ func TestAccUserGroupResource_basic(t *testing.T) {
 				),
 			},
 			{
-				ResourceName:      "anyscale_user_group.test",
+				ResourceName:      "anyscale_iam_user_group.test",
 				ImportState:       true,
 				ImportStateVerify: true,
 			},
@@ -181,10 +181,10 @@ func TestAccUserGroupResource_basic(t *testing.T) {
 	})
 }
 
-// TestAccUserGroupResource_disappears: a group deleted outside Terraform is
+// TestAccIAMUserGroupResource_disappears: a group deleted outside Terraform is
 // removed from state on refresh and planned for re-creation, not reported as
 // an error.
-func TestAccUserGroupResource_disappears(t *testing.T) {
+func TestAccIAMUserGroupResource_disappears(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
@@ -194,11 +194,11 @@ func TestAccUserGroupResource_disappears(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		CheckDestroy:             NewAPIDestroyCheck("anyscale_user_group", "/api/v2/user_groups/%s"),
+		CheckDestroy:             NewAPIDestroyCheck("anyscale_iam_user_group", "/api/v2/user_groups/%s"),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccUserGroupConfig(name),
-				Check:  testAccCheckUserGroupInAPI("anyscale_user_group.test", name, &id),
+				Check:  testAccCheckUserGroupInAPI("anyscale_iam_user_group.test", name, &id),
 			},
 			{
 				PreConfig: func() {
@@ -209,13 +209,13 @@ func TestAccUserGroupResource_disappears(t *testing.T) {
 				Config: testAccUserGroupConfig(name),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("anyscale_user_group.test", plancheck.ResourceActionCreate),
+						plancheck.ExpectResourceAction("anyscale_iam_user_group.test", plancheck.ResourceActionCreate),
 					},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
-					testAccCheckUserGroupInAPI("anyscale_user_group.test", name, nil),
+					testAccCheckUserGroupInAPI("anyscale_iam_user_group.test", name, nil),
 					func(s *terraform.State) error {
-						if got := s.RootModule().Resources["anyscale_user_group.test"].Primary.ID; got == id {
+						if got := s.RootModule().Resources["anyscale_iam_user_group.test"].Primary.ID; got == id {
 							return fmt.Errorf("re-created group reused the deleted ID %s", id)
 						}
 						return nil
@@ -226,10 +226,10 @@ func TestAccUserGroupResource_disappears(t *testing.T) {
 	})
 }
 
-// TestAccUserGroupResource_DuplicateNameError: creating a group whose name is
+// TestAccIAMUserGroupResource_DuplicateNameError: creating a group whose name is
 // already taken fails with an actionable message naming the import command,
 // and leaves nothing behind in state.
-func TestAccUserGroupResource_DuplicateNameError(t *testing.T) {
+func TestAccIAMUserGroupResource_DuplicateNameError(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
