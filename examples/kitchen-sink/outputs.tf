@@ -156,12 +156,12 @@ output "project_viewer_role_id" {
 }
 
 output "user_group_member_count" {
-  value       = var.enable_user_groups ? length(data.anyscale_user_group.team[0].members) : null
+  value       = var.enable_user_groups ? length(data.anyscale_iam_user_group.team[0].members) : null
   description = "Members of the kitchen-sink user group. Null unless enable_user_groups is set."
 }
 
 output "user_group_count" {
-  value       = var.enable_user_groups ? length(data.anyscale_user_groups.all[0].groups) : null
+  value       = var.enable_user_groups ? length(data.anyscale_iam_user_groups.all[0].groups) : null
   description = "User groups in the organization. Null unless enable_user_groups is set."
 }
 

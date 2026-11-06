@@ -20,14 +20,14 @@ data "anyscale_iam_role" "project_viewer" {
   name = "project_viewer" # exact, case-sensitive
 }
 
-resource "anyscale_user_group" "analysts" {
+resource "anyscale_iam_user_group" "analysts" {
   name = "analysts"
 }
 
 # Who is in the group. AUTHORITATIVE: anyone not listed is removed from
 # the group. Each email must already belong to your organization.
 resource "anyscale_user_group_members" "analysts" {
-  user_group_id = anyscale_user_group.analysts.id
+  user_group_id = anyscale_iam_user_group.analysts.id
   members = [
     "alice@example.com",
     "bob@example.com",
@@ -37,7 +37,7 @@ resource "anyscale_user_group_members" "analysts" {
 # What the group may do: every member gets project_viewer on this
 # project.
 resource "anyscale_iam_role_grant" "analysts_project_viewer" {
-  user_group_id = anyscale_user_group.analysts.id
+  user_group_id = anyscale_iam_user_group.analysts.id
   role_id       = data.anyscale_iam_role.project_viewer.id
   # exactly one of cloud_id, project_id, organization_id
   project_id = var.project_id
@@ -51,7 +51,7 @@ resource "anyscale_iam_role_grant" "analysts_project_viewer" {
 # Directory-synced (SCIM) groups can't be managed by Terraform, but they
 # can hold a role binding. Here every member of the group gets the role
 # across the whole organization.
-data "anyscale_user_group" "okta_admins" {
+data "anyscale_iam_user_group" "okta_admins" {
   name = "okta-admins"
 }
 
@@ -62,7 +62,7 @@ data "anyscale_iam_role" "org_role" {
 }
 
 resource "anyscale_iam_role_grant" "okta_admins_org" {
-  user_group_id   = data.anyscale_user_group.okta_admins.id
+  user_group_id   = data.anyscale_iam_user_group.okta_admins.id
   role_id         = data.anyscale_iam_role.org_role.id
   organization_id = data.anyscale_organization.current.id
 }

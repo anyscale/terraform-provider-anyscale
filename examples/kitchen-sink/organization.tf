@@ -26,10 +26,10 @@ data "anyscale_organization_user" "member" {
   email = anyscale_organization_user.member[0].email
 }
 
-# --- anyscale_user_group + anyscale_user_group_members (gated by enable_user_groups) ------------
+# --- anyscale_iam_user_group + anyscale_user_group_members (gated by enable_user_groups) --------
 # Beta, and enabled per organization. The members list is authoritative: anyone in the group who
 # is not listed is removed. Each email must belong to an accepted member.
-resource "anyscale_user_group" "team" {
+resource "anyscale_iam_user_group" "team" {
   count = var.enable_user_groups ? 1 : 0
 
   name = "${var.name_prefix}-team"
@@ -38,21 +38,21 @@ resource "anyscale_user_group" "team" {
 resource "anyscale_user_group_members" "team" {
   count = var.enable_user_groups ? 1 : 0
 
-  user_group_id = anyscale_user_group.team[0].id
+  user_group_id = anyscale_iam_user_group.team[0].id
   members       = var.user_group_member_emails
 }
 
-data "anyscale_user_group" "team" {
+data "anyscale_iam_user_group" "team" {
   count = var.enable_user_groups ? 1 : 0
 
   # Read after the members are written, so the data source shows them.
   id = anyscale_user_group_members.team[0].user_group_id
 }
 
-data "anyscale_user_groups" "all" {
+data "anyscale_iam_user_groups" "all" {
   count = var.enable_user_groups ? 1 : 0
 
-  depends_on = [anyscale_user_group.team]
+  depends_on = [anyscale_iam_user_group.team]
 }
 
 # --- anyscale_iam_role_grant (gated by enable_role_binding) ---------------------------------------
@@ -61,7 +61,7 @@ data "anyscale_user_groups" "all" {
 resource "anyscale_iam_role_grant" "team_project_viewer" {
   count = var.enable_role_binding ? 1 : 0
 
-  user_group_id = anyscale_user_group.team[0].id
+  user_group_id = anyscale_iam_user_group.team[0].id
   role_id       = data.anyscale_iam_role.project_viewer[0].id
   project_id    = anyscale_project.b.id
 }
