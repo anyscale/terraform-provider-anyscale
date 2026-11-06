@@ -2,7 +2,7 @@
 # support@anyscale.com). AUTHORITATIVE: every direct role binding on
 # the scope that roles does not name is revoked, including the owner
 # binding Anyscale grants whoever created the project. Do not also
-# manage this scope with anyscale_role_binding.
+# manage this scope with anyscale_iam_role_grant.
 variable "cloud_name" {
   description = "Name of an existing Anyscale cloud"
   type        = string
@@ -34,7 +34,7 @@ resource "anyscale_user_group" "analysts" {
   name = "analysts"
 }
 
-resource "anyscale_role_binding_policy" "project" {
+resource "anyscale_iam_role_binding" "project" {
   # exactly one of organization_id, cloud_id, project_id
   project_id = anyscale_project.team.id
 

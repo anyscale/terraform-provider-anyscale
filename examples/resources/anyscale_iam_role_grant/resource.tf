@@ -1,8 +1,8 @@
 # Beta; Anyscale enables it per organization (contact
-# support@anyscale.com). Breaking schema changes get a deprecation
-# first. Grants one role to one user group or one user on exactly one
-# of a cloud, a project, or the organization. A binding cannot be
-# edited: changing any argument replaces it.
+# support@anyscale.com). Beta resources can change incompatibly
+# between provider versions. Grants one role to one user group or one
+# user on exactly one of a cloud, a project, or the organization. A
+# binding cannot be edited: changing any argument replaces it.
 #
 # Prefer groups: grant a role to a group once, then change who has
 # access by editing the group's members.
@@ -36,7 +36,7 @@ resource "anyscale_user_group_members" "analysts" {
 
 # What the group may do: every member gets project_viewer on this
 # project.
-resource "anyscale_role_binding" "analysts_project_viewer" {
+resource "anyscale_iam_role_grant" "analysts_project_viewer" {
   user_group_id = anyscale_user_group.analysts.id
   role_id       = data.anyscale_role.project_viewer.id
   # exactly one of cloud_id, project_id, organization_id
@@ -61,7 +61,7 @@ data "anyscale_role" "org_role" {
   name = var.org_role_name
 }
 
-resource "anyscale_role_binding" "okta_admins_org" {
+resource "anyscale_iam_role_grant" "okta_admins_org" {
   user_group_id   = data.anyscale_user_group.okta_admins.id
   role_id         = data.anyscale_role.org_role.id
   organization_id = data.anyscale_organization.current.id
@@ -74,7 +74,7 @@ data "anyscale_organization_user" "carol" {
   email = "carol@example.com"
 }
 
-resource "anyscale_role_binding" "carol_project_viewer" {
+resource "anyscale_iam_role_grant" "carol_project_viewer" {
   user_id    = data.anyscale_organization_user.carol.user_id
   role_id    = data.anyscale_role.project_viewer.id
   project_id = var.project_id
