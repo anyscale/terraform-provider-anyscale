@@ -95,3 +95,21 @@ func cliDiagnostics(lines []tfApplyJSONLine, severity string) []string {
 	}
 	return out
 }
+
+// cliDevWorkspaceEditable is cliDevWorkspace plus a function that replaces
+// main.tf with new hcl, for a plan against changed config in the same state.
+func cliDevWorkspaceEditable(t *testing.T, hcl string) (run func(args ...string) ([]tfApplyJSONLine, string, error), rewrite func(hcl string)) {
+	t.Helper()
+	workDir, cliConfigPath := writeCLIWorkspace(t, buildProviderBinaryForCLICheck(t), hcl)
+	run = func(args ...string) ([]tfApplyJSONLine, string, error) {
+		out, err := runTerraformCLI(workDir, cliConfigPath, args...)
+		return parseTFJSONLines(out), string(out), err
+	}
+	rewrite = func(hcl string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(workDir, "main.tf"), []byte(cliWorkspacePreamble+hcl), 0o600); err != nil {
+			t.Fatalf("failed to rewrite scratch main.tf: %v", err)
+		}
+	}
+	return run, rewrite
+}

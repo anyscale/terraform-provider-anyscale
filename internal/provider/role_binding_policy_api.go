@@ -46,6 +46,27 @@ type roleBindingPolicyBinding struct {
 	RoleID        string  `json:"role_id"`
 	ResourceType  string  `json:"resource_type"`
 	ResourceID    string  `json:"resource_id"`
+	// Origin is the path that made the grant: "declarative" for a policy
+	// apply, "imperative" for a direct grant (anyscale_role_binding, the
+	// console, a CLI grant). Absent on a dry run's added entries and on older
+	// bindings.
+	Origin *string `json:"origin"`
+}
+
+// roleBindingOriginDeclarative is the origin a policy apply gives the grants
+// it makes.
+const roleBindingOriginDeclarative = "declarative"
+
+// grantedOutsidePolicy returns the bindings a policy apply did not make. An
+// absent origin counts as outside: nothing shows a policy made it.
+func grantedOutsidePolicy(bs []roleBindingPolicyBinding) []roleBindingPolicyBinding {
+	var out []roleBindingPolicyBinding
+	for _, b := range bs {
+		if b.Origin == nil || *b.Origin != roleBindingOriginDeclarative {
+			out = append(out, b)
+		}
+	}
+	return out
 }
 
 // policyMixHint closes a warning listing grants a policy revokes but may not

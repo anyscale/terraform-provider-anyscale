@@ -70,13 +70,119 @@ func TestAccRoleBindingPolicyResource_CreateTakeoverWarningCLI(t *testing.T) {
 	if real, dry := pmApplyBodies(t, m.takeRequests()); len(real) != 0 || len(dry) == 0 {
 		t.Errorf("plan made %d applies and %d dry runs, want 0 and at least 1", len(real), len(dry))
 	}
+}
 
-	// An update plans no such warning: its diff already shows every change.
+const pmOutsideSummary = "Policy Revokes Role Bindings Granted Outside It"
+
+// pmOutsideWarning returns the detail of the update plan's outside-grant
+// warning, failing the test if lines hold any other provider warning.
+func pmOutsideWarning(t *testing.T, lines []tfApplyJSONLine) (detail string, found bool) {
+	t.Helper()
+	for _, l := range lines {
+		if l.Type == "diagnostic" && l.Diagnostic.Severity == "warning" && l.Diagnostic.Summary == pmOutsideSummary {
+			detail, found = l.Diagnostic.Detail, true
+		}
+	}
+	for _, w := range pmProviderWarnings(lines) {
+		if !strings.HasPrefix(w, "warning: "+pmOutsideSummary+":") {
+			t.Errorf("update plan warned: %s", w)
+		}
+	}
+	return detail, found
+}
+
+// pmUpdatePlan applies pmBase, runs seed, and returns the next plan's lines:
+// an update, since refresh pulls the seeded grants into state.
+func pmUpdatePlan(t *testing.T, m *policyMockServer, config string, seed func()) []tfApplyJSONLine {
+	t.Helper()
+	run := cliDevWorkspace(t, config)
 	pmRunOK(t, run, "apply", "-auto-approve", "-json")
-	m.seed("user", pmBob, pmReader, "project", pmProject)
-	lines = pmRunOK(t, run, "plan", "-json")
-	if w := pmProviderWarnings(lines); len(w) != 0 {
-		t.Errorf("update plan warned: %v", w)
+	seed()
+	m.takeRequests()
+	lines := pmRunOK(t, run, "plan", "-json")
+	if real, dry := pmApplyBodies(t, m.takeRequests()); len(real) != 0 || len(dry) == 0 {
+		t.Errorf("update plan made %d applies and %d dry runs, want 0 and at least 1", len(real), len(dry))
+	}
+	return lines
+}
+
+// B: an update that revokes a direct grant warns, listing exactly it.
+func TestAccRoleBindingPolicyResource_UpdateRevokesOutsideGrantWarningCLI(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newPolicyMock(t)
+	lines := pmUpdatePlan(t, m, pmConfig(m, "project_id", pmProject, pmBase()...), func() {
+		m.seed("user", pmBob, pmReader, "project", pmProject)
+	})
+	detail, found := pmOutsideWarning(t, lines)
+	if !found {
+		t.Fatalf("no %q warning; diagnostics: %v", pmOutsideSummary, cliDiagnostics(lines, ""))
+	}
+	for _, w := range []string{"which were made outside this policy:", "role " + pmReader + " to user " + pmBob, "managed twice"} {
+		if !strings.Contains(detail, w) {
+			t.Errorf("warning lacks %q; detail: %s", w, detail)
+		}
+	}
+	if n := strings.Count(detail, "  - "); n != 1 {
+		t.Errorf("warning lists %d bindings, want 1; detail: %s", n, detail)
+	}
+}
+
+// C: an update that drops a principal the policy granted revokes only a
+// declarative grant, which the plan diff shows; it does not warn.
+func TestAccRoleBindingPolicyResource_UpdateRevokesOwnGrantNoWarningCLI(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newPolicyMock(t)
+	run, rewrite := cliDevWorkspaceEditable(t, pmConfig(m, "project_id", pmProject,
+		append(pmBase(), pmRole(pmWriter, []string{pmBob}, nil))...))
+	pmRunOK(t, run, "apply", "-auto-approve", "-json")
+
+	rewrite(pmConfig(m, "project_id", pmProject, pmBase()...))
+	m.takeRequests()
+	lines := pmRunOK(t, run, "plan", "-json")
+	if real, dry := pmApplyBodies(t, m.takeRequests()); len(real) != 0 || len(dry) == 0 {
+		t.Errorf("update plan made %d applies and %d dry runs, want 0 and at least 1", len(real), len(dry))
+	}
+	if detail, found := pmOutsideWarning(t, lines); found {
+		t.Errorf("revoking the policy's own grant warned: %s", detail)
+	}
+}
+
+// D: with both kinds revoked, the warning lists only the direct grant.
+func TestAccRoleBindingPolicyResource_UpdateMixedRevokesWarningCLI(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newPolicyMock(t)
+	run, rewrite := cliDevWorkspaceEditable(t, pmConfig(m, "project_id", pmProject,
+		append(pmBase(), pmRole(pmWriter, []string{pmBob}, nil))...))
+	pmRunOK(t, run, "apply", "-auto-approve", "-json")
+	m.seed("user", pmAlice, pmReader, "project", pmProject)
+
+	rewrite(pmConfig(m, "project_id", pmProject, pmBase()...))
+	lines := pmRunOK(t, run, "plan", "-json")
+	detail, found := pmOutsideWarning(t, lines)
+	if !found {
+		t.Fatalf("no %q warning; diagnostics: %v", pmOutsideSummary, cliDiagnostics(lines, ""))
+	}
+	if !strings.Contains(detail, "role "+pmReader+" to user "+pmAlice) {
+		t.Errorf("warning does not list the direct grant; detail: %s", detail)
+	}
+	if strings.Contains(detail, pmBob) {
+		t.Errorf("warning lists the policy's own grant to %s; detail: %s", pmBob, detail)
+	}
+}
+
+// E: a revoked grant with no origin counts as granted outside the policy.
+func TestAccRoleBindingPolicyResource_UpdateRevokesOriginlessGrantWarningCLI(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newPolicyMock(t)
+	lines := pmUpdatePlan(t, m, pmConfig(m, "project_id", pmProject, pmBase()...), func() {
+		m.seedOrigin("user", pmBob, pmWriter, "project", pmProject, "")
+	})
+	detail, found := pmOutsideWarning(t, lines)
+	if !found {
+		t.Fatalf("no %q warning; diagnostics: %v", pmOutsideSummary, cliDiagnostics(lines, ""))
+	}
+	if !strings.Contains(detail, "role "+pmWriter+" to user "+pmBob) {
+		t.Errorf("warning does not list the originless grant; detail: %s", detail)
 	}
 }
 
@@ -121,6 +227,9 @@ func TestAccRoleBindingPolicyResource_DestroyWarningsCLI(t *testing.T) {
 	pmExpectDestroyPlanWarning(t, lines,
 		[]string{"role " + pmReader + " to user_group " + pmGroupA},
 		[]string{"role " + pmOwner + " to user " + policyMockCaller, "role " + pmWriter + " to user " + pmBob})
+
+	// Every revoked grant is the policy's own, so there is no mix hint.
+	pmExpectNoMixHint(t, lines)
 
 	lines = pmRunOK(t, run, "destroy", "-auto-approve", "-json")
 	pmExpectWarning(t, lines, "Role Bindings Kept on Destroy",
@@ -195,4 +304,47 @@ func TestAccRoleBindingPolicyResource_DestroyPlanKeepsFrozenCLI(t *testing.T) {
 	if real, dry := pmApplyBodies(t, m.takeRequests()); len(real) != 0 || len(dry) < 2 {
 		t.Errorf("destroy plan made %d applies and %d dry runs, want 0 and a retry after the frozen refusal", len(real), len(dry))
 	}
+}
+
+const pmDestroyMixMarker = "These revoked grants were made outside this policy:"
+
+// pmExpectNoMixHint fails if the destroy plan's warning carries the mix hint.
+func pmExpectNoMixHint(t *testing.T, lines []tfApplyJSONLine) {
+	t.Helper()
+	for _, l := range lines {
+		if l.Type == "diagnostic" && l.Diagnostic.Summary == "Destroy Revokes Role Bindings" && strings.Contains(l.Diagnostic.Detail, pmDestroyMixMarker) {
+			t.Errorf("destroy of policy-made grants only carries the mix hint; detail: %s", l.Diagnostic.Detail)
+		}
+	}
+}
+
+// A destroy that revokes a grant made outside the policy names it and warns
+// that the scope may be managed twice; the policy's own grants stay out of
+// that list.
+func TestAccRoleBindingPolicyResource_DestroyMixHintCLI(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newPolicyMock(t)
+	run := cliDevWorkspace(t, pmConfig(m, "project_id", pmProject, pmBase()...))
+	pmRunOK(t, run, "apply", "-auto-approve", "-json")
+	// Granted directly after the apply, as anyscale_role_binding would.
+	m.seed("user", pmBob, pmWriter, "project", pmProject)
+
+	lines := pmRunOK(t, run, "plan", "-destroy", "-json")
+	for _, l := range lines {
+		if l.Type != "diagnostic" || l.Diagnostic.Summary != "Destroy Revokes Role Bindings" {
+			continue
+		}
+		_, mix, found := strings.Cut(l.Diagnostic.Detail, pmDestroyMixMarker)
+		if !found {
+			t.Fatalf("destroy-plan warning has no mix hint; detail: %s", l.Diagnostic.Detail)
+		}
+		if !strings.Contains(mix, "role "+pmWriter+" to user "+pmBob) || !strings.Contains(mix, "managed twice") {
+			t.Errorf("mix hint does not name the outside grant; detail: %s", l.Diagnostic.Detail)
+		}
+		if strings.Contains(mix, pmGroupA) {
+			t.Errorf("mix hint lists the policy's own grant to %s; detail: %s", pmGroupA, l.Diagnostic.Detail)
+		}
+		return
+	}
+	t.Errorf("no destroy-plan warning; diagnostics: %v", cliDiagnostics(lines, ""))
 }
