@@ -75,7 +75,8 @@ names per object for a release cycle with no one to migrate.
    to an old type outside `CHANGELOG.md`, `.changelog/`, `docs/decisions/` and `docs/deferred/`
    (historical records keep the names they were written with). The only expected hits are the
    removed-name lists in `internal/provider/provider_registry_test.go`, which must name the old
-   types. Use `-P`: with `-E`, `\b` matches nothing
+   types, and the schema-version comment in `resource_iam_user_group_members.go`, which explains
+   why no state under the old type can reach the new one. Use `-P`: with `-E`, `\b` matches nothing
    and the check passes vacuously.
 6. `make check`, `make docs`, `make docs-validate` and `make validate-examples` pass.
 7. All renames ship together in v0.38.0.
