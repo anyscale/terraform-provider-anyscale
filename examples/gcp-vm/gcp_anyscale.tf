@@ -1,9 +1,10 @@
 # GCP VM Scenario - Cloud Foundation Module
 # Consolidated example with optional Filestore and Memorystore
 
+# The cloud ID is not a module input: the empty cloud's credentials come from
+# this module's outputs, so the module cannot depend on the cloud.
 locals {
   full_labels = merge(tomap({
-    anyscale-cloud-id           = anyscale_cloud.primary.id,
     anyscale-deploy-environment = var.anyscale_deploy_env
     }),
     var.labels
