@@ -104,6 +104,27 @@ func TestProjectResourceModifyPlan_AllowsDescriptionChangeOnNonDefaultProject(t 
 	}
 }
 
+// TestProjectResourceModifyPlan_AllowsUnknownDescriptionOnDefaultProject: a
+// plan whose description is still unknown (from another resource's output)
+// may turn out to equal the current one, so a default project's plan must
+// not fail before the value resolves. Control: with a KNOWN changed value
+// the refusal still fires (the test above).
+func TestProjectResourceModifyPlan_AllowsUnknownDescriptionOnDefaultProject(t *testing.T) {
+	resp := runProjectModifyPlan(t,
+		projectModel("prj_default", true, "original"),
+		&ProjectResourceModel{
+			ID:          types.StringValue("prj_default"),
+			CloudID:     types.StringValue("cld_mock"),
+			Name:        types.StringValue("project-prj_default"),
+			Description: types.StringUnknown(),
+			IsDefault:   types.BoolValue(true),
+		})
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("expected no error for an unknown description on a default project, got: %v", resp.Diagnostics)
+	}
+}
+
 // TestProjectResourceModifyPlan_HasNoPriorStateOnCreate: with no prior state
 // there is no current project to protect, so a create-time plan (even one
 // that would later be a default project) must not error. A null State.Raw is
