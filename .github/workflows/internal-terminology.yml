@@ -1,0 +1,115 @@
+name: Internal Terminology Gate
+
+# Fails a PR whose tree, commits, PR title or PR body carries internal
+# agent/role terminology (rules and rationale live in
+# .github/scripts/check-internal-terminology.sh). Re-runs on label changes
+# because the `squash-body-edited` label downgrades COMMIT-MESSAGE findings
+# to warnings: a commit-message hit cannot be fixed without force-push, and
+# the merger can hand-edit the squash body instead. Tree, PR title and PR
+# body stay hard fails regardless of labels. Existing main history is out of
+# scope (forward-only).
+#
+# Like schema-gate, the gate script and denylist run from the merge-base: a
+# PR must not edit the logic that judges it. Only the PR that adds the gate
+# falls back to its own copy. Pushes to main run the tree check only (their
+# commits are already history).
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terminology-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  terminology-gate:
+    name: Terminology Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history for the merge-base and the PR's commit list.
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+          persist-credentials: false
+
+      - name: Gate script self-test
+        # Runs from the checked-out (PR head) copy, ahead of the checks, so a
+        # regression in the script fails loudly instead of silently passing.
+        run: bash .github/scripts/check-internal-terminology_test.sh
+
+      - name: Extract gate script and denylist from the merge-base
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/.github/scripts"
+          merge_base=$(git merge-base "$BASE_SHA" HEAD)
+          if git cat-file -e "${merge_base}:.github/scripts/check-internal-terminology.sh" 2>/dev/null; then
+            git show "${merge_base}:.github/scripts/check-internal-terminology.sh" > "$RUNNER_TEMP/.github/scripts/check-internal-terminology.sh"
+            git show "${merge_base}:.github/internal-terminology.txt" > "$RUNNER_TEMP/.github/internal-terminology.txt"
+          else
+            echo "::notice::terminology-gate: script does not exist at the merge-base ${merge_base}; running the PR head's copy. This only happens for the PR that adds the gate."
+            cp .github/scripts/check-internal-terminology.sh "$RUNNER_TEMP/.github/scripts/"
+            cp .github/internal-terminology.txt "$RUNNER_TEMP/.github/"
+          fi
+          chmod +x "$RUNNER_TEMP/.github/scripts/check-internal-terminology.sh"
+
+      - name: Tree check (tracked files at the PR head)
+        run: "$RUNNER_TEMP/.github/scripts/check-internal-terminology.sh"
+
+      - name: Commit messages and PR title/body
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body || '' }}
+          PR_LABELS_JSON: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          gate="$RUNNER_TEMP/.github/scripts/check-internal-terminology.sh"
+          merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+          status=0
+
+          # Commit messages. A hit here cannot be repaired without
+          # force-push, so the squash-body-edited label downgrades these
+          # findings to a warning for the merger to handle by hand in the
+          # squash dialog; every other finding stays a hard fail.
+          commit_findings=0
+          for sha in $(git rev-list --reverse "$merge_base".."$HEAD_SHA"); do
+            git log -1 --format=%B "$sha" > "$RUNNER_TEMP/msg.txt"
+            if ! out=$(bash "$gate" --message-file "$RUNNER_TEMP/msg.txt"); then
+              commit_findings=1
+              echo "commit $sha:"
+              echo "$out"
+            fi
+          done
+          if [[ $commit_findings -eq 1 ]]; then
+            if printf '%s\n' "$PR_LABELS_JSON" | jq -e 'index("squash-body-edited") != null' >/dev/null; then
+              echo "::warning::commit-message terminology findings above are downgraded to a warning (label squash-body-edited): hand-edit the squash body when merging. Tree, PR title and PR body remain hard fails."
+            else
+              status=1
+            fi
+          fi
+
+          printf '%s\n' "$PR_TITLE" > "$RUNNER_TEMP/pr-title.txt"
+          if ! out=$(bash "$gate" --message-file "$RUNNER_TEMP/pr-title.txt"); then
+            echo "PR title:"
+            echo "$out"
+            status=1
+          fi
+          printf '%s\n' "$PR_BODY" > "$RUNNER_TEMP/pr-body.txt"
+          if ! out=$(bash "$gate" --message-file "$RUNNER_TEMP/pr-body.txt"); then
+            echo "PR body:"
+            echo "$out"
+            status=1
+          fi
+
+          exit "$status"

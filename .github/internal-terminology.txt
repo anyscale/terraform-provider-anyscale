@@ -1,0 +1,5 @@
+# Internal programme terms only. NEVER add customer names or sensitive
+# strings here - committing the guard commits the leak. One fixed string per
+# line; matched case-insensitively as a substring. Lines starting with "#"
+# and blank lines are ignored.
+Phase 2B

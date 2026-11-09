@@ -26,6 +26,9 @@ mappings, and generated Registry-compatible docs.
     fixture is `tfp-test-aws-useast1-STATIC`; scrubbing that string breaks the acctest resolver, the
     sweep-target org guard, and CI's success path. Use
     `tfp-(architect|forge|assayer|scribe|shipwright)`.
+  - **Enforced by `.github/scripts/check-internal-terminology.sh`** — in CI (tree, commit
+    messages, PR title/body; `.github/workflows/internal-terminology.yml`) and at pre-commit's
+    `commit-msg` stage. Fix findings by rephrasing; there is no inline suppression marker.
 - **Be succinct.** Lead with the finding or decision; put only enough evidence under it to check the
   claim. Cut restatement of what the reader knows, recaps of your own prior messages, and narration
   of process. Applies to agent-to-agent messages as much as replies to the user — in a multi-agent

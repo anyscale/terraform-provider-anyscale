@@ -3,6 +3,12 @@
 # Install: pre-commit install
 # Run manually: pre-commit run --all-files
 # Update hooks: pre-commit autoupdate
+
+# Installs the pre-commit AND commit-msg hook types by default, so the
+# internal-terminology message gate below is installed without needing
+# `pre-commit install --hook-types commit-msg`.
+default_install_hook_types: [pre-commit, commit-msg]
+
 repos:
   # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -22,6 +28,21 @@ repos:
 
   - repo: local
     hooks:
+      - id: check-internal-terminology
+        # Checks the commit message only; the tracked-file tree check runs
+        # in CI (.github/workflows/internal-terminology.yml), where the
+        # merge-base script and denylist cannot be edited by the PR being
+        # judged. Lines found here are fixed by rephrasing - git history is
+        # immutable without a force-push, so amend and reword.
+        # --git-commit-msg, not --message-file: git hands the hook the
+        # UNCLEANED message, whose "# On branch ..." template line and
+        # `git commit -v` scissors+diff would false-positive. The mode
+        # applies git's own cleanup before checking.
+        name: internal terminology (commit message)
+        entry: bash .github/scripts/check-internal-terminology.sh --git-commit-msg
+        language: system
+        stages: [commit-msg]
+        always_run: true
       - id: gofmt
         name: gofmt
         entry: go fmt ./...
