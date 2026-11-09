@@ -81,3 +81,35 @@ organizations end in the same state as today. No schema or state change. Changel
   6. Ordering: the `PUT` precedes the cloud-resource add and readiness polling, asserted on an
      ordered request log, not counts.
   7. Decision 6: empty cloud with `auto_add_user = true` applies cleanly with one `PUT`.
+
+## Revision 2026-11-09
+
+Status: pending user approval (overrides the user-approved decision 4).
+
+Supersedes decision 4 and decision 6b's taint clause; revises decision 3. Decisions 1, 2, 5
+and 6 stand. Gate 1 re-run the same day (real API, test org, throwaway cloud, deleted; log
+`g1-cloud-settings.log`) confirmed every settings refusal we know of fires on a still-`CREATING`,
+resource-less cloud, so the rollback `DELETE` is cheap and never loses a provisioned resource.
+
+- **All three settings writes now run before the resource add** (`auto_add_user`, then
+  `lineage_tracking_enabled`, then `aggregated_logs_enabled`), each a `PUT` only where the plan
+  differs from the all-false create baseline. Decision 1 covered `auto_add_user` alone; this
+  covers lineage and aggregated logs the same way, and covers empty clouds on all three.
+- **Any settings-write failure on the fresh-create path rolls back** (decision 4 superseded):
+  `DELETE` the cloud, `RemoveResource`, and an error saying the cloud was not created and
+  nothing was left behind. No taint, no replace, no orphan.
+- **Adopt-by-name never deletes** a cloud the provider did not create. A settings failure on an
+  adopted cloud is instead a warning naming the setting; `Create` succeeds.
+- **A failed rollback `DELETE` is a warning too** (decision 3 revised): it names the cloud ID,
+  the setting failure and the delete failure, and `Create` succeeds, untainted.
+- **Warning-exit semantics:** state records the planned setting value, so until the next
+  refresh state over-reports the setting; the warning says so. The next plan then shows an
+  in-place Update of that setting, and a failed Update never taints.
+- **Post-ready readback mismatch** (a setting the backend reset during `add_resource`): re-`PUT`
+  once at most; a failure or a persistent mismatch becomes a warning, never an error.
+- **Unchanged and out of scope:** `add_resource` failure and readiness-wait timeout still
+  taint; the converted-organization 409 keeps its decision-2 text; the Update path is
+  untouched.
+
+Compatibility: behavior change only, no schema or state change. Clouds already tainted by
+older versions stay tainted — `terraform untaint` clears them.
