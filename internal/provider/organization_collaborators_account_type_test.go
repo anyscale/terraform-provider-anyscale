@@ -135,7 +135,7 @@ var (
 )
 
 // The by-email lookup behind anyscale_cloud_access, anyscale_organization_user_role
-// and anyscale_organization_user resolves a service account, asking for every
+// and anyscale_iam_organization_user resolves a service account, asking for every
 // account type in the same request as the email.
 func TestListOrgCollaboratorByEmail_AsksForAllAccountsInOneRequest(t *testing.T) {
 	client, queries := newOrgCollaboratorAccountTypeMock(t, accountTypeUser, accountTypeSA)
@@ -267,7 +267,7 @@ func organizationUserDataSourceConfig() OrganizationUserDataSourceModel {
 	}
 }
 
-// data.anyscale_organization_user finds a service account by email, identity ID
+// data.anyscale_iam_organization_user finds a service account by email, identity ID
 // or user ID, and still finds a user.
 func TestOrganizationUserDataSourceRead_FindsServiceAccount(t *testing.T) {
 	client, _ := newOrgCollaboratorAccountTypeMock(t, accountTypeUser, accountTypeSA)

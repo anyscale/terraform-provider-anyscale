@@ -165,16 +165,16 @@ func TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError(t *testin
 		"resource anyscale_organization_user_role": func(url string, mock *mockOrgUserRoleServer) string {
 			return orgUserRoleConfig(url, mock.email, "collaborator", "")
 		},
-		"data source anyscale_organization_user": func(url string, mock *mockOrgUserRoleServer) string {
+		"data source anyscale_iam_organization_user": func(url string, mock *mockOrgUserRoleServer) string {
 			return testAccProviderBlock(url) + fmt.Sprintf(`
-data "anyscale_organization_user" "u" {
+data "anyscale_iam_organization_user" "u" {
   email = %q
 }
 `, mock.email)
 		},
-		"data source anyscale_organization_users": func(url string, _ *mockOrgUserRoleServer) string {
+		"data source anyscale_iam_organization_users": func(url string, _ *mockOrgUserRoleServer) string {
 			return testAccProviderBlock(url) + `
-data "anyscale_organization_users" "all" {}
+data "anyscale_iam_organization_users" "all" {}
 `
 		},
 	}
@@ -205,7 +205,7 @@ data "anyscale_organization_users" "all" {}
 // A data source looked up by email must return the configured spelling: the API
 // lowercases emails, and Core rejects a result that changes a configured value.
 // Positive control: the lowercase spelling, which was never affected.
-func TestAccOrganizationUserDataSource_MixedCaseEmailLookup(t *testing.T) {
+func TestAccIAMOrganizationUserDataSource_MixedCaseEmailLookup(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	for name, email := range map[string]string{
 		"lowercase_control": "org-role-mock@example.com",
@@ -217,11 +217,11 @@ func TestAccOrganizationUserDataSource_MixedCaseEmailLookup(t *testing.T) {
 				ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 				Steps: []resource.TestStep{{
 					Config: testAccProviderBlock(httpServer.URL) + fmt.Sprintf(`
-data "anyscale_organization_user" "u" {
+data "anyscale_iam_organization_user" "u" {
   email = %q
 }
 `, email),
-					Check: resource.TestCheckResourceAttr("data.anyscale_organization_user.u", "email", email),
+					Check: resource.TestCheckResourceAttr("data.anyscale_iam_organization_user.u", "email", email),
 				}},
 			})
 		})

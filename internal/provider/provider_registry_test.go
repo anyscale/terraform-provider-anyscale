@@ -9,23 +9,29 @@ import (
 )
 
 // TestRegistryTypeNames pins the provider's registered type names for the
-// anyscale_iam_ role and user-group resources and data sources: the renamed
-// types are present and none of the pre-0.37.0/pre-0.38.0 names survive
-// (docs/decisions/role-grant-rename/, docs/decisions/iam-namespace-rename/).
+// anyscale_iam_ role, user-group, and organization-membership resources and
+// data sources: the renamed types are present and none of the pre-0.37.0 /
+// pre-0.38.0 / pre-0.39.0 names survive (docs/decisions/role-grant-rename/,
+// docs/decisions/iam-namespace-rename/,
+// docs/decisions/iam-organization-rename/).
 func TestRegistryTypeNames(t *testing.T) {
 	p := &AnyscaleProvider{}
 
 	wantResources := map[string]bool{
-		"anyscale_iam_role_grant":         false,
-		"anyscale_iam_role_binding":       false,
-		"anyscale_iam_user_group":         false,
-		"anyscale_iam_user_group_members": false,
+		"anyscale_iam_role_grant":              false,
+		"anyscale_iam_role_binding":            false,
+		"anyscale_iam_user_group":              false,
+		"anyscale_iam_user_group_members":      false,
+		"anyscale_iam_organization_user":       false,
+		"anyscale_iam_organization_invitation": false,
 	}
 	neverResources := []string{
 		"anyscale_role_binding",
 		"anyscale_role_binding_policy",
 		"anyscale_user_group",
 		"anyscale_user_group_members",
+		"anyscale_organization_user",
+		"anyscale_organization_invitation",
 	}
 
 	for _, f := range p.Resources(context.Background()) {
@@ -47,10 +53,11 @@ func TestRegistryTypeNames(t *testing.T) {
 	}
 
 	wantDataSources := map[string]bool{
-		"anyscale_iam_role_binding": false,
-		"anyscale_iam_role":         false,
-		"anyscale_iam_user_group":   false,
-		"anyscale_iam_user_groups":  false,
+		"anyscale_iam_role_binding":      false,
+		"anyscale_iam_role":              false,
+		"anyscale_iam_user_group":        false,
+		"anyscale_iam_user_groups":       false,
+		"anyscale_iam_organization_user": false,
 	}
 
 	neverDataSources := []string{
@@ -58,6 +65,8 @@ func TestRegistryTypeNames(t *testing.T) {
 		"anyscale_role",
 		"anyscale_user_group",
 		"anyscale_user_groups",
+		"anyscale_organization_user",
+		"anyscale_organization_users",
 	}
 
 	for _, f := range p.DataSources(context.Background()) {

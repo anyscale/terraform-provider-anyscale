@@ -23,7 +23,7 @@ import (
 // the real resource code, no real infra.
 //
 // Mirrors the list-hardcodes-empty / singular-has-real-value asymmetry the
-// shipped anyscale_organization_user resource already depends on
+// shipped anyscale_iam_organization_user resource already depends on
 // (findOrgCollaboratorByEmail always re-reads the singular path) - the list
 // handler below deliberately does NOT report additionalRoles, so a test that
 // accidentally reads roles off the list would see a false empty instead of

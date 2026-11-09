@@ -5,7 +5,7 @@ subcategory: ""
 description: |-
   ~> Deprecated for organizations converted to role bindings; use anyscale_iam_role_grant there. Unconverted organizations keep using this resource. Not available on Azure, where access is managed in the Azure portal. See Legacy RBAC deprecation ../guides/rbac.md#legacy-rbac-deprecation.
   Manages one organization member's organization-scope role. A converted organization ../guides/rbac.md#organization-access-mode refuses these writes.
-  This resource manages the role of a user who is already a member of the organization; it does not add or remove members. Membership is managed by anyscale_organization_user.
+  This resource manages the role of a user who is already a member of the organization; it does not add or remove members. Membership is managed by anyscale_iam_organization_user.
   Destroying this resource does not revert base_role
   Destroy leaves the member at whatever base_role they currently have, and emits a warning naming them and that role. It does not demote them, because an organization member always has some base role - there is no "no role" state to return them to - and demoting an organization owner removes their implicit permissions across every cloud in the organization. If deny_roles was declared, destroy does clear it to empty, since an empty deny set is a real, reachable state this resource took authority over.
   A consequence worth stating plainly: because email forces replacement, correcting a typo in email leaves the previously-named person at the role Terraform gave them, permanently. Terraform destroys the old resource and creates a new one, and the destroy does not revert the role. Review the plan; the provider cannot distinguish a typo from a deliberate change of subject.
@@ -19,7 +19,7 @@ description: |-
 
 Manages one organization member's organization-scope role. A [converted organization](../guides/rbac.md#organization-access-mode) refuses these writes.
 
-This resource manages the role of a user who is **already** a member of the organization; it does not add or remove members. Membership is managed by `anyscale_organization_user`.
+This resource manages the role of a user who is **already** a member of the organization; it does not add or remove members. Membership is managed by `anyscale_iam_organization_user`.
 
 ### Destroying this resource does not revert `base_role`
 
@@ -37,7 +37,7 @@ A consequence worth stating plainly: because `email` forces replacement, **corre
 # Deprecated: see the RBAC guide, "Legacy RBAC deprecation".
 # Manage an existing organization member's role. This resource does not
 # add or remove members -- the person must already be in the
-# organization (see anyscale_organization_user for membership) -- it
+# organization (see anyscale_iam_organization_user for membership) -- it
 # only sets base_role and, optionally, deny_roles for them.
 resource "anyscale_organization_user_role" "analyst" {
   email     = "analyst@example.com"

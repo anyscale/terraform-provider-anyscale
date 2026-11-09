@@ -9,8 +9,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 )
 
-// Shared invitation-creation path for anyscale_organization_user and
-// anyscale_organization_invitation.
+// Shared invitation-creation path for anyscale_iam_organization_user and
+// anyscale_iam_organization_invitation.
 //
 // It exists because both resources POST to the same endpoint from two separate
 // call sites, so any guard added to one silently misses the other. That is the

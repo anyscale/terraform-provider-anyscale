@@ -61,15 +61,15 @@ data "anyscale_user" "current" {}
 
 data "anyscale_organization" "current" {}
 
-# --- anyscale_organization_user + anyscale_organization_users -------------------------------------
+# --- anyscale_iam_organization_user + anyscale_iam_organization_users -------------------------------------
 # Look up the current user's own org-membership entry by chaining off anyscale_user.current above,
 # rather than invite_email -- new_member is only invited, not yet an org member, until they accept
 # (see organization.tf), so looking them up here would 404 on a fresh apply.
-data "anyscale_organization_user" "self" {
+data "anyscale_iam_organization_user" "self" {
   email = data.anyscale_user.current.email
 }
 
-data "anyscale_organization_users" "all" {}
+data "anyscale_iam_organization_users" "all" {}
 
 # --- anyscale_services + anyscale_service ---------------------------------------------------------
 data "anyscale_services" "in_project_b" {

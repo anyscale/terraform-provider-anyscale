@@ -1,0 +1,216 @@
+package acctest
+
+import (
+	"testing"
+
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+)
+
+func TestAccIAMOrganizationUserDataSource_ByEmail(t *testing.T) {
+	t.Parallel()
+	SkipIfNotAcceptanceTest(t)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccOrganizationUserDataSourceByEmailConfig(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					// Verify user fields are populated
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "id"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "email"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "name"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "permission_level"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "created_at"),
+					// Verify email matches current user
+					resource.TestCheckResourceAttrPair(
+						"data.anyscale_iam_organization_user.test", "email",
+						"data.anyscale_user.current", "email",
+					),
+				),
+			},
+		},
+	})
+}
+
+func TestAccIAMOrganizationUserDataSource_ByID(t *testing.T) {
+	t.Parallel()
+	SkipIfNotAcceptanceTest(t)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccOrganizationUserDataSourceByIDConfig(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					// Verify user fields are populated
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "id"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "email"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "name"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "permission_level"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "created_at"),
+					// id is the lookup key (read from users[0].id), so pairing it
+					// would compare the input to itself. Pair the fields the lookup
+					// had to resolve instead.
+					resource.TestCheckResourceAttrPair(
+						"data.anyscale_iam_organization_user.test", "email",
+						"data.anyscale_iam_organization_users.all", "users.0.email",
+					),
+					resource.TestCheckResourceAttrPair(
+						"data.anyscale_iam_organization_user.test", "name",
+						"data.anyscale_iam_organization_users.all", "users.0.name",
+					),
+					resource.TestCheckResourceAttrPair(
+						"data.anyscale_iam_organization_user.test", "user_id",
+						"data.anyscale_iam_organization_users.all", "users.0.user_id",
+					),
+				),
+			},
+		},
+	})
+}
+
+func TestAccIAMOrganizationUserDataSource_ByUserID(t *testing.T) {
+	t.Parallel()
+	SkipIfNotAcceptanceTest(t)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccOrganizationUserDataSourceByUserIDConfig(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					// Verify user fields are populated
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "id"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "email"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "name"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "permission_level"),
+					// user_id is the lookup key (read from users[0].user_id), so
+					// pairing it would compare the input to itself. Pair the fields
+					// the lookup had to resolve instead.
+					resource.TestCheckResourceAttrPair(
+						"data.anyscale_iam_organization_user.test", "id",
+						"data.anyscale_iam_organization_users.all", "users.0.id",
+					),
+					resource.TestCheckResourceAttrPair(
+						"data.anyscale_iam_organization_user.test", "email",
+						"data.anyscale_iam_organization_users.all", "users.0.email",
+					),
+					resource.TestCheckResourceAttrPair(
+						"data.anyscale_iam_organization_user.test", "name",
+						"data.anyscale_iam_organization_users.all", "users.0.name",
+					),
+				),
+			},
+		},
+	})
+}
+
+func TestAccIAMOrganizationUserDataSource_AllFieldsPopulated(t *testing.T) {
+	t.Parallel()
+	SkipIfNotAcceptanceTest(t)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccOrganizationUserDataSourceByEmailConfig(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					// Verify all fields are present
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "id"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "email"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "name"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "permission_level"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "created_at"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccIAMOrganizationUserDataSource_FromListToSingle(t *testing.T) {
+	t.Parallel()
+	SkipIfNotAcceptanceTest(t)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccOrganizationUserDataSourceFromListToSingleConfig(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					// Verify we can use the users list to look up a single user
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "id"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "email"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "name"),
+					// Looked up by email, so id and name are what the lookup
+					// resolved - they must match the first user from the list.
+					resource.TestCheckResourceAttrPair(
+						"data.anyscale_iam_organization_user.test", "id",
+						"data.anyscale_iam_organization_users.all", "users.0.id",
+					),
+					resource.TestCheckResourceAttrPair(
+						"data.anyscale_iam_organization_user.test", "name",
+						"data.anyscale_iam_organization_users.all", "users.0.name",
+					),
+				),
+			},
+		},
+	})
+}
+
+// Configuration templates
+
+func testAccOrganizationUserDataSourceByEmailConfig() string {
+	return `
+data "anyscale_user" "current" {
+}
+
+data "anyscale_iam_organization_user" "test" {
+  email = data.anyscale_user.current.email
+}
+`
+}
+
+// The ByID and ByUserID configs read whichever member sorts first, and their
+// tests assert permission_level is set. That field comes from the legacy
+// permission system, which stops updating when the organization converts to
+// role bindings: a member who joins after conversion may have no value. If
+// these tests start failing on a converted test org, pick a member that joined
+// before conversion (or the token's own identity) instead of users[0].
+func testAccOrganizationUserDataSourceByIDConfig() string {
+	return `
+data "anyscale_iam_organization_users" "all" {
+}
+
+data "anyscale_iam_organization_user" "test" {
+  id = data.anyscale_iam_organization_users.all.users[0].id
+}
+`
+}
+
+func testAccOrganizationUserDataSourceByUserIDConfig() string {
+	return `
+data "anyscale_iam_organization_users" "all" {
+}
+
+data "anyscale_iam_organization_user" "test" {
+  user_id = data.anyscale_iam_organization_users.all.users[0].user_id
+}
+`
+}
+
+func testAccOrganizationUserDataSourceFromListToSingleConfig() string {
+	return `
+data "anyscale_iam_organization_users" "all" {
+}
+
+data "anyscale_iam_organization_user" "test" {
+  email = data.anyscale_iam_organization_users.all.users[0].email
+}
+`
+}

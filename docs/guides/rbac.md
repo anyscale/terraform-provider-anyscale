@@ -2,7 +2,7 @@
 page_title: "RBAC: Roles Across Organizations, Clouds, and Projects"
 subcategory: "Concepts & Reference"
 description: |-
-  How access control is split across anyscale_organization_user and anyscale_organization_user_role - which resource manages what, what "authoritative" means for a role resource, and why destroying anyscale_organization_user_role does not revert a person's role.
+  How access control is split across anyscale_iam_organization_user and anyscale_organization_user_role - which resource manages what, what "authoritative" means for a role resource, and why destroying anyscale_organization_user_role does not revert a person's role.
 ---
 
 # RBAC: Roles Across Organizations, Clouds, and Projects
@@ -18,7 +18,7 @@ Read this before writing configuration that spans more than one scope.
 
 | Scope | Resource | Manages |
 |---|---|---|
-| Organization membership | [`anyscale_organization_user`](../resources/organization_user.md) | Whether the user is under Terraform management. It cannot create a member - people join by invitation - but declaring it adopts an existing member with no API call. Destroying it removes nobody: it cancels only a still-pending invitation this resource itself sent. |
+| Organization membership | [`anyscale_iam_organization_user`](../resources/iam_organization_user.md) | Whether the user is under Terraform management. It cannot create a member - people join by invitation - but declaring it adopts an existing member with no API call. Destroying it removes nobody: it cancels only a still-pending invitation this resource itself sent. |
 | Organization role | [`anyscale_organization_user_role`](../resources/organization_user_role.md) | One user's `base_role` and `deny_roles` in the organization. Authoritative over that one user's role - not over who is a member. |
 | User groups (Beta) | [`anyscale_iam_user_group`](../resources/iam_user_group.md), [`anyscale_iam_user_group_members`](../resources/iam_user_group_members.md) | A group's name, and its **entire** member list. Not what the group may access - see role bindings, next row. See [User groups (Beta)](#user-groups-beta). |
 | Role grants (Beta) | [`anyscale_iam_role_grant`](../resources/iam_role_grant.md), [`anyscale_iam_role_binding`](../resources/iam_role_binding.md), [`anyscale_iam_role`](../data-sources/iam_role.md) data source | One role held by one user group or one user on one cloud, project, or the organization (`anyscale_iam_role_grant`), or every direct role binding on a scope (`anyscale_iam_role_binding`). **Converted organizations only** - see [Organization access mode](#organization-access-mode). See [Role bindings (Beta)](#role-bindings-beta). |
@@ -29,11 +29,11 @@ it manages, never over a whole population - see
 
 ## Inviting people: limits, single sign-on, directory sync
 
-`anyscale_organization_user` and `anyscale_organization_invitation` both send invitations, and both
+`anyscale_iam_organization_user` and `anyscale_iam_organization_invitation` both send invitations, and both
 are subject to the same constraints.
 
 - **Apply success is not access.** A person who is not yet a member has only been *invited*; they
-  have access once they accept the emailed link. Read the `anyscale_organization_user` data source
+  have access once they accept the emailed link. Read the `anyscale_iam_organization_user` data source
   to see where they are.
 - **Rate limits are per organization**, shared with the Anyscale console and not per configuration:
   by default at most 20 pending invitations at once and 20 sent per 24 hours. Anyscale can change
@@ -42,7 +42,7 @@ are subject to the same constraints.
   the limit.
 - **Single sign-on `required`:** creating an invitation is refused, because the emailed link would be
   rejected on use while still spending one of the 20 daily invitations. Bring the person in through
-  your identity provider; once they have logged in, `anyscale_organization_user` adopts them. If the
+  your identity provider; once they have logged in, `anyscale_iam_organization_user` adopts them. If the
   provider cannot read the organization's SSO mode, it sends the invitation and attaches a warning.
 - **Directory sync (SCIM) with the Policy API:** if the organization has both enabled, the backend
   refuses to create invitations. Both must be true; SCIM alone does not trigger it. Existing members
@@ -51,9 +51,9 @@ are subject to the same constraints.
 - **Re-inviting a pending address** silently invalidates the earlier invitation and creates a new one
   with a new `id`; letter case does not matter. A tracked earlier invitation then reads `expired`
   on its next refresh.
-- **Destroying never removes a member.** Destroying `anyscale_organization_user` cancels only a
+- **Destroying never removes a member.** Destroying `anyscale_iam_organization_user` cancels only a
   still-pending invitation it sent, and never evicts anyone who had joined or was adopted. Destroying
-  `anyscale_organization_invitation` revokes a pending invitation and has no effect on an accepted
+  `anyscale_iam_organization_invitation` revokes a pending invitation and has no effect on an accepted
   one. Removing someone's access is a deliberate act neither resource can do.
 
 ## User groups (Beta)
@@ -86,7 +86,7 @@ organization roles (`base_role`) are not managed by this provider.
 
 `anyscale_iam_user_group_members` takes **email addresses** and resolves each to a user in your
 organization. An email that is not an organization member fails the apply; invite the person first
-with [`anyscale_organization_invitation`](../resources/organization_invitation.md) and wait for them to
+with [`anyscale_iam_organization_invitation`](../resources/iam_organization_invitation.md) and wait for them to
 accept. Emails match case-insensitively, and state keeps the spelling from your configuration. After `terraform import`, a configuration that spells an
 email with uppercase letters shows a one-time in-place update to `members`; it makes no API change.
 
@@ -131,7 +131,7 @@ expect refreshes to scale with the number of groups.
 
 ```hcl
 # Prerequisite: both people are already organization members. If not, invite them first with
-# anyscale_organization_invitation, wait for them to accept, then apply this configuration.
+# anyscale_iam_organization_invitation, wait for them to accept, then apply this configuration.
 resource "anyscale_iam_user_group" "ml_platform" {
   name = "ml-platform"
 }
@@ -160,7 +160,7 @@ locals {
   }
 }
 
-resource "anyscale_organization_invitation" "team_members" {
+resource "anyscale_iam_organization_invitation" "team_members" {
   for_each = local.ml_team
   email    = each.key
 }
@@ -193,7 +193,7 @@ and conversion is one-way.
 | Access is held by | Collaborator and policy records | Role bindings |
 | Writes that work | [`anyscale_organization_user_role`](../resources/organization_user_role.md), `anyscale_cloud.auto_add_user` | [`anyscale_iam_role_grant`](../resources/iam_role_grant.md) |
 | Writes the API refuses (HTTP 409) | `anyscale_iam_role_grant` | The resources in the Unconverted column |
-| Not affected by mode | [`anyscale_iam_user_group`](../resources/iam_user_group.md), [`anyscale_iam_user_group_members`](../resources/iam_user_group_members.md), [`anyscale_organization_user`](../resources/organization_user.md), [`anyscale_project`](../resources/project.md), [`anyscale_cloud`](../resources/cloud.md) (except `auto_add_user`) | same |
+| Not affected by mode | [`anyscale_iam_user_group`](../resources/iam_user_group.md), [`anyscale_iam_user_group_members`](../resources/iam_user_group_members.md), [`anyscale_iam_organization_user`](../resources/iam_organization_user.md), [`anyscale_project`](../resources/project.md), [`anyscale_cloud`](../resources/cloud.md) (except `auto_add_user`) | same |
 
 The provider does not detect the mode in advance; the API refuses the write and the provider reports it.
 Role bindings are also behind a feature flag (see [Role bindings (Beta)](#role-bindings-beta)). An
@@ -272,7 +272,7 @@ None is available on an Azure control plane (see [Organization access mode](#org
 | `anyscale_organization_user_role` | Writes fail with "Organization Uses Role Bindings" | `anyscale_iam_role_grant` |
 | `anyscale_cloud.auto_add_user` | Setting it fails | An `anyscale_iam_role_grant` on the cloud for the All users group |
 | `auto_add_user` on the `anyscale_cloud` and `anyscale_clouds` data sources | No longer applies | Same |
-| `collaborators` on the `anyscale_project` data source; `permission_level`, `base_role` and `additional_roles` on the `anyscale_organization_user(s)` data sources; `organization_permission_level` on the `anyscale_user` data source | A snapshot from before conversion | No replacement yet |
+| `collaborators` on the `anyscale_project` data source; `permission_level`, `base_role` and `additional_roles` on the `anyscale_iam_organization_user(s)` data sources; `organization_permission_level` on the `anyscale_user` data source | A snapshot from before conversion | No replacement yet |
 
 Terraform warns when a configuration uses one: setting a deprecated resource or attribute, or
 referencing a deprecated read-only attribute, for example in an output. For a referenced read-only
@@ -330,16 +330,16 @@ member gets the role.
 ### Granting a user, not a group
 
 Binding a user takes the user's `usr_...` ID, not their email. Look it up with the
-[`anyscale_organization_user`](../data-sources/organization_user.md) data source and use its **`user_id`**
+[`anyscale_iam_organization_user`](../data-sources/iam_organization_user.md) data source and use its **`user_id`**
 attribute, not `id` (that is the identity ID, a different value):
 
 ```hcl
-data "anyscale_organization_user" "alice" {
+data "anyscale_iam_organization_user" "alice" {
   email = "alice@example.com"
 }
 
 resource "anyscale_iam_role_grant" "alice_viewer" {
-  user_id    = data.anyscale_organization_user.alice.user_id
+  user_id    = data.anyscale_iam_organization_user.alice.user_id
   role_id    = data.anyscale_iam_role.viewer.id
   project_id = var.project_id
 }

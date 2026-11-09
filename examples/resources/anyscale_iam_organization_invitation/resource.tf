@@ -1,0 +1,37 @@
+# Send an invitation to a new user. Every invitation grants default
+# collaborator access once accepted -- there's no role argument here,
+# because the invitations API has no way to set one at invite time. To
+# grant a different role (e.g. owner), invite the user, wait for them to
+# accept, then set anyscale_organization_user_role.base_role for them
+# (see its own example, or organization_user_workflow for the full
+# lifecycle).
+resource "anyscale_iam_organization_invitation" "new_user" {
+  email = "newuser@example.com"
+}
+
+# Output the invitation status
+output "invitation_status" {
+  value       = anyscale_iam_organization_invitation.new_user.status
+  description = "Invitation status (pending, accepted, or expired)"
+}
+
+# Output invitation ID for tracking
+output "invitation_id" {
+  value       = anyscale_iam_organization_invitation.new_user.id
+  description = "The unique invitation ID"
+}
+
+# Send a second invitation to a different address -- invitations behave
+# identically regardless of who they're for, so this just demonstrates
+# inviting more than one person.
+resource "anyscale_iam_organization_invitation" "second_user" {
+  email = "admin@example.com"
+}
+
+# Check if the second invitation was accepted
+output "second_user_accepted" {
+  value = (
+    anyscale_iam_organization_invitation.second_user.accepted_at != null
+  )
+  description = "Whether the second invitation has been accepted"
+}

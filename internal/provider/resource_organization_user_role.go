@@ -204,7 +204,7 @@ func NewOrganizationUserRoleResource() resource.Resource {
 //
 // Deliberately NOT authoritative over organization membership: it manages the
 // role of a member who already exists, and destroying it never evicts anyone.
-// Membership itself stays with anyscale_organization_user.
+// Membership itself stays with anyscale_iam_organization_user.
 type OrganizationUserRoleResource struct {
 	client *Client
 }
@@ -232,7 +232,7 @@ func (r *OrganizationUserRoleResource) Schema(ctx context.Context, req resource.
 		MarkdownDescription: legacyRBACResourceCallout() + "\n\n" +
 			"Manages one organization member's organization-scope role. A [converted organization](../guides/rbac.md#organization-access-mode) refuses these writes.\n\n" +
 			"This resource manages the role of a user who is **already** a member of the organization; it does " +
-			"not add or remove members. Membership is managed by `anyscale_organization_user`.\n\n" +
+			"not add or remove members. Membership is managed by `anyscale_iam_organization_user`.\n\n" +
 			"### Destroying this resource does not revert `base_role`\n\n" +
 			"Destroy leaves the member at whatever `base_role` they currently have, and emits a warning naming " +
 			"them and that role. It does **not** demote them, because an organization member always has *some* " +
@@ -978,7 +978,7 @@ func (r *OrganizationUserRoleResource) ImportState(ctx context.Context, req reso
 		resp.Diagnostics.AddError(
 			"Error Importing Organization User Role",
 			fmt.Sprintf("Could not find an organization member with email %q: %s\n\n"+
-				"This resource manages the role of an existing member. Use the anyscale_organization_users data "+
+				"This resource manages the role of an existing member. Use the anyscale_iam_organization_users data "+
 				"source to list members and their emails.", email, err.Error()),
 		)
 		return
@@ -1022,7 +1022,7 @@ func stringListToSlice(ctx context.Context, l types.List) ([]string, diag.Diagno
 
 // resolveIdentityForEmail resolves an org member's identity_id and user_id from their
 // email via the org-wide collaborator list (the same listAllOrganizationCollaborators
-// already shared with anyscale_organization_user/users), mirroring the email-lookup
+// already shared with anyscale_iam_organization_user/users), mirroring the email-lookup
 // branch that data source already established: a server-side email query param as a
 // narrowing hint, plus a case-insensitive exact match client-side, since the filter is
 // not guaranteed to be a strict match. This resolution direction (email -> both ids) is

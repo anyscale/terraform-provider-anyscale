@@ -61,10 +61,10 @@ falling back to a sane default; see the [Compute Config guide](../../docs/guides
 | `anyscale_container_image_registry` | A base image registered from a public registry |
 | `anyscale_project.a` | A project scoped to Cloud A |
 | `anyscale_project.b` | A project scoped to Cloud B |
-| `anyscale_organization_invitation` | **Opt-in.** Zero instances unless you set `var.invite_email`; see below |
-| `anyscale_organization_user` | **Opt-in.** Zero instances unless you set `var.org_user_email`; see below |
+| `anyscale_iam_organization_invitation` | **Opt-in.** Zero instances unless you set `var.invite_email`; see below |
+| `anyscale_iam_organization_user` | **Opt-in.** Zero instances unless you set `var.org_user_email`; see below |
 
-`anyscale_organization_user` manages a member's membership (not their role -
+`anyscale_iam_organization_user` manages a member's membership (not their role -
 that's `anyscale_organization_user_role`). Set `org_user_email` to an existing member to adopt them;
 an address that is not a member yet is sent a real invitation. Destroy never removes a member
 (it cancels a still-pending invitation). See
@@ -74,7 +74,7 @@ invite -> wait -> adopt -> manage lifecycle.
 **Data sources:** `anyscale_cloud`, `anyscale_clouds`,
 `anyscale_compute_config`, `anyscale_container_image`, `anyscale_container_images`,
 `anyscale_project`, `anyscale_projects`, `anyscale_user`, `anyscale_organization`,
-`anyscale_organization_user`, `anyscale_organization_users`, `anyscale_services`,
+`anyscale_iam_organization_user`, `anyscale_iam_organization_users`, `anyscale_services`,
 `anyscale_service` — see `data_sources.tf`. Most read back the resources created above;
 `anyscale_user` and `anyscale_organization` are zero-argument connection-level singletons (see the
 [`anyscale_organization` data source docs](../../docs/data-sources/organization.md) for why those
@@ -102,7 +102,7 @@ implicit extra one.
 | Variable | Enables | Needs |
 | --- | --- | --- |
 | `enable_system_cluster` | `anyscale_system_cluster` (Cloud B) and its data source | Nothing extra. Destroying the cloud terminates the System Cluster; destroying only `anyscale_system_cluster` does not stop it |
-| `org_user_email` | `anyscale_organization_user` and its data source | An existing member's email (a non-member gets a real invitation) |
+| `org_user_email` | `anyscale_iam_organization_user` and its data source | An existing member's email (a non-member gets a real invitation) |
 | `enable_user_groups` | `anyscale_iam_user_group`, `anyscale_iam_user_group_members`, and the `anyscale_iam_user_group` / `anyscale_iam_user_groups` data sources | User groups enabled for your org (org-wide objects behind a feature flag) |
 | `user_group_member_emails` | Group membership | Each email must be an accepted org member |
 | `enable_role_binding` | `anyscale_iam_role_grant` | `enable_user_groups`, and an org on role bindings (converted); legacy orgs answer `409` |
@@ -131,7 +131,7 @@ implicit extra one.
 2. **This creates two real clouds, two projects, three compute configs, two container images, and a
    running Ray Serve service** in your Anyscale org, plus the AWS infrastructure above.
 3. **The real invitation email is opt-in, not automatic.** Leave `invite_email` unset (the
-   default) and `anyscale_organization_invitation` applies zero instances. Set it to an address you
+   default) and `anyscale_iam_organization_invitation` applies zero instances. Set it to an address you
    own or control if you want to exercise that resource — it will receive a real invitation.
 4. **Org-wide pieces are opt-in.** `org_user_email`, `enable_user_groups`, `user_group_member_emails`
    and `enable_role_binding` (see [the gated table](#what-is-included-gated-and-excluded)) default to
@@ -207,6 +207,6 @@ terraform apply
 - [aws-eks-basic](../aws-eks-basic/) — the module wiring this example's shared VPC/EKS cluster is
   based on, in isolation
 - [`organization_user_workflow`](../resources/organization_user_workflow/main.tf) — the invite/
-  import lifecycle for `anyscale_organization_user`
+  import lifecycle for `anyscale_iam_organization_user`
 - Any `examples/resources/anyscale_*` or `examples/data-sources/anyscale_*` directory for a
   minimal, single-resource look at one schema in isolation

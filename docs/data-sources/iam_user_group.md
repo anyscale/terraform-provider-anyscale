@@ -55,7 +55,7 @@ Read-Only:
 
 - `email` (String) The member's email address.
 - `name` (String) The member's display name; the email when the user has no name.
-- `user_id` (String) The member's user ID (`usr_...`), the `user_id` of `anyscale_organization_user`.
+- `user_id` (String) The member's user ID (`usr_...`), the `user_id` of `anyscale_iam_organization_user`.
 
 
 <a id="nestedatt--organization_role"></a>

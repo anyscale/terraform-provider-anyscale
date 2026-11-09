@@ -60,7 +60,7 @@ output "project_b_id" {
 }
 
 output "new_member_invitation_status" {
-  value       = length(anyscale_organization_invitation.new_member) > 0 ? anyscale_organization_invitation.new_member[0].status : null
+  value       = length(anyscale_iam_organization_invitation.new_member) > 0 ? anyscale_iam_organization_invitation.new_member[0].status : null
   description = "Status of the invitation sent to invite_email: pending, accepted, or expired. Null when invite_email is left at its default (the resource doesn't exist)."
 }
 
@@ -111,12 +111,12 @@ output "ds_organization_name" {
 }
 
 output "ds_self_permission_level" {
-  value       = data.anyscale_organization_user.self.permission_level
-  description = "The current user's own organization permission level, looked up via anyscale_organization_user."
+  value       = data.anyscale_iam_organization_user.self.permission_level
+  description = "The current user's own organization permission level, looked up via anyscale_iam_organization_user."
 }
 
 output "ds_organization_user_count" {
-  value       = length(data.anyscale_organization_users.all.users)
+  value       = length(data.anyscale_iam_organization_users.all.users)
   description = "Total number of users in the organization."
 }
 
@@ -166,6 +166,6 @@ output "user_group_count" {
 }
 
 output "org_user_base_role" {
-  value       = var.org_user_email != "" ? data.anyscale_organization_user.member[0].base_role : null
+  value       = var.org_user_email != "" ? data.anyscale_iam_organization_user.member[0].base_role : null
   description = "Base role of the org_user_email member. Null unless org_user_email is set."
 }

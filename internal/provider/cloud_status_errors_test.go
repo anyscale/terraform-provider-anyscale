@@ -37,7 +37,7 @@ func TestCloudRequestsCarryHTTPStatus(t *testing.T) {
 			var config CloudDataSourceModel
 			return (&CloudDataSource{client: client}).readCloudIntoModel(ctx, "cld_x", &config)
 		},
-		"anyscale_organization_invitation": func() error {
+		"anyscale_iam_organization_invitation": func() error {
 			_, err := (&OrganizationInvitationResource{client: client}).getInvitationByID(ctx, "orginv_x")
 			return err
 		},

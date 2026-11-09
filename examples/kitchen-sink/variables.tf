@@ -122,7 +122,7 @@ variable "invite_email" {
 }
 
 variable "org_user_email" {
-  description = "Email to manage with anyscale_organization_user. Empty (the default) skips it. An existing member is adopted and never removed by destroy; any other address is sent a real invitation, which destroy cancels while it is still pending."
+  description = "Email to manage with anyscale_iam_organization_user. Empty (the default) skips it. An existing member is adopted and never removed by destroy; any other address is sent a real invitation, which destroy cancels while it is still pending."
   type        = string
   default     = ""
 }

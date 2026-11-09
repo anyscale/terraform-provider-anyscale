@@ -84,15 +84,15 @@ resource "anyscale_cloud" "test" {
 }
 
 // Referencing a deprecated read-only attribute warns, even though it is never configured.
-func TestAccOrganizationUserDataSource_DeprecatedAttributeReferenceWarns(t *testing.T) {
+func TestAccIAMOrganizationUserDataSource_DeprecatedAttributeReferenceWarns(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	expectOneDeprecationWarning(t, `
-data "anyscale_organization_user" "test" {
+data "anyscale_iam_organization_user" "test" {
   email = "a@example.com"
 }
 
 output "base_role" {
-  value = data.anyscale_organization_user.test.base_role
+  value = data.anyscale_iam_organization_user.test.base_role
 }
 `)
 }
@@ -126,12 +126,12 @@ resource "anyscale_cloud" "test" {
   region         = "us-east-2"
 }
 
-data "anyscale_organization_user" "test" {
+data "anyscale_iam_organization_user" "test" {
   email = "a@example.com"
 }
 
 output "email" {
-  value = data.anyscale_organization_user.test.email
+  value = data.anyscale_iam_organization_user.test.email
 }
 `)
 	if !result.Valid {
