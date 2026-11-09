@@ -10,8 +10,9 @@ permissions:
   contents: read
   pull-requests: read # needed by dorny/paths-filter (docs-only acctest skip)
 
-# PR ref: cancel a stale in-progress run when a follow-up push supersedes it.
-# Main ref: never cancel. A completed main run is the release gate's evidence
+# Cancel a stale in-progress run for PR events only: a follow-up push to an
+# open PR supersedes its own previous run (the fast dev loop). Main runs are
+# NEVER cancelled. A completed main run is the release gate's evidence
 # (release-acctest-gate.sh requires a commit since the previous tag whose main
 # CI ran both acceptance steps green; PR-branch or interrupted runs do not
 # count), and cancel-in-progress destroyed it reliably: the changelog-finalize
@@ -23,6 +24,7 @@ permissions:
 # cancellation itself, so keeping main runs alive improves it too, and
 # sweep.yml stays as the backstop either way.
 concurrency:
+  # Per-event evaluation: PR runs supersede their own ref; main always completes.
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
