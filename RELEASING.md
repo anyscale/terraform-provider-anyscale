@@ -67,6 +67,11 @@ Review the PR like any other change and merge it. Because the entries were each 
 own fragment PR, this review is mostly a sanity check on grouping/wording. See
 [Why the changelog goes through a PR](#why-the-changelog-goes-through-a-pr).
 
+Before merging, confirm the most recent code change on main has a completed,
+green CI run (`gh run list --branch main`). The release gate accepts only
+completed main runs - one still running or cancelled by a newer push fails
+at tag time.
+
 ### 2. Tag the release
 Once the changelog PR is merged into `main`:
 ```bash
