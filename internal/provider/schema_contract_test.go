@@ -619,17 +619,14 @@ func TestProjectCollaboratorRemoved(t *testing.T) {
 	}
 }
 
-// TestProjectDescriptionRequiresReplaceIfConfigured pins task 452e7154's fix.
-// anyscale_project.description is Optional+Computed (the API auto-generates
-// a description when omitted), so a plain RequiresReplace() fires on ANY
-// change to the value — including a server-generated description changing on
-// its own, or any other update that happens to trigger a fresh read —
-// forcing a full project replace nobody asked for.
-// RequiresReplaceIfConfigured only fires when the user actually configured a
-// value, which is the correct trigger. UseStateForUnknown is required
-// alongside it so a server-assigned description stays stable across
-// subsequent plans instead of looking perpetually unknown.
-func TestProjectDescriptionRequiresReplaceIfConfigured(t *testing.T) {
+// TestProjectDescriptionUpdatableInPlace pins the description-update contract,
+// superseding task 452e7154's replace contract. The API gained
+// PATCH /api/v2/projects/{id} (confirmed in production 2026-11-09), so a
+// description change must plan an in-place update: NO RequiresReplace variant
+// may appear, not even RequiresReplaceIfConfigured. UseStateForUnknown stays
+// so an unconfigured (server-generated) description reads as stable across
+// plans rather than perpetually unknown.
+func TestProjectDescriptionUpdatableInPlace(t *testing.T) {
 	s := schemaOf(t, &ProjectResource{})
 
 	desc, ok := s.Attributes["description"].(schema.StringAttribute)
@@ -638,13 +635,14 @@ func TestProjectDescriptionRequiresReplaceIfConfigured(t *testing.T) {
 	}
 
 	if hasPlanModifierDescription(desc.PlanModifiers, descRequiresReplace) {
-		t.Errorf("description must NOT use plain stringplanmodifier.RequiresReplace() — that forces a full " +
-			"project replace on ANY change, including a server-generated description or an unrelated update " +
-			"(task 452e7154's regression). Use RequiresReplaceIfConfigured instead.")
+		t.Errorf("description must NOT use stringplanmodifier.RequiresReplace() — a description change " +
+			"updates in place via PATCH /api/v2/projects/{id}; replacing a project for an edit is the " +
+			"pre-2026-11 behavior this contract removes")
 	}
-	if !hasPlanModifierDescription(desc.PlanModifiers, descRequiresReplaceIfConfigured) {
-		t.Errorf("description must include stringplanmodifier.RequiresReplaceIfConfigured() so replacement only " +
-			"triggers on a user-configured change, not a server-side one")
+	if hasPlanModifierDescription(desc.PlanModifiers, descRequiresReplaceIfConfigured) {
+		t.Errorf("description must NOT use stringplanmodifier.RequiresReplaceIfConfigured() either — that was " +
+			"task 452e7154's answer when no in-place route existed; with PATCH confirmed it would still destroy " +
+			"a live project for an edit nobody asked to replace")
 	}
 	if !hasPlanModifierDescription(desc.PlanModifiers, descUseStateForUnknown) {
 		t.Errorf("description must include stringplanmodifier.UseStateForUnknown() so a server-assigned value " +
