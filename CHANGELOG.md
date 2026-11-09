@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.39.0] - 2026-11-09
+
+### Breaking Changes
+
+- resource/anyscale_organization_user: `anyscale_organization_user` is removed and renamed to `anyscale_iam_organization_user`; move existing state with a `moved` block (`from = anyscale_organization_user.<name>`, `to = anyscale_iam_organization_user.<name>`); the next plan shows no changes.
+- resource/anyscale_organization_invitation: `anyscale_organization_invitation` is removed and renamed to `anyscale_iam_organization_invitation`; move existing state with a `moved` block (`from = anyscale_organization_invitation.<name>`, `to = anyscale_iam_organization_invitation.<name>`); the next plan shows no changes.
+- data-source/anyscale_organization_user: `anyscale_organization_user` is removed and renamed to `anyscale_iam_organization_user`; update the data source type in your configuration, keeping the same arguments.
+- data-source/anyscale_organization_users: `anyscale_organization_users` is removed and renamed to `anyscale_iam_organization_users`; update the data source type in your configuration, keeping the same arguments.
+
 ## [0.38.0] - 2026-11-06
 
 ### Breaking Changes
@@ -1383,7 +1392,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.38.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.39.0...HEAD
+[0.39.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.39.0
 [0.38.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.38.0
 [0.37.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.37.0
 [0.36.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.36.1
