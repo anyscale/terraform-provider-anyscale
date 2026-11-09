@@ -10,21 +10,13 @@ permissions:
   contents: read
   pull-requests: read # needed by dorny/paths-filter (docs-only acctest skip)
 
-# Cancel a stale in-progress run for PR events only: a follow-up push to an
-# open PR supersedes its own previous run (the fast dev loop). Main runs are
-# NEVER cancelled. A completed main run is the release gate's evidence
-# (release-acctest-gate.sh requires a commit since the previous tag whose main
-# CI ran both acceptance steps green; PR-branch or interrupted runs do not
-# count), and cancel-in-progress destroyed it reliably: the changelog-finalize
-# merge lands minutes after the code merge and cancelled the code commit's
-# run, while the finalize commit is docs-only and skips the acceptance
-# shards -- so around a release the range always lacked a green main run.
-# Cost of not cancelling on main: a rare extra full run when two merges land
-# back to back. The leak tradeoff the old comment noted applies to
-# cancellation itself, so keeping main runs alive improves it too, and
-# sweep.yml stays as the backstop either way.
+# Cancel a stale in-progress run only for PR pushes: a follow-up commit to
+# an open PR supersedes its own previous run. Main runs always complete -
+# the release gate (release-acctest-gate.sh) reads the latest green main CI
+# as its acceptance evidence, and a cancelled main run would destroy it.
+# Cost: a rare extra full run when two merges land back to back.
+# sweep.yml stays the leaked-resource backstop.
 concurrency:
-  # Per-event evaluation: PR runs supersede their own ref; main always completes.
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 

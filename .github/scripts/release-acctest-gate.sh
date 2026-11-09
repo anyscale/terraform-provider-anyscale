@@ -111,7 +111,7 @@ while read -r c; do
   echo "  $(git log -1 --format='%h %s' "$c"): no run with both acceptance steps green"
 done < <(git rev-list --first-parent "${PREV}..${TAG_SHA}")
 
-[ -n "$baseline" ] || fail "no commit in ${PREV}..${TAG_SHA} has a CI run whose acceptance steps (Data Sources and Resources) both ran green. Checked ${#checked[@]} commit(s): ${checked[*]:-none}. Fix: re-run CI on the newest code-changing commit (gh run rerun), wait for it to complete green, then re-run the Release workflow against the EXISTING tag. Do NOT move, delete, or re-create the tag."
+[ -n "$baseline" ] || fail "no commit in ${PREV}..${TAG_SHA} has a CI run whose acceptance steps (Data Sources and Resources) both ran green. Checked ${#checked[@]} commit(s): ${checked[*]:-none}. Re-run CI on the newest code-changing commit (gh run rerun), wait for it to complete green, then re-run the Release workflow against the EXISTING tag; do not delete or re-create the tag."
 
 echo "Tested baseline: $(git log -1 --format='%h %s' "$baseline") ($run_note)"
 bad=()
