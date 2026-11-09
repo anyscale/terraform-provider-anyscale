@@ -124,13 +124,11 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 					stringvalidator.LengthAtLeast(1),
 				},
 				PlanModifiers: []planmodifier.String{
-					// Not a plan modifier note: there is deliberately no
-					// RequiresReplace* here. Changing the description PATCHes
-					// /api/v2/projects/{id}; only the default project cannot
-					// be updated (see ModifyPlan, which refuses that at plan
-					// time). UseStateForUnknown keeps an unconfigured value
-					// stable across unrelated updates instead of firing a
-					// spurious replace as RequiresReplace would.
+					// There is deliberately no RequiresReplace* here: changing
+					// the description updates in place (only the default
+					// project cannot; ModifyPlan refuses that at plan time).
+					// UseStateForUnknown keeps an unconfigured value stable
+					// across unrelated updates.
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
@@ -374,7 +372,11 @@ func (r *ProjectResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 		return
 	}
 
-	if state.IsDefault.ValueBool() && !plan.Description.Equal(state.Description) {
+	// An unknown description (from another resource's output) may yet equal
+	// the current one, and Create/Update resolves it before any write runs -
+	// refusing a default-project change here would fail a plan on a value
+	// that never turns out to be a change.
+	if state.IsDefault.ValueBool() && !plan.Description.IsUnknown() && !plan.Description.Equal(state.Description) {
 		resp.Diagnostics.AddError(
 			"Default Project Description Cannot Be Changed",
 			"Anyscale refuses to modify a default project (the API returns: \"A default project cannot be modified.\"), so its description cannot be updated in place, and the provider does not replace a project for a description change. No changes were made.",
