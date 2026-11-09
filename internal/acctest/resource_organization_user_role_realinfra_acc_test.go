@@ -417,7 +417,7 @@ func restoreCollaboratorIfOwner(t *testing.T, email, identityID string) {
 	}
 }
 
-// TestAccOrganizationUserRoleResourceR5LegacyPutPreservesDenyRoles is the R5
+// TestAccIAMOrganizationUserRoleResourceR5LegacyPutPreservesDenyRoles is the R5
 // gate: it answers whether the legacy permission_level write path clobbers deny
 // roles set through the roles path.
 //
@@ -427,14 +427,14 @@ func restoreCollaboratorIfOwner(t *testing.T, email, identityID string) {
 // that the two write paths are independent - is false.
 //
 // Omitting deny_roles alone plans a no-op (deny_roles is UseStateForUnknown; see
-// TestAccOrganizationUserRoleResource_DenyRolesOmittedPlanStability), so no write
+// TestAccIAMOrganizationUserRoleResource_DenyRolesOmittedPlanStability), so no write
 // would happen at all. Step 2 therefore also changes base_role to owner, which
 // forces an Update down the legacy path, and step 3 restores collaborator through
 // the same path. Destroy does not revert base_role, so a cleanup also demotes the
 // member back to collaborator if a failure leaves them an owner.
 //
-// Run: TF_ACC=1 ANYSCALE_TEST_USER_EMAIL=<disposable member> ANYSCALE_TEST_ORG_NAME=<org> go test ./internal/acctest -run '^TestAccOrganizationUserRoleResourceR5LegacyPutPreservesDenyRoles$' -v -count=1
-func TestAccOrganizationUserRoleResourceR5LegacyPutPreservesDenyRoles(t *testing.T) {
+// Run: TF_ACC=1 ANYSCALE_TEST_USER_EMAIL=<disposable member> ANYSCALE_TEST_ORG_NAME=<org> go test ./internal/acctest -run '^TestAccIAMOrganizationUserRoleResourceR5LegacyPutPreservesDenyRoles$' -v -count=1
+func TestAccIAMOrganizationUserRoleResourceR5LegacyPutPreservesDenyRoles(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	email := requireRealInfraTestUser(t)
 	skipUnlessTestOrgMode(t, testOrgModeLegacy, "anyscale_organization_user_role writes answer 409 in a converted organization")
@@ -522,7 +522,7 @@ resource "anyscale_organization_user_role" "realinfra" {
 	})
 }
 
-// TestAccOrganizationUserRoleResourceChangingDenyRoleWritePersists is the V8
+// TestAccIAMOrganizationUserRoleResourceChangingDenyRoleWritePersists is the V8
 // residual: prove a CHANGING deny_roles value actually reaches the backend.
 //
 // The failure mode this exists for is a write that silently no-ops on update -
@@ -530,8 +530,8 @@ resource "anyscale_organization_user_role" "realinfra" {
 // permissions would not have moved. Only reading the backend after the second
 // apply distinguishes that from a working write.
 //
-// Run: TF_ACC=1 ANYSCALE_TEST_USER_EMAIL=<disposable member> ANYSCALE_TEST_ORG_NAME=<org> go test ./internal/acctest -run '^TestAccOrganizationUserRoleResourceChangingDenyRoleWritePersists$' -v -count=1
-func TestAccOrganizationUserRoleResourceChangingDenyRoleWritePersists(t *testing.T) {
+// Run: TF_ACC=1 ANYSCALE_TEST_USER_EMAIL=<disposable member> ANYSCALE_TEST_ORG_NAME=<org> go test ./internal/acctest -run '^TestAccIAMOrganizationUserRoleResourceChangingDenyRoleWritePersists$' -v -count=1
+func TestAccIAMOrganizationUserRoleResourceChangingDenyRoleWritePersists(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	email := requireRealInfraTestUser(t)
 	skipUnlessTestOrgMode(t, testOrgModeLegacy, "anyscale_organization_user_role writes answer 409 in a converted organization")

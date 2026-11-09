@@ -6,7 +6,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
-func TestAccOrganizationUserDataSource_ByEmail(t *testing.T) {
+func TestAccIAMOrganizationUserDataSource_ByEmail(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
@@ -18,14 +18,14 @@ func TestAccOrganizationUserDataSource_ByEmail(t *testing.T) {
 				Config: testAccOrganizationUserDataSourceByEmailConfig(),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Verify user fields are populated
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "id"),
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "email"),
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "name"),
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "permission_level"),
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "created_at"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "id"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "email"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "name"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "permission_level"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "created_at"),
 					// Verify email matches current user
 					resource.TestCheckResourceAttrPair(
-						"data.anyscale_organization_user.test", "email",
+						"data.anyscale_iam_organization_user.test", "email",
 						"data.anyscale_user.current", "email",
 					),
 				),
@@ -34,7 +34,7 @@ func TestAccOrganizationUserDataSource_ByEmail(t *testing.T) {
 	})
 }
 
-func TestAccOrganizationUserDataSource_ByID(t *testing.T) {
+func TestAccIAMOrganizationUserDataSource_ByID(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
@@ -46,25 +46,25 @@ func TestAccOrganizationUserDataSource_ByID(t *testing.T) {
 				Config: testAccOrganizationUserDataSourceByIDConfig(),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Verify user fields are populated
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "id"),
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "email"),
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "name"),
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "permission_level"),
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "created_at"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "id"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "email"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "name"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "permission_level"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "created_at"),
 					// id is the lookup key (read from users[0].id), so pairing it
 					// would compare the input to itself. Pair the fields the lookup
 					// had to resolve instead.
 					resource.TestCheckResourceAttrPair(
-						"data.anyscale_organization_user.test", "email",
-						"data.anyscale_organization_users.all", "users.0.email",
+						"data.anyscale_iam_organization_user.test", "email",
+						"data.anyscale_iam_organization_users.all", "users.0.email",
 					),
 					resource.TestCheckResourceAttrPair(
-						"data.anyscale_organization_user.test", "name",
-						"data.anyscale_organization_users.all", "users.0.name",
+						"data.anyscale_iam_organization_user.test", "name",
+						"data.anyscale_iam_organization_users.all", "users.0.name",
 					),
 					resource.TestCheckResourceAttrPair(
-						"data.anyscale_organization_user.test", "user_id",
-						"data.anyscale_organization_users.all", "users.0.user_id",
+						"data.anyscale_iam_organization_user.test", "user_id",
+						"data.anyscale_iam_organization_users.all", "users.0.user_id",
 					),
 				),
 			},
@@ -72,7 +72,7 @@ func TestAccOrganizationUserDataSource_ByID(t *testing.T) {
 	})
 }
 
-func TestAccOrganizationUserDataSource_ByUserID(t *testing.T) {
+func TestAccIAMOrganizationUserDataSource_ByUserID(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
@@ -84,24 +84,24 @@ func TestAccOrganizationUserDataSource_ByUserID(t *testing.T) {
 				Config: testAccOrganizationUserDataSourceByUserIDConfig(),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Verify user fields are populated
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "id"),
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "email"),
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "name"),
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "permission_level"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "id"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "email"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "name"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "permission_level"),
 					// user_id is the lookup key (read from users[0].user_id), so
 					// pairing it would compare the input to itself. Pair the fields
 					// the lookup had to resolve instead.
 					resource.TestCheckResourceAttrPair(
-						"data.anyscale_organization_user.test", "id",
-						"data.anyscale_organization_users.all", "users.0.id",
+						"data.anyscale_iam_organization_user.test", "id",
+						"data.anyscale_iam_organization_users.all", "users.0.id",
 					),
 					resource.TestCheckResourceAttrPair(
-						"data.anyscale_organization_user.test", "email",
-						"data.anyscale_organization_users.all", "users.0.email",
+						"data.anyscale_iam_organization_user.test", "email",
+						"data.anyscale_iam_organization_users.all", "users.0.email",
 					),
 					resource.TestCheckResourceAttrPair(
-						"data.anyscale_organization_user.test", "name",
-						"data.anyscale_organization_users.all", "users.0.name",
+						"data.anyscale_iam_organization_user.test", "name",
+						"data.anyscale_iam_organization_users.all", "users.0.name",
 					),
 				),
 			},
@@ -109,7 +109,7 @@ func TestAccOrganizationUserDataSource_ByUserID(t *testing.T) {
 	})
 }
 
-func TestAccOrganizationUserDataSource_AllFieldsPopulated(t *testing.T) {
+func TestAccIAMOrganizationUserDataSource_AllFieldsPopulated(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
@@ -121,18 +121,18 @@ func TestAccOrganizationUserDataSource_AllFieldsPopulated(t *testing.T) {
 				Config: testAccOrganizationUserDataSourceByEmailConfig(),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Verify all fields are present
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "id"),
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "email"),
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "name"),
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "permission_level"),
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "created_at"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "id"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "email"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "name"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "permission_level"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "created_at"),
 				),
 			},
 		},
 	})
 }
 
-func TestAccOrganizationUserDataSource_FromListToSingle(t *testing.T) {
+func TestAccIAMOrganizationUserDataSource_FromListToSingle(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
@@ -144,18 +144,18 @@ func TestAccOrganizationUserDataSource_FromListToSingle(t *testing.T) {
 				Config: testAccOrganizationUserDataSourceFromListToSingleConfig(),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Verify we can use the users list to look up a single user
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "id"),
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "email"),
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "name"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "id"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "email"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_user.test", "name"),
 					// Looked up by email, so id and name are what the lookup
 					// resolved - they must match the first user from the list.
 					resource.TestCheckResourceAttrPair(
-						"data.anyscale_organization_user.test", "id",
-						"data.anyscale_organization_users.all", "users.0.id",
+						"data.anyscale_iam_organization_user.test", "id",
+						"data.anyscale_iam_organization_users.all", "users.0.id",
 					),
 					resource.TestCheckResourceAttrPair(
-						"data.anyscale_organization_user.test", "name",
-						"data.anyscale_organization_users.all", "users.0.name",
+						"data.anyscale_iam_organization_user.test", "name",
+						"data.anyscale_iam_organization_users.all", "users.0.name",
 					),
 				),
 			},
@@ -170,7 +170,7 @@ func testAccOrganizationUserDataSourceByEmailConfig() string {
 data "anyscale_user" "current" {
 }
 
-data "anyscale_organization_user" "test" {
+data "anyscale_iam_organization_user" "test" {
   email = data.anyscale_user.current.email
 }
 `
@@ -184,33 +184,33 @@ data "anyscale_organization_user" "test" {
 // before conversion (or the token's own identity) instead of users[0].
 func testAccOrganizationUserDataSourceByIDConfig() string {
 	return `
-data "anyscale_organization_users" "all" {
+data "anyscale_iam_organization_users" "all" {
 }
 
-data "anyscale_organization_user" "test" {
-  id = data.anyscale_organization_users.all.users[0].id
+data "anyscale_iam_organization_user" "test" {
+  id = data.anyscale_iam_organization_users.all.users[0].id
 }
 `
 }
 
 func testAccOrganizationUserDataSourceByUserIDConfig() string {
 	return `
-data "anyscale_organization_users" "all" {
+data "anyscale_iam_organization_users" "all" {
 }
 
-data "anyscale_organization_user" "test" {
-  user_id = data.anyscale_organization_users.all.users[0].user_id
+data "anyscale_iam_organization_user" "test" {
+  user_id = data.anyscale_iam_organization_users.all.users[0].user_id
 }
 `
 }
 
 func testAccOrganizationUserDataSourceFromListToSingleConfig() string {
 	return `
-data "anyscale_organization_users" "all" {
+data "anyscale_iam_organization_users" "all" {
 }
 
-data "anyscale_organization_user" "test" {
-  email = data.anyscale_organization_users.all.users[0].email
+data "anyscale_iam_organization_user" "test" {
+  email = data.anyscale_iam_organization_users.all.users[0].email
 }
 `
 }

@@ -70,12 +70,12 @@ resource "anyscale_iam_role_grant" "okta_admins_org" {
 # Alternative: bind a single user or service account (usr_...) with
 # user_id instead of user_group_id. Use the data source's user_id, not
 # its id.
-data "anyscale_organization_user" "carol" {
+data "anyscale_iam_organization_user" "carol" {
   email = "carol@example.com"
 }
 
 resource "anyscale_iam_role_grant" "carol_project_viewer" {
-  user_id    = data.anyscale_organization_user.carol.user_id
+  user_id    = data.anyscale_iam_organization_user.carol.user_id
   role_id    = data.anyscale_iam_role.project_viewer.id
   project_id = var.project_id
 }

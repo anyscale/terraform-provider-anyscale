@@ -88,12 +88,12 @@ resource "anyscale_iam_role_grant" "okta_admins_org" {
 # Alternative: bind a single user or service account (usr_...) with
 # user_id instead of user_group_id. Use the data source's user_id, not
 # its id.
-data "anyscale_organization_user" "carol" {
+data "anyscale_iam_organization_user" "carol" {
   email = "carol@example.com"
 }
 
 resource "anyscale_iam_role_grant" "carol_project_viewer" {
-  user_id    = data.anyscale_organization_user.carol.user_id
+  user_id    = data.anyscale_iam_organization_user.carol.user_id
   role_id    = data.anyscale_iam_role.project_viewer.id
   project_id = var.project_id
 }
@@ -112,7 +112,7 @@ resource "anyscale_iam_role_grant" "carol_project_viewer" {
 - `organization_id` (String) Grant the role on the organization: the token's own, as returned by the `anyscale_organization` data source. Specify exactly one of `organization_id`, `cloud_id` or `project_id`. Changing it replaces the binding.
 - `project_id` (String) Grant the role on this project. Specify exactly one of `organization_id`, `cloud_id` or `project_id`. Changing it replaces the binding.
 - `user_group_id` (String) The user group that holds the role (`ug_...`). Groups synced from an identity provider are accepted. Specify exactly one of `user_group_id` or `user_id`. Changing it replaces the binding.
-- `user_id` (String) The user that holds the role (`usr_...`); look up an organization member by email with the `anyscale_organization_user` data source. Service accounts are users too (`usr_...`). Specify exactly one of `user_group_id` or `user_id`. Changing it replaces the binding.
+- `user_id` (String) The user that holds the role (`usr_...`); look up an organization member by email with the `anyscale_iam_organization_user` data source. Service accounts are users too (`usr_...`). Specify exactly one of `user_group_id` or `user_id`. Changing it replaces the binding.
 
 ### Read-Only
 

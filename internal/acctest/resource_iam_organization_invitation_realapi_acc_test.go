@@ -14,7 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// TestAccOrganizationInvitationResource_RealAPI sends, re-plans, imports and
+// TestAccIAMOrganizationInvitationResource_RealAPI sends, re-plans, imports and
 // revokes a real organization invitation.
 //
 // The invitee is a fresh plus-address on ANYSCALE_TEST_USER_EMAIL's mailbox
@@ -33,8 +33,8 @@ import (
 // Destroy invalidates the invitation. The row is never deleted, so
 // CheckDestroy reads it back by ID and requires it gone or expired.
 //
-// Run: TF_ACC=1 ANYSCALE_TEST_USER_EMAIL=<mailbox you control> ANYSCALE_TEST_ORG_NAME=<org> go test ./internal/acctest -run '^TestAccOrganizationInvitationResource_RealAPI$' -v -count=1
-func TestAccOrganizationInvitationResource_RealAPI(t *testing.T) {
+// Run: TF_ACC=1 ANYSCALE_TEST_USER_EMAIL=<mailbox you control> ANYSCALE_TEST_ORG_NAME=<org> go test ./internal/acctest -run '^TestAccIAMOrganizationInvitationResource_RealAPI$' -v -count=1
+func TestAccIAMOrganizationInvitationResource_RealAPI(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	base := strings.TrimSpace(os.Getenv("ANYSCALE_TEST_USER_EMAIL"))
 	if base == "" {
@@ -67,10 +67,10 @@ func TestAccOrganizationInvitationResource_RealAPI(t *testing.T) {
 		}
 	})
 
-	const addr = "anyscale_organization_invitation.test"
+	const addr = "anyscale_iam_organization_invitation.test"
 	config := func(e string) string {
 		return realInfraProviderBlock() + fmt.Sprintf(`
-resource "anyscale_organization_invitation" "test" {
+resource "anyscale_iam_organization_invitation" "test" {
   email = %q
 }
 `, e)

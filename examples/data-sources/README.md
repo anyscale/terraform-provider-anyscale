@@ -232,7 +232,7 @@ output "organization_default_cloud_id" {
 }
 ```
 
-### `anyscale_organization_user`
+### `anyscale_iam_organization_user`
 
 Look up a specific user in the organization by identity ID, user ID, or
 email.
@@ -245,16 +245,16 @@ email.
 
 **Example:**
 ```terraform
-data "anyscale_organization_user" "by_email" {
+data "anyscale_iam_organization_user" "by_email" {
   email = "user@example.com"
 }
 
 output "user_base_role" {
-  value = data.anyscale_organization_user.by_email.base_role
+  value = data.anyscale_iam_organization_user.by_email.base_role
 }
 ```
 
-### `anyscale_organization_users`
+### `anyscale_iam_organization_users`
 
 List and filter users in the organization.
 
@@ -266,11 +266,11 @@ List and filter users in the organization.
 
 **Example:**
 ```terraform
-data "anyscale_organization_users" "humans" {}
+data "anyscale_iam_organization_users" "humans" {}
 
 output "organization_user_emails" {
   value = [
-    for u in data.anyscale_organization_users.humans.users : u.email
+    for u in data.anyscale_iam_organization_users.humans.users : u.email
   ]
 }
 ```

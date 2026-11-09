@@ -19,7 +19,7 @@ import (
 // singular per-user GET the read path still makes (see
 // hydrateCollaboratorRoles), without touching real infra.
 //
-// There is deliberately NO update handler: anyscale_organization_user manages
+// There is deliberately NO update handler: anyscale_iam_organization_user manages
 // membership only and has no writable attribute, so the provider can no longer
 // issue PUT /api/v2/organization_collaborators/{identity_id} at all. Leaving
 // the route unhandled is the point - an unexpected PUT now falls through to the
@@ -153,7 +153,7 @@ func (s *mockCollaboratorLifecycleServer) isDeleted() bool {
 	return s.deleted
 }
 
-// TestAccOrganizationUserResource_Lifecycle_MockServer is the contract's T1/AC
+// TestAccIAMOrganizationUserResource_Lifecycle_MockServer is the contract's T1/AC
 // mandatory CI-enforced lifecycle test (section 7): Import -> Read -> Delete,
 // all against a scripted mock, no env-var gating, no real identity touched. The
 // lifecycle starts from Import rather than Create because that is what this
@@ -162,7 +162,7 @@ func (s *mockCollaboratorLifecycleServer) isDeleted() bool {
 // resource. It does neither: Create adopts an existing member or invites a new
 // one (see resource_organization_user.go's own doc comment), and that path has
 // its own dedicated coverage in resource_organization_user_origin_acc_test.go
-// (TestAccOrganizationUserResourceDestroyAdoptedMemberIsNotEvicted and its
+// (TestAccIAMOrganizationUserResourceDestroyAdoptedMemberIsNotEvicted and its
 // invited-path sibling).
 //
 // There is no Update leg any more: the resource is membership-only and exposes
@@ -177,14 +177,14 @@ func (s *mockCollaboratorLifecycleServer) isDeleted() bool {
 // indirectly (findUserByID hydrates through it on every read), and the
 // role-field assertions themselves live with the data sources that still
 // expose them.
-func TestAccOrganizationUserResource_Lifecycle_MockServer(t *testing.T) {
+func TestAccIAMOrganizationUserResource_Lifecycle_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	httpServer, mockServer := newMockCollaboratorLifecycleServer(t)
-	const resourceAddr = "anyscale_organization_user.test"
+	const resourceAddr = "anyscale_iam_organization_user.test"
 
 	config := testAccProviderBlock(httpServer.URL) + `
-resource "anyscale_organization_user" "test" {
+resource "anyscale_iam_organization_user" "test" {
   email = "lifecycle@example.com"
 }
 `

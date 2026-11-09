@@ -126,7 +126,7 @@ const cloudAccessAutoAddUserSubstring = "auto add users enabled"
 // endpoint to preflight it against, and it returns the SAME 409 status - so the
 // two are only distinguishable by their detail text.
 //
-// anyscale_organization_invitation documents the identical condition on the
+// anyscale_iam_organization_invitation documents the identical condition on the
 // invite path; SCIM alone does not trigger it.
 const cloudAccessPolicyAPISubstring = "Policy API"
 
@@ -660,8 +660,8 @@ func grantCloudAccessMember(ctx context.Context, client *Client, cloudID string,
 		diags.AddError(
 			"Could Not Resolve Organization Member",
 			fmt.Sprintf("No organization member could be resolved for %q: %s\n\nA cloud role can only be granted to "+
-				"someone who is already a member of the organization. Add them first - anyscale_organization_user manages "+
-				"membership, and anyscale_organization_invitation invites someone who has no account yet.", m.Email, err.Error()),
+				"someone who is already a member of the organization. Add them first - anyscale_iam_organization_user manages "+
+				"membership, and anyscale_iam_organization_invitation invites someone who has no account yet.", m.Email, err.Error()),
 		)
 		return diags, nil
 	}

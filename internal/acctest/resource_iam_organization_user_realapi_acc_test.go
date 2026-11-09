@@ -10,8 +10,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// TestAccOrganizationUserResource_RealAPI declares an existing member as an
-// anyscale_organization_user against the real API: adopt, flip
+// TestAccIAMOrganizationUserResource_RealAPI declares an existing member as an
+// anyscale_iam_organization_user against the real API: adopt, flip
 // reinvite_if_expired in place, import by email, destroy.
 //
 // For a member, every step is read-only on the backend: create adopts without
@@ -25,8 +25,8 @@ import (
 // that is not the token's own identity; requireRealInfraTestUser enforces all
 // of that and ANYSCALE_TEST_ORG_NAME.
 //
-// Run: TF_ACC=1 ANYSCALE_TEST_ORG_MUTATION=1 ANYSCALE_TEST_USER_EMAIL=<disposable member> ANYSCALE_TEST_ORG_NAME=<org> go test ./internal/acctest -run '^TestAccOrganizationUserResource_RealAPI$' -v -count=1
-func TestAccOrganizationUserResource_RealAPI(t *testing.T) {
+// Run: TF_ACC=1 ANYSCALE_TEST_ORG_MUTATION=1 ANYSCALE_TEST_USER_EMAIL=<disposable member> ANYSCALE_TEST_ORG_NAME=<org> go test ./internal/acctest -run '^TestAccIAMOrganizationUserResource_RealAPI$' -v -count=1
+func TestAccIAMOrganizationUserResource_RealAPI(t *testing.T) {
 	skipUnlessOrgMutation(t)
 	email := requireRealInfraTestUser(t)
 
@@ -44,10 +44,10 @@ func TestAccOrganizationUserResource_RealAPI(t *testing.T) {
 		t.Logf("VERIFIED: %s is still a member with the same roles", email)
 	})
 
-	const addr = "anyscale_organization_user.test"
+	const addr = "anyscale_iam_organization_user.test"
 	config := func(reinvite bool) string {
 		return realInfraProviderBlock() + fmt.Sprintf(`
-resource "anyscale_organization_user" "test" {
+resource "anyscale_iam_organization_user" "test" {
   email               = %q
   reinvite_if_expired = %t
 }
@@ -126,7 +126,7 @@ func checkMemberUnchanged(t *testing.T, email string, before liveOrgMember) erro
 	t.Helper()
 	now, found := readLiveOrgRole(t, email)
 	if !found {
-		return fmt.Errorf("%s is no longer a member of the organization: anyscale_organization_user must never evict", email)
+		return fmt.Errorf("%s is no longer a member of the organization: anyscale_iam_organization_user must never evict", email)
 	}
 	if !strings.EqualFold(now.BaseRole, before.BaseRole) {
 		return fmt.Errorf("%s base_role changed from %q to %q", email, before.BaseRole, now.BaseRole)

@@ -18,7 +18,7 @@ import (
 // that Delete correctly READS the membership origin out of Terraform provider
 // private state.
 //
-// anyscale_organization_user records an origin at Create/ImportState and Delete
+// anyscale_iam_organization_user records an origin at Create/ImportState and Delete
 // branches on it - "adopted" must never evict a human who was already a member,
 // "invited" must invalidate the invitation this resource sent, "imported" must
 // do nothing. Those branches are unit-tested by extracting Delete's body to take
@@ -254,13 +254,13 @@ func (s *mockOrganizationUserOriginServer) snapshot() (eviction, invalidate, inv
 
 func originTestConfig(serverURL, email string) string {
 	return testAccProviderBlock(serverURL) + fmt.Sprintf(`
-resource "anyscale_organization_user" "test" {
+resource "anyscale_iam_organization_user" "test" {
   email = %[1]q
 }
 `, email)
 }
 
-// TestAccOrganizationUserResourceDestroyAdoptedMemberIsNotEvicted is the safety
+// TestAccIAMOrganizationUserResourceDestroyAdoptedMemberIsNotEvicted is the safety
 // property with the worst failure mode in this resource: destroying a resource
 // that merely ADOPTED an existing member must not remove that human from the
 // organization.
@@ -268,7 +268,7 @@ resource "anyscale_organization_user" "test" {
 // The origin is written by Create (adopt path) into private state, persisted by
 // the framework, and read back by Delete. Nothing between those points is
 // stubbed, which is what makes this test able to catch a broken read.
-func TestAccOrganizationUserResourceDestroyAdoptedMemberIsNotEvicted(t *testing.T) {
+func TestAccIAMOrganizationUserResourceDestroyAdoptedMemberIsNotEvicted(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	// Seeded as an existing member -> Create must ADOPT.
@@ -298,7 +298,7 @@ func TestAccOrganizationUserResourceDestroyAdoptedMemberIsNotEvicted(t *testing.
 			{
 				Config: originTestConfig(httpServer.URL, originTestAdoptedEmail),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_organization_user.test", "email", originTestAdoptedEmail),
+					resource.TestCheckResourceAttr("anyscale_iam_organization_user.test", "email", originTestAdoptedEmail),
 					// Adoption is silent: no invitation, no email, no error.
 					func(*terraform.State) error {
 						if _, _, invited := mock.snapshot(); invited {
@@ -312,11 +312,11 @@ func TestAccOrganizationUserResourceDestroyAdoptedMemberIsNotEvicted(t *testing.
 	})
 }
 
-// TestAccOrganizationUserResourceDestroyInvitedCancelsInvitation is the other
+// TestAccIAMOrganizationUserResourceDestroyInvitedCancelsInvitation is the other
 // half of the same read: when Create DID send the invitation, destroy must take
 // it back. Getting this wrong leaks a live invitation that Terraform no longer
 // tracks and that the person can still accept.
-func TestAccOrganizationUserResourceDestroyInvitedCancelsInvitation(t *testing.T) {
+func TestAccIAMOrganizationUserResourceDestroyInvitedCancelsInvitation(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	// No existing member -> Create must INVITE.
@@ -342,7 +342,7 @@ func TestAccOrganizationUserResourceDestroyInvitedCancelsInvitation(t *testing.T
 			{
 				Config: originTestConfig(httpServer.URL, originTestInvitedEmail),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_organization_user.test", "email", originTestInvitedEmail),
+					resource.TestCheckResourceAttr("anyscale_iam_organization_user.test", "email", originTestInvitedEmail),
 					func(*terraform.State) error {
 						if _, _, invited := mock.snapshot(); !invited {
 							return fmt.Errorf("create did not send an invitation for a non-member")
@@ -355,7 +355,7 @@ func TestAccOrganizationUserResourceDestroyInvitedCancelsInvitation(t *testing.T
 	})
 }
 
-// TestAccOrganizationUserResourceImportRoundTripPreservesCasing pins this
+// TestAccIAMOrganizationUserResourceImportRoundTripPreservesCasing pins this
 // resource's import-round-trip guarantee: import must produce a NO-OP PLAN
 // for a realistic config, never a diff and never a replacement.
 //
@@ -412,7 +412,7 @@ func TestAccOrganizationUserResourceDestroyInvitedCancelsInvitation(t *testing.T
 // differs in the way that matters - it carries a plan modifier that deliberately
 // rewrites the planned value, which Core permits, so Core's consistency check
 // does not save it the way it saves this one.
-func TestAccOrganizationUserResourceImportRoundTripPreservesCasing(t *testing.T) {
+func TestAccIAMOrganizationUserResourceImportRoundTripPreservesCasing(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	// Deliberately mixed case, and deliberately NOT what the backend stores.
@@ -424,7 +424,7 @@ func TestAccOrganizationUserResourceImportRoundTripPreservesCasing(t *testing.T)
 	// returns the email lower-cased, as the backend does.
 	httpServer, _ := newMockOrganizationUserOriginServer(t, operatorCasing)
 
-	const resourceName = "anyscale_organization_user.test"
+	const resourceName = "anyscale_iam_organization_user.test"
 	config := originTestConfig(httpServer.URL, operatorCasing)
 
 	resource.Test(t, resource.TestCase{

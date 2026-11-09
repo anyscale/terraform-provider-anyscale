@@ -10,14 +10,14 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// TestAccOrganizationUsersDataSource_Basic previously asserted only that
+// TestAccIAMOrganizationUsersDataSource_Basic previously asserted only that
 // "users.#" was set, which holds even for an empty list - a data source that
 // returned zero rows, or rows with every field left empty, would pass
 // identically to a correctly working one. Replaced with a falsifiable
 // assertion per the RBAC test-gap review: every returned row must have a
 // non-empty id and email, which fails if the data source returns rows it did
 // not actually populate.
-func TestAccOrganizationUsersDataSource_Basic(t *testing.T) {
+func TestAccIAMOrganizationUsersDataSource_Basic(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
@@ -28,8 +28,8 @@ func TestAccOrganizationUsersDataSource_Basic(t *testing.T) {
 			{
 				Config: testAccOrganizationUsersDataSourceBasicConfig(),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_users.test", "users.#"),
-					testAccCheckAllOrgUsersHaveIDAndEmail("data.anyscale_organization_users.test"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_users.test", "users.#"),
+					testAccCheckAllOrgUsersHaveIDAndEmail("data.anyscale_iam_organization_users.test"),
 				),
 			},
 		},
@@ -77,7 +77,7 @@ func testAccCheckAllOrgUsersHaveIDAndEmail(usersResourceName string) resource.Te
 	}
 }
 
-func TestAccOrganizationUsersDataSource_UserFieldsPopulated(t *testing.T) {
+func TestAccIAMOrganizationUsersDataSource_UserFieldsPopulated(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
@@ -89,26 +89,26 @@ func TestAccOrganizationUsersDataSource_UserFieldsPopulated(t *testing.T) {
 				Config: testAccOrganizationUsersDataSourceBasicConfig(),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Verify at least one user is returned
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_users.test", "users.#"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_users.test", "users.#"),
 					// Verify the first user has expected fields populated
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_users.test", "users.0.id"),
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_users.test", "users.0.name"),
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_users.test", "users.0.email"),
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_users.test", "users.0.permission_level"),
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_users.test", "users.0.created_at"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_users.test", "users.0.id"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_users.test", "users.0.name"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_users.test", "users.0.email"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_users.test", "users.0.permission_level"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_users.test", "users.0.created_at"),
 				),
 			},
 		},
 	})
 }
 
-// TestAccOrganizationUsersDataSource_FilterByEmail is DS-OU-6's mutation-proof
+// TestAccIAMOrganizationUsersDataSource_FilterByEmail is DS-OU-6's mutation-proof
 // guard for the email filter. The old version only asserted users.# was set,
 // which passes even if the filter is a silent no-op (the current user is
 // always in the unfiltered list too). This asserts every returned user's email
 // actually contains the filter substring, per the schema's own "case-insensitive
 // partial match" contract.
-func TestAccOrganizationUsersDataSource_FilterByEmail(t *testing.T) {
+func TestAccIAMOrganizationUsersDataSource_FilterByEmail(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
@@ -119,17 +119,17 @@ func TestAccOrganizationUsersDataSource_FilterByEmail(t *testing.T) {
 			{
 				Config: testAccOrganizationUsersDataSourceFilterByEmailConfig(),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_users.test", "users.#"),
-					testAccCheckAllOrgUsersEmailContains("data.anyscale_organization_users.test", "data.anyscale_user.current", "email"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_users.test", "users.#"),
+					testAccCheckAllOrgUsersEmailContains("data.anyscale_iam_organization_users.test", "data.anyscale_user.current", "email"),
 				),
 			},
 		},
 	})
 }
 
-// TestAccOrganizationUsersDataSource_FilterByName is DS-OU-6's mutation-proof
+// TestAccIAMOrganizationUsersDataSource_FilterByName is DS-OU-6's mutation-proof
 // guard for the name filter - same shape as FilterByEmail above.
-func TestAccOrganizationUsersDataSource_FilterByName(t *testing.T) {
+func TestAccIAMOrganizationUsersDataSource_FilterByName(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
@@ -140,15 +140,15 @@ func TestAccOrganizationUsersDataSource_FilterByName(t *testing.T) {
 			{
 				Config: testAccOrganizationUsersDataSourceFilterByNameConfig(),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_users.test", "users.#"),
-					testAccCheckAllOrgUsersNameContains("data.anyscale_organization_users.test", "data.anyscale_user.current", "name"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_users.test", "users.#"),
+					testAccCheckAllOrgUsersNameContains("data.anyscale_iam_organization_users.test", "data.anyscale_user.current", "name"),
 				),
 			},
 		},
 	})
 }
 
-// TestAccOrganizationUsersDataSource_ServiceAccountFilterPartitionsUsers is
+// TestAccIAMOrganizationUsersDataSource_ServiceAccountFilterPartitionsUsers is
 // DS-OU-6's mutation-proof guard for is_service_account, replacing the old
 // _ServiceAccountsOnly and _UsersOnly tests. Those only asserted users.# was
 // set, which is unfalsifiable in this test org: it currently has zero service
@@ -175,7 +175,7 @@ func TestAccOrganizationUsersDataSource_FilterByName(t *testing.T) {
 // happens to have any real service accounts today. Neither assertion depends
 // on the org's actual service-account population, unlike the version this
 // replaces.
-func TestAccOrganizationUsersDataSource_ServiceAccountFilterPartitionsUsers(t *testing.T) {
+func TestAccIAMOrganizationUsersDataSource_ServiceAccountFilterPartitionsUsers(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
@@ -186,7 +186,7 @@ func TestAccOrganizationUsersDataSource_ServiceAccountFilterPartitionsUsers(t *t
 			{
 				Config: testAccOrganizationUsersDataSourcePartitionConfig(),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet("data.anyscale_organization_users.all", "users.#"),
+					resource.TestCheckResourceAttrSet("data.anyscale_iam_organization_users.all", "users.#"),
 					testAccCheckOrgUsersServiceAccountPartitionSumsToTotal(),
 				),
 			},
@@ -276,7 +276,7 @@ func testAccCheckOrgUsersServiceAccountPartitionSumsToTotal() resource.TestCheck
 	}
 
 	return func(s *terraform.State) error {
-		total, err := countOf(s, "data.anyscale_organization_users.all")
+		total, err := countOf(s, "data.anyscale_iam_organization_users.all")
 		if err != nil {
 			return err
 		}
@@ -284,11 +284,11 @@ func testAccCheckOrgUsersServiceAccountPartitionSumsToTotal() resource.TestCheck
 			return fmt.Errorf("expected at least one user in the org, got 0 - cannot prove the filter's behavior against an empty list")
 		}
 
-		serviceAccounts, err := countOf(s, "data.anyscale_organization_users.service_accounts")
+		serviceAccounts, err := countOf(s, "data.anyscale_iam_organization_users.service_accounts")
 		if err != nil {
 			return err
 		}
-		regularUsers, err := countOf(s, "data.anyscale_organization_users.regular_users")
+		regularUsers, err := countOf(s, "data.anyscale_iam_organization_users.regular_users")
 		if err != nil {
 			return err
 		}
@@ -313,7 +313,7 @@ func testAccCheckOrgUsersServiceAccountPartitionSumsToTotal() resource.TestCheck
 
 func testAccOrganizationUsersDataSourceBasicConfig() string {
 	return `
-data "anyscale_organization_users" "test" {
+data "anyscale_iam_organization_users" "test" {
 }
 `
 }
@@ -323,7 +323,7 @@ func testAccOrganizationUsersDataSourceFilterByEmailConfig() string {
 data "anyscale_user" "current" {
 }
 
-data "anyscale_organization_users" "test" {
+data "anyscale_iam_organization_users" "test" {
   email = data.anyscale_user.current.email
 }
 `
@@ -334,7 +334,7 @@ func testAccOrganizationUsersDataSourceFilterByNameConfig() string {
 data "anyscale_user" "current" {
 }
 
-data "anyscale_organization_users" "test" {
+data "anyscale_iam_organization_users" "test" {
   name = data.anyscale_user.current.name
 }
 `
@@ -342,14 +342,14 @@ data "anyscale_organization_users" "test" {
 
 func testAccOrganizationUsersDataSourcePartitionConfig() string {
 	return `
-data "anyscale_organization_users" "all" {
+data "anyscale_iam_organization_users" "all" {
 }
 
-data "anyscale_organization_users" "service_accounts" {
+data "anyscale_iam_organization_users" "service_accounts" {
   is_service_account = true
 }
 
-data "anyscale_organization_users" "regular_users" {
+data "anyscale_iam_organization_users" "regular_users" {
   is_service_account = false
 }
 `

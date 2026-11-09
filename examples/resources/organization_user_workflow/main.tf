@@ -14,23 +14,23 @@ terraform {
 
 # Step 1: invite. Invitees get the default collaborator role; step 2
 # sets a different one.
-resource "anyscale_organization_invitation" "new_member" {
+resource "anyscale_iam_organization_invitation" "new_member" {
   email = "newmember@example.com"
 }
 
 # Output invitation details for manual follow-up
 output "invitation_id" {
-  value       = anyscale_organization_invitation.new_member.id
+  value       = anyscale_iam_organization_invitation.new_member.id
   description = "Invitation ID to share if the user checks status"
 }
 
 output "invitation_status" {
-  value       = anyscale_organization_invitation.new_member.status
+  value       = anyscale_iam_organization_invitation.new_member.status
   description = "Current status: pending, accepted, or expired"
 }
 
 output "invitation_expires_at" {
-  value       = anyscale_organization_invitation.new_member.expires_at
+  value       = anyscale_iam_organization_invitation.new_member.expires_at
   description = "When this invitation will expire"
 }
 
@@ -62,7 +62,7 @@ output "invitation_expires_at" {
 # existing member with no API call, since Terraform is just declaring a
 # fact that is already true:
 #
-# resource "anyscale_organization_user" "new_member" {
+# resource "anyscale_iam_organization_user" "new_member" {
 #   email = "newmember@example.com"
 #
 #   # Importing this resource instead of declaring it works
@@ -70,11 +70,11 @@ output "invitation_expires_at" {
 #   # the organization; the person keeps full access and a warning says
 #   # so. This resource can only stop tracking them, never revoke
 #   # them -- do that from the Anyscale console:
-#   #   terraform import anyscale_organization_user.new_member newmember@example.com
+#   #   terraform import anyscale_iam_organization_user.new_member newmember@example.com
 # }
 #
 # output "managed_user_email" {
-#   value       = anyscale_organization_user.new_member.email
+#   value       = anyscale_iam_organization_user.new_member.email
 #   description = "Email of the managed member"
 # }
 
@@ -98,7 +98,7 @@ locals {
 # has no way to set a different role at invite time. The role loop below
 # is where "lead@example.com" actually becomes an owner, after they
 # accept, same as any other promotion.
-resource "anyscale_organization_invitation" "team_members" {
+resource "anyscale_iam_organization_invitation" "team_members" {
   for_each = local.ml_team
 
   email = each.key
@@ -108,7 +108,7 @@ resource "anyscale_organization_invitation" "team_members" {
 output "team_invitations" {
   value = {
     for email, invitation in
-    anyscale_organization_invitation.team_members :
+    anyscale_iam_organization_invitation.team_members :
     email => {
       id         = invitation.id
       status     = invitation.status

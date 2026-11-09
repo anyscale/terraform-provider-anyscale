@@ -331,7 +331,7 @@ func resolveOrgUserIDsByEmail(ctx context.Context, client *Client, emails []stri
 	if len(missing) > 0 {
 		sort.Strings(missing)
 		problems = append(problems, fmt.Sprintf(
-			"not members of the organization: %s. Invite them first, for example with anyscale_organization_invitation, and add them once they have accepted",
+			"not members of the organization: %s. Invite them first, for example with anyscale_iam_organization_invitation, and add them once they have accepted",
 			strings.Join(missing, ", ")))
 	}
 	if len(noUserID) > 0 {

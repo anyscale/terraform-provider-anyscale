@@ -48,7 +48,7 @@ type OrganizationUserDataSourceModel struct {
 
 // Metadata returns the data source type name.
 func (d *OrganizationUserDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_organization_user"
+	resp.TypeName = req.ProviderTypeName + "_iam_organization_user"
 }
 
 // Schema defines the data source schema.
@@ -57,7 +57,7 @@ func (d *OrganizationUserDataSource) Schema(ctx context.Context, req datasource.
 	attributes["id"] = schema.StringAttribute{
 		Optional:            true,
 		Computed:            true,
-		MarkdownDescription: "The identity ID of the user. Specify exactly one of `id`, `user_id`, or `email`. Not the `id` of the `anyscale_organization_user` resource, which is the email address; use `email` for a value that resource accepts.",
+		MarkdownDescription: "The identity ID of the user. Specify exactly one of `id`, `user_id`, or `email`. Not the `id` of the `anyscale_iam_organization_user` resource, which is the email address; use `email` for a value that resource accepts.",
 	}
 	attributes["user_id"] = schema.StringAttribute{
 		Optional:            true,

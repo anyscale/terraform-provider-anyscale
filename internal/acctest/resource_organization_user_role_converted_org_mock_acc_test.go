@@ -135,7 +135,7 @@ func (s *convOrgUserRoleServer) handle(w http.ResponseWriter, r *http.Request) {
 // Every create write path answers the converted-org 409 with the role-bindings
 // diagnostic: the roles PUT (deny_roles declared, and base_role alone) and the
 // legacy permission_level PUT reached when the roles API answers 501.
-func TestAccOrganizationUserRoleResource_ConvertedOrgCreateErrors(t *testing.T) {
+func TestAccIAMOrganizationUserRoleResource_ConvertedOrgCreateErrors(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	cases := []struct {
 		name                  string
@@ -172,7 +172,7 @@ func TestAccOrganizationUserRoleResource_ConvertedOrgCreateErrors(t *testing.T) 
 // left in place and drop the resource from state, never error, or the
 // resource could not be destroyed without terraform state rm. Driven through
 // the terraform CLI because resource.Test does not surface warnings.
-func TestAccOrganizationUserRoleResource_ConvertedOrgDestroyWarnsAndDropsState(t *testing.T) {
+func TestAccIAMOrganizationUserRoleResource_ConvertedOrgDestroyWarnsAndDropsState(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	server, mock := newConvOrgUserRoleServer(t)
 	run := cliDevWorkspace(t, orgUserRoleConfig(server.URL, mock.email, "collaborator", `["image_reader"]`))
@@ -213,7 +213,7 @@ func TestAccOrganizationUserRoleResource_ConvertedOrgDestroyWarnsAndDropsState(t
 // A 409 with any other detail keeps the generic handling on both write paths.
 // This is also the control for the converted-org tests: the same mock and
 // configs, only the detail differs.
-func TestAccOrganizationUserRoleResource_ConvertedOrgUnrecognizedConflictPassesThrough(t *testing.T) {
+func TestAccIAMOrganizationUserRoleResource_ConvertedOrgUnrecognizedConflictPassesThrough(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	cases := []struct {
 		name                     string

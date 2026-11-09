@@ -1,29 +1,29 @@
 # Organization-wide resources, all off by default (count = 0) and enabled by a variable: each
 # sends real email, needs a real member, or needs an organization feature. See README.md.
 
-# --- anyscale_organization_invitation (gated by invite_email) -----------------------------------
+# --- anyscale_iam_organization_invitation (gated by invite_email) -----------------------------------
 # Sends a real invitation email. Every invitation grants default collaborator access on
 # acceptance; the invitations API cannot set another role up front.
-resource "anyscale_organization_invitation" "new_member" {
+resource "anyscale_iam_organization_invitation" "new_member" {
   count = var.invite_email != "" ? 1 : 0
 
   email = var.invite_email
 }
 
-# --- anyscale_organization_user (gated by org_user_email) ---------------------------------------
+# --- anyscale_iam_organization_user (gated by org_user_email) ---------------------------------------
 # Manages membership only, keyed by email. Declaring an existing member adopts them with no API
 # call, and destroying it removes nobody. An email that is not a member yet gets a real
 # invitation, which destroy cancels if it is still pending.
-resource "anyscale_organization_user" "member" {
+resource "anyscale_iam_organization_user" "member" {
   count = var.org_user_email != "" ? 1 : 0
 
   email = var.org_user_email
 }
 
-data "anyscale_organization_user" "member" {
+data "anyscale_iam_organization_user" "member" {
   count = var.org_user_email != "" ? 1 : 0
 
-  email = anyscale_organization_user.member[0].email
+  email = anyscale_iam_organization_user.member[0].email
 }
 
 # --- anyscale_iam_user_group + anyscale_iam_user_group_members (gated by enable_user_groups) --------

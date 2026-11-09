@@ -1,7 +1,7 @@
 # Deprecated: see the RBAC guide, "Legacy RBAC deprecation".
 # Manage an existing organization member's role. This resource does not
 # add or remove members -- the person must already be in the
-# organization (see anyscale_organization_user for membership) -- it
+# organization (see anyscale_iam_organization_user for membership) -- it
 # only sets base_role and, optionally, deny_roles for them.
 resource "anyscale_organization_user_role" "analyst" {
   email     = "analyst@example.com"

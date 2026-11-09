@@ -211,7 +211,7 @@ func TestAccCloudAccessResource_AzureBlocked_MockServer(t *testing.T) {
 	})
 }
 
-func TestAccOrganizationUserRoleResource_AzureBlocked_MockServer(t *testing.T) {
+func TestAccIAMOrganizationUserRoleResource_AzureBlocked_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	server, mock := newMockOrgUserRoleServer(t)
 	var azure atomic.Bool
@@ -366,7 +366,7 @@ func TestAccAzureClassificationNegativeSetResource_MockServer(t *testing.T) {
 		{"organization_user", func(t *testing.T) string {
 			server, _ := newMockCollaboratorLifecycleServer(t)
 			return testAccProviderBlock(server.URL) + `
-resource "anyscale_organization_user" "test" {
+resource "anyscale_iam_organization_user" "test" {
   email = "lifecycle@example.com"
 }
 `
@@ -374,7 +374,7 @@ resource "anyscale_organization_user" "test" {
 		{"organization_invitation", func(t *testing.T) string {
 			server, _ := newMockInvitationServer(t, false)
 			return testAccProviderBlock(server.URL) + `
-resource "anyscale_organization_invitation" "test" {
+resource "anyscale_iam_organization_invitation" "test" {
   email = "azure-negative@example.com"
 }
 `

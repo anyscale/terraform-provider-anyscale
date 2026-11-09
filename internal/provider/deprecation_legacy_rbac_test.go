@@ -87,12 +87,12 @@ func TestLegacyRBACDeprecation_Positive(t *testing.T) {
 		{"anyscale_cloud", NewCloudDataSource(), "auto_add_user"},
 		{"anyscale_clouds", NewCloudsDataSource(), "clouds.auto_add_user"},
 		{"anyscale_project", NewProjectDataSource(), "collaborators"},
-		{"anyscale_organization_user", NewOrganizationUserDataSource(), "permission_level"},
-		{"anyscale_organization_user", NewOrganizationUserDataSource(), "base_role"},
-		{"anyscale_organization_user", NewOrganizationUserDataSource(), "additional_roles"},
-		{"anyscale_organization_users", NewOrganizationUsersDataSource(), "users.permission_level"},
-		{"anyscale_organization_users", NewOrganizationUsersDataSource(), "users.base_role"},
-		{"anyscale_organization_users", NewOrganizationUsersDataSource(), "users.additional_roles"},
+		{"anyscale_iam_organization_user", NewOrganizationUserDataSource(), "permission_level"},
+		{"anyscale_iam_organization_user", NewOrganizationUserDataSource(), "base_role"},
+		{"anyscale_iam_organization_user", NewOrganizationUserDataSource(), "additional_roles"},
+		{"anyscale_iam_organization_users", NewOrganizationUsersDataSource(), "users.permission_level"},
+		{"anyscale_iam_organization_users", NewOrganizationUsersDataSource(), "users.base_role"},
+		{"anyscale_iam_organization_users", NewOrganizationUsersDataSource(), "users.additional_roles"},
 		{"anyscale_user", NewUserDataSource(), "organization_permission_level"},
 	} {
 		expectDeprecated(t, "data."+tc.name+"."+tc.path, dataSourceAttr(t, dataSourceSchema(t, tc.ds), tc.path))
@@ -114,10 +114,10 @@ func TestLegacyRBACDeprecation_Negative(t *testing.T) {
 	notDeprecated("anyscale_cloud.lineage_tracking_enabled", resourceAttr(t, cloud, "lineage_tracking_enabled"))
 
 	for name, r := range map[string]resource.Resource{
-		"anyscale_organization_user":       NewOrganizationUserResource(),
-		"anyscale_organization_invitation": NewOrganizationInvitationResource(),
-		"anyscale_iam_user_group":          NewIAMUserGroupResource(),
-		"anyscale_iam_user_group_members":  NewIAMUserGroupMembersResource(),
+		"anyscale_iam_organization_user":       NewOrganizationUserResource(),
+		"anyscale_iam_organization_invitation": NewOrganizationInvitationResource(),
+		"anyscale_iam_user_group":              NewIAMUserGroupResource(),
+		"anyscale_iam_user_group_members":      NewIAMUserGroupMembersResource(),
 	} {
 		s := resourceSchema(t, r)
 		notDeprecated(name, s)

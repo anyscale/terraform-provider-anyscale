@@ -79,12 +79,18 @@ type OrganizationUserResourceModel struct {
 
 // Metadata returns the resource type name.
 func (r *OrganizationUserResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_organization_user"
+	resp.TypeName = req.ProviderTypeName + "_iam_organization_user"
 }
 
 // Schema defines the schema for the resource.
 func (r *OrganizationUserResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
-	resp.Schema = schema.Schema{
+	resp.Schema = organizationUserSchemaV1()
+}
+
+// organizationUserSchemaV1() returns the current schema so StateMover can declare it as a
+// SourceSchema without duplicating the literal.
+func organizationUserSchemaV1() schema.Schema {
+	return schema.Schema{
 		// v1: re-keyed from identity_id to email. See
 		// resource_organization_user_upgrade.go for the migration and why it is
 		// required rather than cosmetic.
@@ -93,7 +99,7 @@ func (r *OrganizationUserResource) Schema(ctx context.Context, req resource.Sche
 		MarkdownDescription: "Declares that a person **should have access** to the Anyscale organization, keyed by email. " +
 			"If they are already a member, this adopts them with no API call or email, so it is safe to declare people who joined before Terraform. " +
 			"Otherwise it sends an invitation.\n\n" +
-			"~> **A successful apply means access was requested, not granted.** The person must accept the emailed link before they have access; read the `anyscale_organization_user` data source to see where they are.\n\n" +
+			"~> **A successful apply means access was requested, not granted.** The person must accept the emailed link before they have access; read the `anyscale_iam_organization_user` data source to see where they are.\n\n" +
 			"Destroying this resource cancels only a still-pending invitation it sent; it never removes a member. " +
 			"Invitation rate limits, single sign-on, and directory-sync restrictions are in the [RBAC guide](../guides/rbac.md#inviting-people-limits-single-sign-on-directory-sync). " +
 			"Roles are managed separately by `anyscale_organization_user_role`; see the [RBAC guide](../guides/rbac.md) for how access control is split across organizations, clouds, and projects.",
@@ -107,7 +113,7 @@ func (r *OrganizationUserResource) Schema(ctx context.Context, req resource.Sche
 				// and neither exists before the person accepts. Email is the only value that
 				// is stable across the whole lifecycle - before the invitation, while it is
 				// pending, and after they join.
-				MarkdownDescription: "The member's email address, same value as `email`. Not the `id` of the `anyscale_organization_user` data source, which is the identity ID; pass that data source's `email` to this resource instead.",
+				MarkdownDescription: "The member's email address, same value as `email`. Not the `id` of the `anyscale_iam_organization_user` data source, which is the identity ID; pass that data source's `email` to this resource instead.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -279,7 +285,7 @@ func (r *OrganizationUserResource) Create(ctx context.Context, req resource.Crea
 		"email_domain": getEmailDomain(email),
 	})
 
-	// Shared with anyscale_organization_invitation: both resources POST to the
+	// Shared with anyscale_iam_organization_invitation: both resources POST to the
 	// same endpoint, so the SSO guard lives in one place rather than being added
 	// to whichever call site someone happens to be looking at.
 	invitation, err := createOrganizationInvitation(ctx, r.client, email, &resp.Diagnostics)
@@ -727,7 +733,7 @@ func (r *OrganizationUserResource) Update(ctx context.Context, req resource.Upda
 		return
 	}
 
-	tflog.Debug(ctx, "Update is a no-op for anyscale_organization_user", map[string]any{
+	tflog.Debug(ctx, "Update is a no-op for anyscale_iam_organization_user", map[string]any{
 		"email_domain": getEmailDomain(plan.Email.ValueString()),
 	})
 
@@ -796,7 +802,7 @@ func (r *OrganizationUserResource) deleteMembership(
 				"Organization Invitation Left Standing",
 				fmt.Sprintf("%s has a pending invitation that this resource adopted rather than sent, so destroying "+
 					"this resource did not cancel it - they can still accept it. Destroy the "+
-					"anyscale_organization_invitation that owns it, or invalidate it from the Anyscale console, if "+
+					"anyscale_iam_organization_invitation that owns it, or invalidate it from the Anyscale console, if "+
 					"it should not stand.", email),
 			)
 			return
@@ -897,7 +903,7 @@ func (r *OrganizationUserResource) deleteInvitedMembership(
 // the very next plan want to replace the resource. Create and Read follow the
 // same rule; all three paths must agree, or a plan modifier ends up papering
 // over the disagreement (which is exactly what happened on
-// anyscale_organization_invitation, where ImportState writes the API's casing
+// anyscale_iam_organization_invitation, where ImportState writes the API's casing
 // and only caseInsensitiveEmailPlanModifier keeps it from replacing).
 //
 // The private-state marker is written HERE rather than left to Read's self-heal:
@@ -910,7 +916,7 @@ func (r *OrganizationUserResource) ImportState(ctx context.Context, req resource
 		resp.Diagnostics.AddError(
 			"Invalid Import ID",
 			"Expected the email address of an organization member or invitee, for example:\n"+
-				"  terraform import anyscale_organization_user.example user@example.com",
+				"  terraform import anyscale_iam_organization_user.example user@example.com",
 		)
 		return
 	}
@@ -923,7 +929,7 @@ func (r *OrganizationUserResource) ImportState(ctx context.Context, req resource
 		resp.Diagnostics.AddError(
 			"Invalid Import ID",
 			fmt.Sprintf("%sThis resource's import argument is now an EMAIL ADDRESS, not an identity ID.\n\n"+
-				"  terraform import anyscale_organization_user.example user@example.com\n\n"+
+				"  terraform import anyscale_iam_organization_user.example user@example.com\n\n"+
 				"The resource was re-keyed to email because identity_id and user_id only exist once someone has "+
 				"accepted an invitation, while email identifies the same person before, during and after that. "+
 				"identity_id is still available as a read-only attribute.", looksLikeIdentity),
@@ -976,7 +982,7 @@ func (r *OrganizationUserResource) ImportState(ctx context.Context, req resource
 			resp.Diagnostics.AddError(
 				"Organization User Not Found",
 				fmt.Sprintf("No organization member and no pending invitation found for %q.\n\nUse the "+
-					"anyscale_organization_users data source to list members and their email addresses. If this "+
+					"anyscale_iam_organization_users data source to list members and their email addresses. If this "+
 					"person was invited and the invitation has since expired, there is nothing to import - declare "+
 					"the resource and apply to invite them again.", email),
 			)

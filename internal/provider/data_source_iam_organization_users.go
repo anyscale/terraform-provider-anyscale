@@ -55,7 +55,7 @@ type OrganizationUserModel struct {
 
 // Metadata returns the data source type name.
 func (d *OrganizationUsersDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_organization_users"
+	resp.TypeName = req.ProviderTypeName + "_iam_organization_users"
 }
 
 // Schema defines the data source schema.
@@ -75,7 +75,7 @@ func (d *OrganizationUsersDataSource) Schema(ctx context.Context, req datasource
 	}
 
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Use this data source to retrieve a list of all users (including service accounts) in your organization. Useful for auditing organization membership, resolving emails before importing `anyscale_organization_user` resources, or filtering users by email or account type.\n\n" +
+		MarkdownDescription: "Use this data source to retrieve a list of all users (including service accounts) in your organization. Useful for auditing organization membership, resolving emails before importing `anyscale_iam_organization_user` resources, or filtering users by email or account type.\n\n" +
 			"The role attributes (`permission_level`, `base_role`, `additional_roles`) are deprecated: in an organization converted to role bindings they report access from before conversion. See " + legacyRBACGuideLink + ".",
 
 		Attributes: map[string]schema.Attribute{

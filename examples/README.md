@@ -137,7 +137,7 @@ Cloud B is a simpler all-in-one VM cloud. Compute configs (including one that ta
 deployment specifically via `cloud_resource`), container images, and two projects sit on top, and
 all 13 registered data sources — `anyscale_cloud`, `anyscale_clouds`, `anyscale_compute_config`,
 `anyscale_container_image`, `anyscale_container_images`, `anyscale_project`, `anyscale_projects`,
-`anyscale_user`, `anyscale_organization`, `anyscale_organization_user`, `anyscale_organization_users`,
+`anyscale_user`, `anyscale_organization`, `anyscale_iam_organization_user`, `anyscale_iam_organization_users`,
 `anyscale_services`, `anyscale_service` — read back what those resources just created.
 
 > [!WARNING]
@@ -159,7 +159,7 @@ you haven't used yet.
   multi-resource cloud, instead of always landing on the primary
 - The attribute-reference dependency ordering a data source needs to safely read back a resource
   created earlier in the same apply, instead of 404ing on a first apply
-- Why `anyscale_organization_user` (shown commented out; adopts an existing member, never
+- Why `anyscale_iam_organization_user` (shown commented out; adopts an existing member, never
   applied here without one) and the `anyscale_service` resource (deliberately not declared here -
   see the kitchen-sink README) are called out explicitly rather than silently applied, and why
   the invitation email and existing-service lookup are both opt-in variables rather than forced
@@ -200,7 +200,7 @@ Examples demonstrating how to use Anyscale data sources to look up existing reso
 - Using `anyscale_compute_config` data source
 - Using `anyscale_container_image` and `anyscale_container_images` data sources
 - Using `anyscale_project` and `anyscale_projects` data sources
-- Using `anyscale_organization`, `anyscale_organization_user`, and `anyscale_organization_users` data sources
+- Using `anyscale_organization`, `anyscale_iam_organization_user`, and `anyscale_iam_organization_users` data sources
 - Using `anyscale_user` data source
 
 See the [data-sources README](./data-sources/README.md) for detailed documentation.
@@ -243,9 +243,9 @@ Minimal example showing just the `anyscale_project` resource configuration.
 
 **Use this when**: You want a simple, focused example of the `anyscale_project` resource.
 
-#### [resources/anyscale_organization_user](./resources/anyscale_organization_user/)
+#### [resources/anyscale_iam_organization_user](./resources/anyscale_iam_organization_user/)
 
-Minimal example showing the `anyscale_organization_user` resource, which manages organization
+Minimal example showing the `anyscale_iam_organization_user` resource, which manages organization
 membership - declaring it with an existing member's email adopts them directly, no import
 required.
 
@@ -253,16 +253,16 @@ required.
 example, to guard them with `prevent_destroy`, or to pair with `anyscale_organization_user_role`
 for role management).
 
-#### [resources/anyscale_organization_invitation](./resources/anyscale_organization_invitation/)
+#### [resources/anyscale_iam_organization_invitation](./resources/anyscale_iam_organization_invitation/)
 
-Minimal example showing just the `anyscale_organization_invitation` resource configuration.
+Minimal example showing just the `anyscale_iam_organization_invitation` resource configuration.
 
 **Use this when**: You want to invite a new member to your Anyscale organization via Terraform.
 
 #### [resources/organization_user_workflow](./resources/organization_user_workflow/)
 
 A walkthrough (not a single-shot apply) chaining invite → wait for acceptance → import → manage,
-since `anyscale_organization_user` only supports import and the wait between invite and
+since `anyscale_iam_organization_user` only supports import and the wait between invite and
 acceptance happens outside Terraform entirely.
 
 **Use this when**: You want to see how the invitation and collaborator resources fit together

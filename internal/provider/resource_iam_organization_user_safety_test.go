@@ -16,7 +16,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// These cover the two SAFETY properties of anyscale_organization_user, as
+// These cover the two SAFETY properties of anyscale_iam_organization_user, as
 // distinct from its happy paths: destroy must never remove a human, and
 // declaring somebody who is already a member must not mail them.
 //

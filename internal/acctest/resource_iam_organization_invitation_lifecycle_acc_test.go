@@ -184,23 +184,23 @@ func (s *mockInvitationServer) snapshot(id string) (mockInvitation, bool) {
 	return *inv, true
 }
 
-// TestAccOrganizationInvitationResource_Lifecycle_MockServer is the contract's T1/AC
+// TestAccIAMOrganizationInvitationResource_Lifecycle_MockServer is the contract's T1/AC
 // mandatory CI-enforced lifecycle test (section 7): Create -> Read -> RequiresReplace on
 // email change -> Delete/invalidate -> Import, all against a scripted mock, no env-var
 // gating, no real invitation sent. Uses a case-stable mock (lowercaseEmail: false) to keep
 // this test focused on general lifecycle correctness - the email-casing defect has its own
-// dedicated regression test above (TestAccOrganizationInvitationResource_MixedCaseEmail_MockServer).
-func TestAccOrganizationInvitationResource_Lifecycle_MockServer(t *testing.T) {
+// dedicated regression test above (TestAccIAMOrganizationInvitationResource_MixedCaseEmail_MockServer).
+func TestAccIAMOrganizationInvitationResource_Lifecycle_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	httpServer, server := newMockInvitationServer(t, false)
 	const email1 = "lifecycle-test-1@example.com"
 	const email2 = "lifecycle-test-2@example.com"
-	const resourceAddr = "anyscale_organization_invitation.test"
+	const resourceAddr = "anyscale_iam_organization_invitation.test"
 
 	configFor := func(email string) string {
 		return testAccProviderBlock(httpServer.URL) + fmt.Sprintf(`
-resource "anyscale_organization_invitation" "test" {
+resource "anyscale_iam_organization_invitation" "test" {
   email = %[1]q
 }
 `, email)
@@ -329,7 +329,7 @@ resource "anyscale_organization_invitation" "test" {
 	}
 }
 
-// TestAccOrganizationInvitationResource_MixedCaseEmail_MockServer resolves contract open
+// TestAccIAMOrganizationInvitationResource_MixedCaseEmail_MockServer resolves contract open
 // item I-OPEN empirically. Traced against the real backend (organization_invitations_dao.py):
 // create_invitation INSERTs invitation["email"].lower() unconditionally, and find_invitation
 // queries WHERE LOWER(email) = LOWER($1) - the stored email is ALWAYS lowercase regardless of
@@ -339,14 +339,14 @@ resource "anyscale_organization_invitation" "test" {
 // apply-consistency check should catch it - this test proves whether that actually happens,
 // using a mock that mirrors the real backend's forced-lowercase behavior, so no real invitation
 // email is sent and no rate-limit quota is spent to find out.
-func TestAccOrganizationInvitationResource_MixedCaseEmail_MockServer(t *testing.T) {
+func TestAccIAMOrganizationInvitationResource_MixedCaseEmail_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	httpServer, _ := newMockInvitationServer(t, true /* lowercaseEmail: mirrors the real backend */)
 	const mixedCaseEmail = "Mixed.Case+Invite@Example.COM"
 
 	config := testAccProviderBlock(httpServer.URL) + fmt.Sprintf(`
-resource "anyscale_organization_invitation" "test" {
+resource "anyscale_iam_organization_invitation" "test" {
   email = %[1]q
 }
 `, mixedCaseEmail)
@@ -356,7 +356,7 @@ resource "anyscale_organization_invitation" "test" {
 		Steps: []resource.TestStep{
 			{
 				Config: config,
-				Check:  resource.TestCheckResourceAttr("anyscale_organization_invitation.test", "email", mixedCaseEmail),
+				Check:  resource.TestCheckResourceAttr("anyscale_iam_organization_invitation.test", "email", mixedCaseEmail),
 			},
 		},
 	})
@@ -369,7 +369,7 @@ resource "anyscale_organization_invitation" "test" {
 	// the configured value and the backend's lowercasing never meets it in a plan.
 	// That is why this test passes, and it is why this test alone cannot exercise
 	// the modifier's interesting branch - see
-	// TestAccOrganizationInvitationResourceCaseOnlyEmailChange below, which is the
+	// TestAccIAMOrganizationInvitationResourceCaseOnlyEmailChange below, which is the
 	// companion this comment used to promise and which did not previously exist.
 	//
 	// If this test ever starts failing with "Provider produced inconsistent result
@@ -377,7 +377,7 @@ resource "anyscale_organization_invitation" "test" {
 	// configured casing - do not silence it without understanding why first.
 }
 
-// TestAccOrganizationInvitationResourceCaseOnlyEmailChange covers the branch the
+// TestAccIAMOrganizationInvitationResourceCaseOnlyEmailChange covers the branch the
 // test above structurally cannot reach: an email edit that changes ONLY letter
 // case, on an invitation that already exists.
 //
@@ -401,7 +401,7 @@ resource "anyscale_organization_invitation" "test" {
 // case-only edit, state legitimately keeps the ORIGINAL casing and does not adopt
 // the newly-typed casing - confirmed by real plan/apply, not inferred from the
 // framework source.
-func TestAccOrganizationInvitationResourceCaseOnlyEmailChange(t *testing.T) {
+func TestAccIAMOrganizationInvitationResourceCaseOnlyEmailChange(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	httpServer, mock := newMockInvitationServer(t, true /* lowercaseEmail: mirrors the real backend */)
@@ -411,13 +411,13 @@ func TestAccOrganizationInvitationResourceCaseOnlyEmailChange(t *testing.T) {
 
 	config := func(email string) string {
 		return testAccProviderBlock(httpServer.URL) + fmt.Sprintf(`
-resource "anyscale_organization_invitation" "test" {
+resource "anyscale_iam_organization_invitation" "test" {
   email = %[1]q
 }
 `, email)
 	}
 
-	const resourceName = "anyscale_organization_invitation.test"
+	const resourceName = "anyscale_iam_organization_invitation.test"
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,

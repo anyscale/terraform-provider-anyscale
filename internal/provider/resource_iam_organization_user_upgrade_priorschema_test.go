@@ -15,7 +15,7 @@ import (
 // upgrader's frozen PriorSchema describes the one that was never released.
 //
 // PR #228 removed permission_level, base_role and additional_roles from
-// anyscale_organization_user WITHOUT bumping Version. So:
+// anyscale_iam_organization_user WITHOUT bumping Version. So:
 //
 //	pre-#228  (v0.24.0, v0.24.1 - REAL, PUBLISHED TAGS): EIGHT attributes
 //	          id, permission_level, email, user_id, name, created_at,

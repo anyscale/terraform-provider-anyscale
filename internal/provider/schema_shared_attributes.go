@@ -140,8 +140,8 @@ func containerImageSharedAttributes() map[string]schema.Attribute {
 	}
 }
 
-// organizationUserSharedAttributes returns the anyscale_organization_user /
-// anyscale_organization_users attributes that are identical in name, type, and
+// organizationUserSharedAttributes returns the anyscale_iam_organization_user /
+// anyscale_iam_organization_users attributes that are identical in name, type, and
 // MarkdownDescription on both sides. Called directly by the singular data source and wrapped
 // inside the plural's per-item NestedObject.
 //

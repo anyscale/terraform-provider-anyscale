@@ -80,7 +80,7 @@ func (d *IAMUserGroupDataSource) Schema(ctx context.Context, req datasource.Sche
 					Attributes: map[string]schema.Attribute{
 						"user_id": schema.StringAttribute{
 							Computed:            true,
-							MarkdownDescription: "The member's user ID (`usr_...`), the `user_id` of `anyscale_organization_user`.",
+							MarkdownDescription: "The member's user ID (`usr_...`), the `user_id` of `anyscale_iam_organization_user`.",
 						},
 						"email": schema.StringAttribute{
 							Computed:            true,

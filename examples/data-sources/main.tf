@@ -291,16 +291,16 @@ output "organization_default_cloud_id" {
 # Example 18: List all users in the organization. Not related to SCIM
 # (this provider has no SCIM integration) - this simply lists
 # organization membership via the API.
-data "anyscale_organization_users" "all" {
+data "anyscale_iam_organization_users" "all" {
 }
 
 output "organization_users_count" {
-  value       = length(data.anyscale_organization_users.all.users)
+  value       = length(data.anyscale_iam_organization_users.all.users)
   description = "Total number of users in the organization"
 }
 
 output "organization_users_list" {
-  value = [for u in data.anyscale_organization_users.all.users : {
+  value = [for u in data.anyscale_iam_organization_users.all.users : {
     name  = u.name
     email = u.email
     # base_role is the current source of role information;
@@ -312,53 +312,53 @@ output "organization_users_list" {
 }
 
 # Example 19: Look up a specific user by email
-data "anyscale_organization_user" "specific" {
+data "anyscale_iam_organization_user" "specific" {
   email = "admin@example.com"
 }
 
 output "specific_user_id" {
-  value       = data.anyscale_organization_user.specific.id
+  value       = data.anyscale_iam_organization_user.specific.id
   description = "The identity ID of the specific user"
 }
 
 # Example 20: Look up a specific user by ID
-data "anyscale_organization_user" "by_id" {
+data "anyscale_iam_organization_user" "by_id" {
   id = "usr_abc123xyz"
 }
 
 output "user_by_id_email" {
-  value       = data.anyscale_organization_user.by_id.email
+  value       = data.anyscale_iam_organization_user.by_id.email
   description = "The email of the user looked up by identity ID"
 }
 
 # Example 21: Look up a specific user by user_id
-data "anyscale_organization_user" "by_user_id" {
+data "anyscale_iam_organization_user" "by_user_id" {
   user_id = "usr_xyz789abc"
 }
 
 output "user_by_user_id_email" {
-  value       = data.anyscale_organization_user.by_user_id.email
+  value       = data.anyscale_iam_organization_user.by_user_id.email
   description = "The email of the user looked up by user_id"
 }
 
 # Example 22: Filter organization users by email
-data "anyscale_organization_users" "filtered" {
+data "anyscale_iam_organization_users" "filtered" {
   email = "admin@example.com"
 }
 
 output "filtered_users_count" {
-  value       = length(data.anyscale_organization_users.filtered.users)
+  value       = length(data.anyscale_iam_organization_users.filtered.users)
   description = "Number of users matching the email filter"
 }
 
 # Example 23: Get service accounts only
-data "anyscale_organization_users" "service_accounts" {
+data "anyscale_iam_organization_users" "service_accounts" {
   is_service_account = true
 }
 
 output "service_accounts_count" {
   value = length(
-    data.anyscale_organization_users.service_accounts.users
+    data.anyscale_iam_organization_users.service_accounts.users
   )
   description = "Number of service accounts in the organization"
 }

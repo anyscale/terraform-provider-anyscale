@@ -52,17 +52,23 @@ type OrganizationInvitationResourceModel struct {
 
 // Metadata returns the resource type name.
 func (r *OrganizationInvitationResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_organization_invitation"
+	resp.TypeName = req.ProviderTypeName + "_iam_organization_invitation"
 }
 
 // Schema defines the schema for the resource.
 func (r *OrganizationInvitationResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
-	resp.Schema = schema.Schema{
+	resp.Schema = organizationInvitationSchema()
+}
+
+// organizationInvitationSchema() returns the current schema so StateMover can declare it as a
+// SourceSchema without duplicating the literal.
+func organizationInvitationSchema() schema.Schema {
+	return schema.Schema{
 		MarkdownDescription: "Sends an email invitation to join the organization. " +
-			"Once the recipient accepts, they are a member with default collaborator permissions; manage them with `anyscale_organization_user` and their role with `anyscale_organization_user_role`. " +
+			"Once the recipient accepts, they are a member with default collaborator permissions; manage them with `anyscale_iam_organization_user` and their role with `anyscale_organization_user_role`. " +
 			"An accepted invitation is a harmless record whose `status` reads `accepted`, so there is no need to remove it from your configuration.\n\n" +
-			"~> **Destroying a pending invitation revokes it; destroying an accepted one does nothing to the member.** To remove a member's access, destroy their `anyscale_organization_user` resource instead. " +
-			"Inviting an existing member fails and points you to `anyscale_organization_user`.\n\n" +
+			"~> **Destroying a pending invitation revokes it; destroying an accepted one does nothing to the member.** To remove a member's access, destroy their `anyscale_iam_organization_user` resource instead. " +
+			"Inviting an existing member fails and points you to `anyscale_iam_organization_user`.\n\n" +
 			"Re-invitation, rate limits, single sign-on, and directory-sync restrictions are in the [RBAC guide](../guides/rbac.md#inviting-people-limits-single-sign-on-directory-sync).",
 
 		Attributes: map[string]schema.Attribute{
@@ -146,7 +152,7 @@ func (r *OrganizationInvitationResource) Create(ctx context.Context, req resourc
 		"email_domain": getEmailDomain(plan.Email.ValueString()),
 	})
 
-	// Shared with anyscale_organization_user, which POSTs to this same endpoint.
+	// Shared with anyscale_iam_organization_user, which POSTs to this same endpoint.
 	// The SSO guard lives in that helper so it cannot be present on one call site
 	// and missing on the other. The API only returns the invitation ID here; full
 	// details are fetched separately below via getInvitationByID.
@@ -156,7 +162,7 @@ func (r *OrganizationInvitationResource) Create(ctx context.Context, req resourc
 		if strings.Contains(detail, "already a member of your organization") {
 			resp.Diagnostics.AddError(
 				"Email Already Belongs to an Organization Member",
-				fmt.Sprintf("%s\n\nLook up their identity_id with the anyscale_organization_user data source and import them as an anyscale_organization_user instead of inviting them again.", detail),
+				fmt.Sprintf("%s\n\nLook up their identity_id with the anyscale_iam_organization_user data source and import them as an anyscale_iam_organization_user instead of inviting them again.", detail),
 			)
 			return
 		}

@@ -158,7 +158,7 @@ func (r *IAMRoleGrantResource) Schema(ctx context.Context, req resource.SchemaRe
 			},
 			"user_id": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "The user that holds the role (`usr_...`); look up an organization member by email with the `anyscale_organization_user` data source. Service accounts are users too (`usr_...`). Specify exactly one of `user_group_id` or `user_id`. Changing it replaces the binding.",
+				MarkdownDescription: "The user that holds the role (`usr_...`); look up an organization member by email with the `anyscale_iam_organization_user` data source. Service accounts are users too (`usr_...`). Specify exactly one of `user_group_id` or `user_id`. Changing it replaces the binding.",
 				PlanModifiers:       replace,
 				Validators:          []validator.String{stringvalidator.LengthAtLeast(1)},
 			},

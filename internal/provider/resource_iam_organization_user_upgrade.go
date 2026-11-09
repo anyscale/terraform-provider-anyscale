@@ -14,7 +14,7 @@ import (
 var _ resource.ResourceWithUpgradeState = &OrganizationUserResource{}
 
 // UpgradeState implements the v0 -> v1 migration for the v0.25.0 re-key of
-// anyscale_organization_user from identity_id to email.
+// anyscale_iam_organization_user from identity_id to email.
 //
 // WHAT MOVES. Under v0, `id` held the identity_id. Under v1 it holds the
 // email, because identity_id and user_id are two different backend identifiers

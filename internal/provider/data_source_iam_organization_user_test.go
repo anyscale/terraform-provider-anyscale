@@ -166,7 +166,7 @@ func TestOrganizationCollaboratorToUserModel_NonNullName(t *testing.T) {
 }
 
 // TestOrganizationUsersDataSource_PagesBeyondFirstPage is a regression test
-// for the plural anyscale_organization_users data source, which used to
+// for the plural anyscale_iam_organization_users data source, which used to
 // silently truncate its result list at the first page.
 func TestOrganizationUsersDataSource_PagesBeyondFirstPage(t *testing.T) {
 	requestCount := 0

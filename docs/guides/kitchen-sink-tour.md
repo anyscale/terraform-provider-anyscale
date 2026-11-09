@@ -10,7 +10,7 @@ description: |-
 [`examples/kitchen-sink`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/kitchen-sink)
 wires a representative subset of this provider's resources and data sources into one configuration.
 It covers a running `anyscale_service` and `anyscale_cloud_iam_mapping`;
-`anyscale_system_cluster` and org-wide pieces (`anyscale_organization_user`, user groups, role bindings) are off by default behind
+`anyscale_system_cluster` and org-wide pieces (`anyscale_iam_organization_user`, user groups, role bindings) are off by default behind
 variables. It leaves out `anyscale_scheduler_config`, `anyscale_organization_default_cloud` and the
 legacy access model (`anyscale_cloud_access`, `anyscale_organization_user_role`) because they are
 org-wide or deprecated; see the example's README for each reason.
@@ -120,14 +120,14 @@ away from a 404.
   `anyscale_container_image_registry` (registered from a public registry), the two ways to get an
   image into Anyscale. See the [Container Images guide](./container-images.md).
 - **Projects and org resources** - one project per cloud, plus
-  `anyscale_organization_user`, user groups and role bindings, each off by default behind a variable
-  (`org_user_email`, `enable_user_groups`, `enable_role_binding`); `anyscale_organization_user` adopts an
+  `anyscale_iam_organization_user`, user groups and role bindings, each off by default behind a variable
+  (`org_user_email`, `enable_user_groups`, `enable_role_binding`); `anyscale_iam_organization_user` adopts an
   existing member (a new address gets a real invitation); see
   [`organization_user_workflow`](https://github.com/anyscale/terraform-provider-anyscale/blob/main/examples/resources/organization_user_workflow/main.tf)
   for the invite -> adopt flow.
 - **Most data sources**, in one file, including the two zero-argument connection-level singletons,
   `anyscale_user` and `anyscale_organization`, which depend on nothing else in the config.
-- **The `anyscale_organization_invitation` resource is opt-in**: set `invite_email` to actually send
+- **The `anyscale_iam_organization_invitation` resource is opt-in**: set `invite_email` to actually send
   one. A fresh `terraform apply` with it unset creates zero instances.
 
 ## Known limitations worth knowing before you extend this

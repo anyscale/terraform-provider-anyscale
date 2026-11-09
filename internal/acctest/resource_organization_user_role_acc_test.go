@@ -23,7 +23,7 @@ import (
 // the real resource code, no real infra.
 //
 // Mirrors the list-hardcodes-empty / singular-has-real-value asymmetry the
-// shipped anyscale_organization_user resource already depends on
+// shipped anyscale_iam_organization_user resource already depends on
 // (findOrgCollaboratorByEmail always re-reads the singular path) - the list
 // handler below deliberately does NOT report additionalRoles, so a test that
 // accidentally reads roles off the list would see a false empty instead of
@@ -120,12 +120,12 @@ func (s *mockOrgUserRoleServer) handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// TestAccOrganizationUserRoleResource_DenyRolesOmittedPlanStability proves
+// TestAccIAMOrganizationUserRoleResource_DenyRolesOmittedPlanStability proves
 // that omitting deny_roles from config after it was previously declared
 // produces an empty plan rather than a perpetual "known after apply" - the
 // behavior deny_roles' Optional+Computed shape with
 // listplanmodifier.UseStateForUnknown exists to give.
-func TestAccOrganizationUserRoleResource_DenyRolesOmittedPlanStability(t *testing.T) {
+func TestAccIAMOrganizationUserRoleResource_DenyRolesOmittedPlanStability(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	httpServer, mock := newMockOrgUserRoleServer(t)
@@ -193,11 +193,11 @@ resource "anyscale_organization_user_role" "mock" {
 	})
 }
 
-// TestAccOrganizationUserRoleResource_DenyRolesExplicitEmptyPlanStability
+// TestAccIAMOrganizationUserRoleResource_DenyRolesExplicitEmptyPlanStability
 // covers the second half of the request: explicit deny_roles = [] must
 // also be stable across a re-plan, and must remain distinct from the omitted
 // case above rather than collapsing into it.
-func TestAccOrganizationUserRoleResource_DenyRolesExplicitEmptyPlanStability(t *testing.T) {
+func TestAccIAMOrganizationUserRoleResource_DenyRolesExplicitEmptyPlanStability(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	httpServer, mock := newMockOrgUserRoleServer(t)
@@ -262,13 +262,13 @@ func (s *mockOrgUserRoleServer) pathCounts() (legacy, roles int) {
 	return s.legacyWrites, s.rolesWrites
 }
 
-// TestAccOrganizationUserRoleResource_DestroyClearsDeclaredDenyRolesLeavesBaseRole
+// TestAccIAMOrganizationUserRoleResource_DestroyClearsDeclaredDenyRolesLeavesBaseRole
 // covers the DECLARED branch of Delete: when deny_roles was declared, destroy clears
 // it to empty via one PUT that sends the CURRENT base_role back unchanged
 // (that endpoint is a SET over the pair), but base_role itself is left in
 // place - an owner's role resource does not get demoted to collaborator on
 // destroy, only their deny roles are cleared.
-func TestAccOrganizationUserRoleResource_DestroyClearsDeclaredDenyRolesLeavesBaseRole(t *testing.T) {
+func TestAccIAMOrganizationUserRoleResource_DestroyClearsDeclaredDenyRolesLeavesBaseRole(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	httpServer, mock := newMockOrgUserRoleServer(t)
@@ -308,7 +308,7 @@ resource "anyscale_organization_user_role" "mock" {
 	}
 }
 
-// TestAccOrganizationUserRoleResource_DestroyLeavesOmittedDenyRolesUntouched
+// TestAccIAMOrganizationUserRoleResource_DestroyLeavesOmittedDenyRolesUntouched
 // covers the OMITTED branch of Delete: when deny_roles was never declared,
 // this resource never took authority over it, so destroy must make NO API
 // call that could touch it - not even a value-preserving one. Asserted by a
@@ -323,7 +323,7 @@ resource "anyscale_organization_user_role" "mock" {
 // (denyRolesDeclaredInConfig) and persist it to private state
 // (recordDenyRolesDeclared), which Delete reads back via
 // denyRolesWereDeclared. Basing the check on state instead fails this test.
-func TestAccOrganizationUserRoleResource_DestroyLeavesOmittedDenyRolesUntouched(t *testing.T) {
+func TestAccIAMOrganizationUserRoleResource_DestroyLeavesOmittedDenyRolesUntouched(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	httpServer, mock := newMockOrgUserRoleServer(t)
@@ -369,13 +369,13 @@ resource "anyscale_organization_user_role" "mock" {
 	}
 }
 
-// TestAccOrganizationUserRoleResource_UpdateOmittedDenyRolesKeepsThemViaRolesAPI
+// TestAccIAMOrganizationUserRoleResource_UpdateOmittedDenyRolesKeepsThemViaRolesAPI
 // guards that a base_role-only Update, with deny_roles omitted, writes through
 // the roles API (so SpiceDB moves with the base role) and sends the member's
 // current deny roles back unchanged, never the legacy Postgres-only endpoint.
 // The call counts distinguish the two paths: a value-preserving write through
 // the wrong endpoint would pass a value-only check.
-func TestAccOrganizationUserRoleResource_UpdateOmittedDenyRolesKeepsThemViaRolesAPI(t *testing.T) {
+func TestAccIAMOrganizationUserRoleResource_UpdateOmittedDenyRolesKeepsThemViaRolesAPI(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	httpServer, mock := newMockOrgUserRoleServer(t)
@@ -437,13 +437,13 @@ resource "anyscale_organization_user_role" "mock" {
 	}
 }
 
-// TestAccOrganizationUserRoleResource_DestroyClearAuthoritySurvivesRefresh
+// TestAccIAMOrganizationUserRoleResource_DestroyClearAuthoritySurvivesRefresh
 // proves the declared-vs-omitted authority signal survives an intervening
 // Read (refresh), not just immediately after Create. If private state were
 // dropped on refresh, Delete would silently fall back to NOT clearing
 // declared deny_roles - the declared branch failing in the other direction,
 // invisible to a test that destroys right after Create.
-func TestAccOrganizationUserRoleResource_DestroyClearAuthoritySurvivesRefresh(t *testing.T) {
+func TestAccIAMOrganizationUserRoleResource_DestroyClearAuthoritySurvivesRefresh(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	httpServer, mock := newMockOrgUserRoleServer(t)
@@ -536,7 +536,7 @@ func (s *mockOrgUserRoleFlakyServer) handleFlaky(w http.ResponseWriter, r *http.
 	s.handle(w, r)
 }
 
-// TestAccOrganizationUserRoleResource_NonNotFoundReadErrorLeavesResourceInState
+// TestAccIAMOrganizationUserRoleResource_NonNotFoundReadErrorLeavesResourceInState
 // proves that a 500 (or any non-404) from Read's underlying list call must
 // produce a real Terraform error, and the resource must remain recoverable
 // in state afterward - not be silently dropped the way a
@@ -549,7 +549,7 @@ func (s *mockOrgUserRoleFlakyServer) handleFlaky(w http.ResponseWriter, r *http.
 // healthy again, succeeding with a clean plan against the SAME resource
 // rather than a fresh create - which is what a wrongly-executed
 // RemoveResource would have forced instead.
-func TestAccOrganizationUserRoleResource_NonNotFoundReadErrorLeavesResourceInState(t *testing.T) {
+func TestAccIAMOrganizationUserRoleResource_NonNotFoundReadErrorLeavesResourceInState(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	httpServer, mock := newMockOrgUserRoleFlakyServer(t, 3)
@@ -589,7 +589,7 @@ resource "anyscale_organization_user_role" "mock" {
 	})
 }
 
-// TestAccOrganizationUserRoleResource_ImportRecoversBaseRoleAndDenyRoles
+// TestAccIAMOrganizationUserRoleResource_ImportRecoversBaseRoleAndDenyRoles
 // covers `terraform import <email>` end to end.
 //
 // What this test can and cannot prove, verified directly rather than assumed:
@@ -606,7 +606,7 @@ resource "anyscale_organization_user_role" "mock" {
 // ImportStateVerify's comparison against Create's own state all actually
 // work for this resource, none of which a unit test calling ImportState
 // directly would exercise.
-func TestAccOrganizationUserRoleResource_ImportRecoversBaseRoleAndDenyRoles(t *testing.T) {
+func TestAccIAMOrganizationUserRoleResource_ImportRecoversBaseRoleAndDenyRoles(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	httpServer, mock := newMockOrgUserRoleServer(t)
@@ -660,7 +660,7 @@ resource "anyscale_organization_user_role" "mock" {
 	})
 }
 
-// TestAccOrganizationUserRoleResource_ColdImportThenDestroyLeavesDenyRolesUntouched
+// TestAccIAMOrganizationUserRoleResource_ColdImportThenDestroyLeavesDenyRolesUntouched
 // covers the documented, deliberate consequence of ImportState never writing
 // the orgUserRoleDenyRolesDeclaredKey private-state entry: denyRolesWereDeclared
 // defaults to false when the key is absent, so a resource that was imported and
@@ -669,7 +669,7 @@ resource "anyscale_organization_user_role" "mock" {
 // denyRolesWereDeclared's own comment as the safe direction (under-act, not
 // over-act) but had no test proving it holds through a real import - only
 // through Create, which always does record the key.
-func TestAccOrganizationUserRoleResource_ColdImportThenDestroyLeavesDenyRolesUntouched(t *testing.T) {
+func TestAccIAMOrganizationUserRoleResource_ColdImportThenDestroyLeavesDenyRolesUntouched(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	httpServer, mock := newMockOrgUserRoleServer(t)
@@ -712,7 +712,7 @@ resource "anyscale_organization_user_role" "mock" {
 	}
 }
 
-// TestAccOrganizationUserRoleResource_RefreshDetectsBaseRoleDrift mutates the
+// TestAccIAMOrganizationUserRoleResource_RefreshDetectsBaseRoleDrift mutates the
 // backend out of band and asserts the refresh carries the new base_role into
 // state. Mock-server, not real API: mutating a real backend mid-test means
 // touching a shared disposable identity with no sweeper to restore it, and a
@@ -730,7 +730,7 @@ resource "anyscale_organization_user_role" "mock" {
 // planned AFTER value is "collaborator" whether or not Read actually noticed
 // the drift. Only asserting the plan's BEFORE value is "owner" proves Read
 // carried the real backend value into state ahead of the plan.
-func TestAccOrganizationUserRoleResource_RefreshDetectsBaseRoleDrift(t *testing.T) {
+func TestAccIAMOrganizationUserRoleResource_RefreshDetectsBaseRoleDrift(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	httpServer, mock := newMockOrgUserRoleServer(t)
@@ -779,7 +779,7 @@ resource "anyscale_organization_user_role" "mock" {
 // distinguish "the plan changed this attribute because of real drift" from
 // "the plan is non-empty for an unrelated reason, and this attribute was
 // never actually re-read" - see the comment on
-// TestAccOrganizationUserRoleResource_RefreshDetectsBaseRoleDrift for how
+// TestAccIAMOrganizationUserRoleResource_RefreshDetectsBaseRoleDrift for how
 // that gap was actually caught, not assumed.
 type expectPlanBeforeValue struct {
 	addr string
