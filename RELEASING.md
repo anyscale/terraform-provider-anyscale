@@ -67,6 +67,12 @@ Review the PR like any other change and merge it. Because the entries were each 
 own fragment PR, this review is mostly a sanity check on grouping/wording. See
 [Why the changelog goes through a PR](#why-the-changelog-goes-through-a-pr).
 
+Before merging, confirm the LAST CODE MERGE's CI run on `main` has completed green (both
+acceptance shards). The release gate proves the tested tree from `main` CI runs only, so merging
+the changelog PR while the code merge's CI is still in flight leaves nothing for the gate to
+find at tag time. `ci.yml` no longer cancels in-flight `main` runs, but the run must still exist
+and have finished green before the gate can use it.
+
 ### 2. Tag the release
 Once the changelog PR is merged into `main`:
 ```bash
