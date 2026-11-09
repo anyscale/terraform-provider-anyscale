@@ -160,7 +160,17 @@ func upgradeOrganizationUserStateV0toV1(ctx context.Context, req resource.Upgrad
 		return
 	}
 
-	upgraded := OrganizationUserResourceModel{
+	resp.Diagnostics.Append(resp.State.Set(ctx, organizationUserV1ModelFromV0(v0))...)
+}
+
+// organizationUserV1ModelFromV0 is the single v0 -> v1 re-key, shared by
+// UpgradeState and MoveState so the two paths cannot drift apart.
+//
+// Written as an explicit field-by-field copy so that adding an attribute to
+// OrganizationUserResourceModel later fails to compile here rather than
+// silently upgrading to a zero value.
+func organizationUserV1ModelFromV0(v0 organizationUserResourceModelV0) OrganizationUserResourceModel {
+	return OrganizationUserResourceModel{
 		// The re-key itself. v0's id was the identity_id; v1's is the email.
 		ID:    v0.Email,
 		Email: v0.Email,
@@ -176,6 +186,4 @@ func upgradeOrganizationUserStateV0toV1(ctx context.Context, req resource.Upgrad
 		// declared it, and this upgrader has no business asserting intent.
 		ReinviteIfExpired: types.BoolNull(),
 	}
-
-	resp.Diagnostics.Append(resp.State.Set(ctx, &upgraded)...)
 }
