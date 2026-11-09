@@ -31,7 +31,7 @@ resource "anyscale_organization_user_role" "mock" {
 
 // An email configured with capitals must apply and then plan clean: the API
 // returns it lowercased, and the configured spelling is what state keeps.
-func TestAccIAMOrganizationUserRoleResource_MixedCaseEmailPlansClean(t *testing.T) {
+func TestAccOrganizationUserRoleResource_MixedCaseEmailPlansClean(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	httpServer, _ := newMockOrgUserRoleServer(t)
 	const addr = "anyscale_organization_user_role.mock"
@@ -59,7 +59,7 @@ func TestAccIAMOrganizationUserRoleResource_MixedCaseEmailPlansClean(t *testing.
 // A deny_roles list in non-canonical order must apply and plan clean: the
 // backend returns the set in its own fixed order. Positive control: the same
 // roles in canonical order.
-func TestAccIAMOrganizationUserRoleResource_DenyRolesOrderPlansClean(t *testing.T) {
+func TestAccOrganizationUserRoleResource_DenyRolesOrderPlansClean(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	for name, roles := range map[string]string{
 		"canonical_order_control": `["image_reader", "image_reader_no_base_images"]`,
@@ -85,7 +85,7 @@ func TestAccIAMOrganizationUserRoleResource_DenyRolesOrderPlansClean(t *testing.
 // When the backend's set really differs from the configured one, state takes
 // the backend's value and the next plan shows the drift: only a reordering is
 // kept in the configured order, never a different set.
-func TestAccIAMOrganizationUserRoleResource_DenyRolesRealDriftStillShows(t *testing.T) {
+func TestAccOrganizationUserRoleResource_DenyRolesRealDriftStillShows(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	httpServer, mock := newMockOrgUserRoleServer(t)
 	cfg := orgUserRoleConfig(httpServer.URL, mock.email, "collaborator", `["image_reader_no_base_images", "image_reader"]`)
@@ -106,7 +106,7 @@ func TestAccIAMOrganizationUserRoleResource_DenyRolesRealDriftStillShows(t *test
 
 // Duplicates in deny_roles are a plan-time error, not an apply-time
 // "inconsistent result".
-func TestAccIAMOrganizationUserRoleResource_DenyRolesDuplicateRejectedAtPlan(t *testing.T) {
+func TestAccOrganizationUserRoleResource_DenyRolesDuplicateRejectedAtPlan(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	httpServer, mock := newMockOrgUserRoleServer(t)
 	resource.Test(t, resource.TestCase{
@@ -124,7 +124,7 @@ func TestAccIAMOrganizationUserRoleResource_DenyRolesDuplicateRejectedAtPlan(t *
 
 // Values outside the backend's enums are plan-time errors. Controls: the valid
 // values apply.
-func TestAccIAMOrganizationUserRoleResource_InvalidRolesRejectedAtPlan(t *testing.T) {
+func TestAccOrganizationUserRoleResource_InvalidRolesRejectedAtPlan(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	cases := []struct {
 		name, base, deny, wantErr string
@@ -158,7 +158,7 @@ func TestAccIAMOrganizationUserRoleResource_InvalidRolesRejectedAtPlan(t *testin
 // list (which restricts even organization owners) as "undetermined" on the
 // strength of a transient failure. Positive control: the same configs succeed
 // when the lookup works.
-func TestAccIAMOrganizationUserRoleResource_PerUserLookupFailureIsAnError(t *testing.T) {
+func TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	surfaces := map[string]func(url string, mock *mockOrgUserRoleServer) string{
@@ -232,7 +232,7 @@ data "anyscale_iam_organization_user" "u" {
 // spells the email the same way. Import is the first step against a member
 // pre-seeded out of band, with ImportStatePersist so the imported state carries
 // into the plan. Positive control: the lowercase spelling.
-func TestAccIAMOrganizationUserRoleResource_ColdImportMixedCaseEmailPlansNoOp(t *testing.T) {
+func TestAccOrganizationUserRoleResource_ColdImportMixedCaseEmailPlansNoOp(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	for name, email := range map[string]string{
 		"lowercase_control": "org-role-mock@example.com",
@@ -264,7 +264,7 @@ func TestAccIAMOrganizationUserRoleResource_ColdImportMixedCaseEmailPlansNoOp(t 
 // Editing only the letter case of email is the same person: an in-place update,
 // not a replace, and the plan is clean afterwards. Positive control: a different
 // address still replaces.
-func TestAccIAMOrganizationUserRoleResource_CaseOnlyEmailEditUpdatesInPlace(t *testing.T) {
+func TestAccOrganizationUserRoleResource_CaseOnlyEmailEditUpdatesInPlace(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	const addr = "anyscale_organization_user_role.mock"
 	httpServer, mock := newMockOrgUserRoleServer(t)

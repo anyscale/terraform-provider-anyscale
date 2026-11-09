@@ -211,7 +211,7 @@ func TestAccCloudAccessResource_AzureBlocked_MockServer(t *testing.T) {
 	})
 }
 
-func TestAccIAMOrganizationUserRoleResource_AzureBlocked_MockServer(t *testing.T) {
+func TestAccOrganizationUserRoleResource_AzureBlocked_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	server, mock := newMockOrgUserRoleServer(t)
 	var azure atomic.Bool

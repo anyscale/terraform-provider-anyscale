@@ -61,7 +61,7 @@ resource "anyscale_cloud_access" "test" {
 `, legacyRBACDeprecationText, "anyscale_iam_role_grant", "Azure")
 }
 
-func TestAccIAMOrganizationUserRoleResource_DeprecationWarningFires(t *testing.T) {
+func TestAccOrganizationUserRoleResource_DeprecationWarningFires(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	expectOneDeprecationWarning(t, `
 resource "anyscale_organization_user_role" "test" {
