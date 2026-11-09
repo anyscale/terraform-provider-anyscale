@@ -166,9 +166,11 @@ func upgradeOrganizationUserStateV0toV1(ctx context.Context, req resource.Upgrad
 // organizationUserV1ModelFromV0 is the single v0 -> v1 re-key, shared by
 // UpgradeState and MoveState so the two paths cannot drift apart.
 //
-// Written as an explicit field-by-field copy so that adding an attribute to
-// OrganizationUserResourceModel later fails to compile here rather than
-// silently upgrading to a zero value.
+// Written as an explicit field-by-field copy. A Go struct literal compiles
+// with fields omitted, so adding an attribute to OrganizationUserResourceModel
+// later does NOT break this function by itself; a new attribute must be
+// given an explicit value here by hand, and the upgrade and move-state unit
+// tests are the guard that notice when it is missing.
 func organizationUserV1ModelFromV0(v0 organizationUserResourceModelV0) OrganizationUserResourceModel {
 	return OrganizationUserResourceModel{
 		// The re-key itself. v0's id was the identity_id; v1's is the email.
