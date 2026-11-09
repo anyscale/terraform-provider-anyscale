@@ -1053,7 +1053,7 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 					name, setting, settingErr.Error()))
 			return
 		} else {
-			addAppliedSettingWarning(&resp.Diagnostics, cloudID, setting, settingErr,
+			addAppliedSettingWarning(&resp.Diagnostics, cloudID, "created", setting, settingErr,
 				fmt.Sprintf("rolling the create back by deleting the cloud also failed (%s)", extractAPIErrorDetail(delErr)))
 			// Exit (b): the create finishes; state records the configured
 			// value for the refused setting (reapplySettingsAfterReadback
@@ -1132,7 +1132,7 @@ func (r *CloudResource) undoCreateRefusedAutoAddUser(ctx context.Context, cloudI
 		return true
 	} else {
 		tflog.Error(ctx, "Failed to delete the cloud after auto_add_user was refused", map[string]any{"id": cloudID, "error": delErr.Error()})
-		addAppliedSettingWarning(&resp.Diagnostics, cloudID, "auto_add_user", refusal,
+		addAppliedSettingWarning(&resp.Diagnostics, cloudID, "created", "auto_add_user", refusal,
 			fmt.Sprintf("Anyscale refuses auto_add_user in this organization, and rolling the create back by deleting the cloud also failed (%s)", extractAPIErrorDetail(delErr)))
 		return false
 	}
@@ -1204,15 +1204,17 @@ func (r *CloudResource) deleteJustCreatedCloud(ctx context.Context, cloudID stri
 // addAppliedSettingWarning is the exit-(b) diagnostic shared by every path
 // where a setting could not be applied but the create must still succeed:
 // adopted clouds, failed rollback deletes, and failed read-back re-attempts.
+// verb distinguishes a fresh create ("created") from an adoption ("adopted") -
+// the adopt path reaches this warning without anything having been created.
 // State records the configured value, so until the next refresh the state
-// over-reports the setting and the next plan is an update of it - the warning
-// says both.
-func addAppliedSettingWarning(diags *diag.Diagnostics, cloudID, setting string, err error, escalation string) {
+// misreports the setting (either way: over- or under-) and the next plan is an
+// update of it - the warning says both.
+func addAppliedSettingWarning(diags *diag.Diagnostics, cloudID, verb, setting string, err error, escalation string) {
 	diags.AddWarning("Cloud Setting Not Applied",
-		fmt.Sprintf("Cloud %s was created, but applying %s failed: %s (%s). Terraform has recorded the configured value "+
-			"in state, so until the next refresh the state over-reports %s, and the next plan is an update of it; that "+
+		fmt.Sprintf("Cloud %s was %s, but applying %s failed: %s (%s). Terraform has recorded the configured value "+
+			"in state, so until the next refresh the state misreports %s, and the next plan is an update of it; that "+
 			"update fails with the same error until the setting, or access to it, is fixed.",
-			cloudID, setting, err.Error(), escalation, setting))
+			cloudID, verb, setting, err.Error(), escalation, setting))
 }
 
 // reconcileAdoptedCloudSettings reconciles the settings of a cloud Create is
@@ -1225,22 +1227,22 @@ func addAppliedSettingWarning(diags *diag.Diagnostics, cloudID, setting string, 
 func (r *CloudResource) reconcileAdoptedCloudSettings(ctx context.Context, cloudID string, plan *CloudResourceModel, configured cloudSettings, diags *diag.Diagnostics) {
 	if settingDiffers(configured.AutoAddUser, plan.AutoAddUser) {
 		if err := r.updateCloudBoolField(ctx, cloudID, "auto_add_user", configured.AutoAddUser.ValueBool()); err != nil {
-			addAppliedSettingWarning(diags, cloudID, "auto_add_user", err,
-				"Terraform adopted this cloud rather than creating it, so the cloud was left as it is")
+			addAppliedSettingWarning(diags, cloudID, "adopted", "auto_add_user", err,
+				"the cloud was left untouched, since this provider did not create it")
 		}
 		plan.AutoAddUser = configured.AutoAddUser
 	}
 	if settingDiffers(configured.LineageTracking, plan.LineageTrackingEnabled) {
 		if err := r.updateCloudBoolField(ctx, cloudID, "lineage_tracking_enabled", configured.LineageTracking.ValueBool()); err != nil {
-			addAppliedSettingWarning(diags, cloudID, "lineage_tracking_enabled", err,
-				"Terraform adopted this cloud rather than creating it, so the cloud was left as it is")
+			addAppliedSettingWarning(diags, cloudID, "adopted", "lineage_tracking_enabled", err,
+				"the cloud was left untouched, since this provider did not create it")
 		}
 		plan.LineageTrackingEnabled = configured.LineageTracking
 	}
 	if settingDiffers(configured.AggregatedLogsEnabled, plan.AggregatedLogsEnabled) {
 		if err := r.updateCloudAggregatedLogsConfig(ctx, cloudID, configured.AggregatedLogsEnabled.ValueBool()); err != nil {
-			addAppliedSettingWarning(diags, cloudID, "aggregated_logs_enabled", err,
-				"Terraform adopted this cloud rather than creating it, so the cloud was left as it is")
+			addAppliedSettingWarning(diags, cloudID, "adopted", "aggregated_logs_enabled", err,
+				"the cloud was left untouched, since this provider did not create it")
 		}
 		plan.AggregatedLogsEnabled = configured.AggregatedLogsEnabled
 	}
@@ -1267,7 +1269,7 @@ func reapplySettingsAfterReadback(ctx context.Context, r *CloudResource, cloudID
 			return
 		}
 		if err := put(ctx, plannedValue.ValueBool()); err != nil {
-			addAppliedSettingWarning(diags, cloudID, field, err, "the read-back re-attempt also failed")
+			addAppliedSettingWarning(diags, cloudID, "created", field, err, "the read-back re-attempt also failed")
 		}
 		set(plannedValue)
 	}
