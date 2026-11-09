@@ -1,0 +1,7 @@
+```
+release-note:breaking-change
+resource/anyscale_organization_user: `anyscale_organization_user` is removed and renamed to `anyscale_iam_organization_user`; move existing state with a `moved` block (`from = anyscale_organization_user.<name>`, `to = anyscale_iam_organization_user.<name>`); the next plan shows no changes.
+resource/anyscale_organization_invitation: `anyscale_organization_invitation` is removed and renamed to `anyscale_iam_organization_invitation`; move existing state with a `moved` block (`from = anyscale_organization_invitation.<name>`, `to = anyscale_iam_organization_invitation.<name>`); the next plan shows no changes.
+data-source/anyscale_organization_user: `anyscale_organization_user` is removed and renamed to `anyscale_iam_organization_user`; update the data source type in your configuration, keeping the same arguments.
+data-source/anyscale_organization_users: `anyscale_organization_users` is removed and renamed to `anyscale_iam_organization_users`; update the data source type in your configuration, keeping the same arguments.
+```
