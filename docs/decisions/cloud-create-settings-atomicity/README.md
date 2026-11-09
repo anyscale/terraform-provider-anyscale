@@ -103,8 +103,9 @@ resource-less cloud, so the rollback `DELETE` is cheap and never loses a provisi
 - **A failed rollback `DELETE` is a warning too** (decision 3 revised): it names the cloud ID,
   the setting failure and the delete failure, and `Create` succeeds, untainted.
 - **Warning-exit semantics:** state records the planned setting value, so until the next
-  refresh state over-reports the setting; the warning says so. The next plan then shows an
-  in-place Update of that setting, and a failed Update never taints.
+  refresh state misreports the setting — it over-reports a refused `true`, but under-reports
+  an adopted cloud whose live value stays on the refused `false`. The warning says so. The
+  next plan then shows an in-place Update of that setting, and a failed Update never taints.
 - **Post-ready readback mismatch** (a setting the backend reset during `add_resource`): re-`PUT`
   once at most; a failure or a persistent mismatch becomes a warning, never an error.
 - **Unchanged and out of scope:** `add_resource` failure and readiness-wait timeout still
