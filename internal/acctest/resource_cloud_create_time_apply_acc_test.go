@@ -27,9 +27,11 @@ type mockCloudCreateTimeServer struct {
 	mu                      sync.Mutex
 	cloudID                 string
 	isAggregatedLogsEnabled bool
-	// isAutoAddUser is what GET reports for auto_add_user. This server does not
-	// own that PUT; a fronting server that does sets it (setAutoAddUser).
+	// isAutoAddUser and isLineageTracking are what GET reports. This server
+	// does not own the auto_add_user PUT (a fronting server that does sets
+	// it via setAutoAddUser); it does own the lineage PUT.
 	isAutoAddUser         bool
+	isLineageTracking     bool
 	logIngestionPutCalled bool
 	logIngestionPutValue  bool
 }
@@ -72,6 +74,18 @@ func newMockCloudCreateTimeServer(t *testing.T) (*httptest.Server, *mockCloudCre
 		default:
 			t.Errorf("unexpected method %s on /api/v2/clouds/%s", r.Method, s.cloudID)
 		}
+	})
+
+	mux.HandleFunc("/api/v2/clouds/"+s.cloudID+"/lineage_tracking_enabled", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if r.Method != http.MethodPut {
+			t.Errorf("unexpected method %s on lineage_tracking_enabled", r.Method)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		s.isLineageTracking = r.URL.Query().Get("lineage_tracking_enabled") == "true"
+		w.WriteHeader(http.StatusNoContent)
 	})
 
 	mux.HandleFunc("/api/v2/clouds/"+s.cloudID+"/update_customer_aggregated_logs_config", func(w http.ResponseWriter, r *http.Request) {
@@ -130,15 +144,27 @@ func (s *mockCloudCreateTimeServer) cloudJSONLocked() string {
 	return fmt.Sprintf(`{
 		"id": %[1]q, "name": "createtime-mock", "provider": "AWS", "region": "us-east-2",
 		"status": "ready", "state": "ACTIVE", "compute_stack": "VM",
-		"auto_add_user": %[3]t, "lineage_tracking_enabled": false,
+		"auto_add_user": %[3]t, "lineage_tracking_enabled": %[4]t,
 		"is_aggregated_logs_enabled": %[2]t
-	}`, s.cloudID, s.isAggregatedLogsEnabled, s.isAutoAddUser)
+	}`, s.cloudID, s.isAggregatedLogsEnabled, s.isAutoAddUser, s.isLineageTracking)
 }
 
 func (s *mockCloudCreateTimeServer) setAutoAddUser(v bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.isAutoAddUser = v
+}
+
+func (s *mockCloudCreateTimeServer) setLineageTracking(v bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.isLineageTracking = v
+}
+
+func (s *mockCloudCreateTimeServer) setAggregatedLogsEnabled(v bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.isAggregatedLogsEnabled = v
 }
 
 func (s *mockCloudCreateTimeServer) snapshot() (putCalled, putValue bool) {
