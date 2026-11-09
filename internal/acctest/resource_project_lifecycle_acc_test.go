@@ -29,16 +29,40 @@ type mockProjectServer struct {
 	mu       sync.Mutex
 	nextSeq  int
 	projects map[string]map[string]any
+
+	// Request counters so tests can assert call counts (exactly one PATCH,
+	// no POST during an update step, never a DELETE). All reads go through
+	// RequestCounts so they take the same lock the handler does.
+	postCount   int
+	patchCount  int
+	deleteCount int
+}
+
+// RequestCounts returns the number of POST/PATCH/DELETE requests the mock
+// has served.
+func (s *mockProjectServer) RequestCounts() (posts, patches, deletes int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.postCount, s.patchCount, s.deleteCount
 }
 
 func newMockProjectServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	server, _ := newMockProjectServerWithCounts(t)
+	return server
+}
+
+// newMockProjectServerWithCounts also returns the underlying
+// mockProjectServer so tests can call RequestCounts() on the same instance
+// the server dispatches to.
+func newMockProjectServerWithCounts(t *testing.T) (*httptest.Server, *mockProjectServer) {
 	t.Helper()
 	s := &mockProjectServer{
 		projects: make(map[string]map[string]any),
 	}
 	server := httptest.NewServer(http.HandlerFunc(s.handle))
 	t.Cleanup(server.Close)
-	return server
+	return server, s
 }
 
 func (s *mockProjectServer) handle(w http.ResponseWriter, r *http.Request) {
@@ -49,10 +73,15 @@ func (s *mockProjectServer) handle(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	switch {
 	case r.Method == http.MethodPost && path == "/api/v2/projects":
+		s.postCount++
 		s.handleCreate(w, r)
+	case r.Method == http.MethodPatch && strings.HasPrefix(path, "/api/v2/projects/"):
+		s.patchCount++
+		s.handlePatch(w, r)
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v2/projects/"):
 		s.handleGet(w, path)
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v2/projects/"):
+		s.deleteCount++
 		s.handleDelete(w, path)
 	default:
 		// Deliberately a hard 404 rather than a permissive echo: the removed
@@ -141,6 +170,54 @@ func (s *mockProjectServer) handleDelete(w http.ResponseWriter, path string) {
 	id := projectIDFromPath(path)
 	delete(s.projects, id)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handlePatch implements PATCH /api/v2/projects/{id} with the wire shape the
+// real control plane confirmed (2026-11-09, production): exactly a
+// {"description": <string>} body - any extra key is 422 extra_forbidden, a
+// missing description is 422, null is 422 string_type; {"description": ""}
+// is accepted and stored as "" (the provider's own LengthAtLeast(1) keeps
+// that shape out of plans); a same-value PATCH is 200; an unknown id is 404.
+// The success response wraps the updated project in "result", like GET.
+func (s *mockProjectServer) handlePatch(w http.ResponseWriter, r *http.Request) {
+	id := projectIDFromPath(r.URL.Path)
+	result, ok := s.projects[id]
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"detail":"Project with ID ` + id + ` not found."}`))
+		return
+	}
+
+	var body map[string]json.RawMessage
+	raw, _ := io.ReadAll(r.Body)
+	if err := json.Unmarshal(raw, &body); err != nil {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"detail":"invalid JSON"}`))
+		return
+	}
+	if len(body) != 1 {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"detail":[{"type":"extra_forbidden"}]}`))
+		return
+	}
+	descRaw, ok := body["description"]
+	if !ok {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"detail":[{"type":"missing"}]}`))
+		return
+	}
+	var desc *string
+	if err := json.Unmarshal(descRaw, &desc); err != nil || desc == nil {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"detail":[{"type":"string_type"}]}`))
+		return
+	}
+
+	result["description"] = *desc
+	s.projects[id] = result
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{"result": result})
 }
 
 // TestAccProjectResource_Lifecycle_MockServer drives create -> refresh ->

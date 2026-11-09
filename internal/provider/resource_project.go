@@ -25,6 +25,7 @@ var (
 	_ resource.Resource                = &ProjectResource{}
 	_ resource.ResourceWithConfigure   = &ProjectResource{}
 	_ resource.ResourceWithImportState = &ProjectResource{}
+	_ resource.ResourceWithModifyPlan  = &ProjectResource{}
 )
 
 // projectNameRegexp matches exactly the names the API stores unchanged. On
@@ -118,13 +119,18 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 			"description": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
-				MarkdownDescription: "Description of the project. If omitted, the API generates one; an empty string is rejected at plan time because the API would replace it the same way. The Anyscale API has no endpoint to update a project's description in place, so explicitly changing this value to something different forces replacement of the project; omitting it (letting the API-generated value persist) never does.",
+				MarkdownDescription: "Description of the project. If omitted on create, the API generates one; an empty string is rejected at plan time. Changing this value updates the project in place. A cloud's default project cannot be modified, so changing its description errors at plan time.",
 				Validators: []validator.String{
 					stringvalidator.LengthAtLeast(1),
 				},
 				PlanModifiers: []planmodifier.String{
-					// Not RequiresReplace: that fires on any unrelated update when description is omitted, since unknown reads as "changed" before UseStateForUnknown resolves it.
-					stringplanmodifier.RequiresReplaceIfConfigured(),
+					// Not a plan modifier note: there is deliberately no
+					// RequiresReplace* here. Changing the description PATCHes
+					// /api/v2/projects/{id}; only the default project cannot
+					// be updated (see ModifyPlan, which refuses that at plan
+					// time). UseStateForUnknown keeps an unconfigured value
+					// stable across unrelated updates instead of firing a
+					// spurious replace as RequiresReplace would.
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
@@ -292,7 +298,55 @@ func (r *ProjectResource) Update(ctx context.Context, req resource.UpdateRequest
 
 	tflog.Info(ctx, "Updating project", map[string]any{"project_id": projectID})
 
-	// Read back full state
+	// The description is the only updatable attribute: send PATCH
+	// /api/v2/projects/{id} with exactly {"description": <plan value>}. The
+	// route rejects any other key (422 extra_forbidden) and a null value
+	// (422 string_type), so the body is a dedicated struct, never the full
+	// model. LengthAtLeast(1) on the schema keeps "" out of the plan, and a
+	// null cannot reach here: UseStateForUnknown resolves an unconfigured
+	// description to the stored value, which is never null after create.
+	if !plan.Description.Equal(state.Description) {
+		patchReq := struct {
+			Description string `json:"description"`
+		}{Description: plan.Description.ValueString()}
+
+		reqBody, err := MarshalRequestBody(patchReq)
+		if err != nil {
+			AddJSONError(&resp.Diagnostics, "marshal", "project description update request", err)
+			return
+		}
+
+		tflog.Debug(ctx, "PATCH /api/v2/projects/"+projectID, map[string]any{
+			"description": patchReq.Description,
+		})
+
+		if _, err := DoRequestAndParse[ProjectResponse](
+			ctx,
+			r.client,
+			"PATCH",
+			fmt.Sprintf("/api/v2/projects/%s", projectID),
+			reqBody,
+			http.StatusOK,
+		); err != nil {
+			if isHTTPStatus(err, http.StatusMethodNotAllowed) {
+				// Some control planes predate the PATCH route (405). Never
+				// fall back to replace: the plan already committed to an
+				// in-place update, and destroying a project for a description
+				// edit is never what the practitioner asked for.
+				resp.Diagnostics.AddError(
+					"Project Description Cannot Be Updated",
+					"This Anyscale control plane does not support updating a project's description yet, and the provider does not replace a project for a description change. "+
+						"No changes were made. Revert the description in your configuration to its stored value, or remove the project from Terraform management to change the description out of band.",
+				)
+				return
+			}
+			AddAPIError(&resp.Diagnostics, "update project description", err)
+			return
+		}
+	}
+
+	// Read back full state as Create does: the PATCH response is discarded in
+	// favor of the same GET the rest of the resource trusts.
 	if err := r.readProject(ctx, projectID, &plan); err != nil {
 		AddAPIError(&resp.Diagnostics, "read project after update", err)
 		return
@@ -300,6 +354,32 @@ func (r *ProjectResource) Update(ctx context.Context, req resource.UpdateRequest
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// ModifyPlan refuses a description change on a default project: the API
+// answers it with 403 ("A default project cannot be modified."), so failing
+// at plan time is the only place the refusal helps the practitioner. This
+// guard is traced from the API's source and error contract, not probed live.
+func (r *ProjectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// Create (no prior state) and destroy (no plan) have no current project
+	// to protect.
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+
+	var plan, state ProjectResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if state.IsDefault.ValueBool() && !plan.Description.Equal(state.Description) {
+		resp.Diagnostics.AddError(
+			"Default Project Description Cannot Be Changed",
+			"Anyscale refuses to modify a default project (the API returns: \"A default project cannot be modified.\"), so its description cannot be updated in place, and the provider does not replace a project for a description change. No changes were made.",
+		)
+	}
 }
 
 // Delete deletes the resource and removes the Terraform state on success.
