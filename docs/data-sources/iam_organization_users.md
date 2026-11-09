@@ -47,7 +47,9 @@ output "engineering_user_emails" {
 
 output "service_account_emails" {
   value = [
-    for u in data.anyscale_iam_organization_users.service_accounts.users :
+    for u in(
+      data.anyscale_iam_organization_users.service_accounts.users
+    ) :
     u.email
   ]
   description = "Emails of every service account in the organization"

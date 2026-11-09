@@ -18,7 +18,7 @@ Read this before writing configuration that spans more than one scope.
 
 | Scope | Resource | Manages |
 |---|---|---|
-| Organization membership | [`anyscale_iam_organization_user`](../resources/organization_user.md) | Whether the user is under Terraform management. It cannot create a member - people join by invitation - but declaring it adopts an existing member with no API call. Destroying it removes nobody: it cancels only a still-pending invitation this resource itself sent. |
+| Organization membership | [`anyscale_iam_organization_user`](../resources/iam_organization_user.md) | Whether the user is under Terraform management. It cannot create a member - people join by invitation - but declaring it adopts an existing member with no API call. Destroying it removes nobody: it cancels only a still-pending invitation this resource itself sent. |
 | Organization role | [`anyscale_organization_user_role`](../resources/organization_user_role.md) | One user's `base_role` and `deny_roles` in the organization. Authoritative over that one user's role - not over who is a member. |
 | User groups (Beta) | [`anyscale_iam_user_group`](../resources/iam_user_group.md), [`anyscale_iam_user_group_members`](../resources/iam_user_group_members.md) | A group's name, and its **entire** member list. Not what the group may access - see role bindings, next row. See [User groups (Beta)](#user-groups-beta). |
 | Role grants (Beta) | [`anyscale_iam_role_grant`](../resources/iam_role_grant.md), [`anyscale_iam_role_binding`](../resources/iam_role_binding.md), [`anyscale_iam_role`](../data-sources/iam_role.md) data source | One role held by one user group or one user on one cloud, project, or the organization (`anyscale_iam_role_grant`), or every direct role binding on a scope (`anyscale_iam_role_binding`). **Converted organizations only** - see [Organization access mode](#organization-access-mode). See [Role bindings (Beta)](#role-bindings-beta). |
@@ -86,7 +86,7 @@ organization roles (`base_role`) are not managed by this provider.
 
 `anyscale_iam_user_group_members` takes **email addresses** and resolves each to a user in your
 organization. An email that is not an organization member fails the apply; invite the person first
-with [`anyscale_iam_organization_invitation`](../resources/organization_invitation.md) and wait for them to
+with [`anyscale_iam_organization_invitation`](../resources/iam_organization_invitation.md) and wait for them to
 accept. Emails match case-insensitively, and state keeps the spelling from your configuration. After `terraform import`, a configuration that spells an
 email with uppercase letters shows a one-time in-place update to `members`; it makes no API change.
 
@@ -193,7 +193,7 @@ and conversion is one-way.
 | Access is held by | Collaborator and policy records | Role bindings |
 | Writes that work | [`anyscale_organization_user_role`](../resources/organization_user_role.md), `anyscale_cloud.auto_add_user` | [`anyscale_iam_role_grant`](../resources/iam_role_grant.md) |
 | Writes the API refuses (HTTP 409) | `anyscale_iam_role_grant` | The resources in the Unconverted column |
-| Not affected by mode | [`anyscale_iam_user_group`](../resources/iam_user_group.md), [`anyscale_iam_user_group_members`](../resources/iam_user_group_members.md), [`anyscale_iam_organization_user`](../resources/organization_user.md), [`anyscale_project`](../resources/project.md), [`anyscale_cloud`](../resources/cloud.md) (except `auto_add_user`) | same |
+| Not affected by mode | [`anyscale_iam_user_group`](../resources/iam_user_group.md), [`anyscale_iam_user_group_members`](../resources/iam_user_group_members.md), [`anyscale_iam_organization_user`](../resources/iam_organization_user.md), [`anyscale_project`](../resources/project.md), [`anyscale_cloud`](../resources/cloud.md) (except `auto_add_user`) | same |
 
 The provider does not detect the mode in advance; the API refuses the write and the provider reports it.
 Role bindings are also behind a feature flag (see [Role bindings (Beta)](#role-bindings-beta)). An
@@ -330,7 +330,7 @@ member gets the role.
 ### Granting a user, not a group
 
 Binding a user takes the user's `usr_...` ID, not their email. Look it up with the
-[`anyscale_iam_organization_user`](../data-sources/organization_user.md) data source and use its **`user_id`**
+[`anyscale_iam_organization_user`](../data-sources/iam_organization_user.md) data source and use its **`user_id`**
 attribute, not `id` (that is the identity ID, a different value):
 
 ```hcl

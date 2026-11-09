@@ -30,7 +30,9 @@ output "invitation_status" {
 }
 
 output "invitation_expires_at" {
-  value       = anyscale_iam_organization_invitation.new_member.expires_at
+  value = (
+    anyscale_iam_organization_invitation.new_member.expires_at
+  )
   description = "When this invitation will expire"
 }
 

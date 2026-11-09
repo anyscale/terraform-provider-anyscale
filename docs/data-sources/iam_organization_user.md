@@ -16,8 +16,8 @@ The role attributes (`permission_level`, `base_role`, `additional_roles`) are de
 ## Example Usage
 
 ```terraform
-# Look up by email - the most common way to find a user before granting
-# them project/cloud access or importing an anyscale_iam_organization_user
+# Look up by email - the most common way to find a user before
+# granting them access or importing the member resource
 data "anyscale_iam_organization_user" "by_email" {
   email = "user@example.com"
 }

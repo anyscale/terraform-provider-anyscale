@@ -19,8 +19,9 @@ Destroying this resource cancels only a still-pending invitation it sent; it nev
 ## Example Usage
 
 ```terraform
-# anyscale_iam_organization_user manages MEMBERSHIP only - whether someone
-# is in the organization. It has no writable attributes besides email.
+# anyscale_iam_organization_user manages MEMBERSHIP only - whether
+# someone is in the organization. It has no writable attributes besides
+# email.
 # To manage what a member can DO, use anyscale_organization_user_role,
 # which owns base_role and deny_roles.
 #
@@ -82,7 +83,9 @@ output "user_email" {
 }
 
 output "user_base_role" {
-  value       = data.anyscale_iam_organization_user.existing_user.base_role
+  value = (
+    data.anyscale_iam_organization_user.existing_user.base_role
+  )
   description = "The member's base role, read from the data source"
 }
 

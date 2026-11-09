@@ -347,7 +347,9 @@ data "anyscale_iam_organization_users" "filtered" {
 }
 
 output "filtered_users_count" {
-  value       = length(data.anyscale_iam_organization_users.filtered.users)
+  value = length(
+    data.anyscale_iam_organization_users.filtered.users
+  )
   description = "Number of users matching the email filter"
 }
 
