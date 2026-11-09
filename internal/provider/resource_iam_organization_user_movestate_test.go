@@ -296,14 +296,14 @@ func TestOrganizationUserMoveState_UnsupportedVersionErrors(t *testing.T) {
 	}
 }
 
-// TestOrganizationUserMoveState_NilSourceStateErrors pins the architect /
-// forge agreement: when the type, address and version ALL match but
+// TestOrganizationUserMoveState_NilSourceStateErrors pins the agreed
+// contract: when the type, address and version ALL match but
 // SourceState is nil (framework decode failed on the raw state), the mover
 // must ERROR rather than skip - a skip would surface as Core's generic
 // "no move" error and the user would lose the cause. The raw side simulates
 // the shape the framework could not decode.
-// NOTE(assayer): finalize the error-text assertions once forge lands the
-// change; HasError is the load-bearing assertion, the state-rm wording is
+// TODO: finalize the error-text assertions once the diagnostic rework
+// lands; HasError is the load-bearing assertion, the state-rm wording is
 // a soft check.
 func TestOrganizationUserMoveState_NilSourceStateErrors(t *testing.T) {
 	r := &OrganizationUserResource{}
