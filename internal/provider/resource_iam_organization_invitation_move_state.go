@@ -52,8 +52,21 @@ func (r *OrganizationInvitationResource) MoveState(ctx context.Context) []resour
 func (r *OrganizationInvitationResource) moveStateOrganizationInvitationV0(ctx context.Context, req resource.MoveStateRequest, resp *resource.MoveStateResponse) {
 	if req.SourceTypeName != organizationInvitationMoveStateSourceTypeName ||
 		req.SourceSchemaVersion != 0 ||
-		!moveStateSourceProviderMatches(req.SourceProviderAddress) ||
-		req.SourceState == nil {
+		!moveStateSourceProviderMatches(req.SourceProviderAddress) {
+		return
+	}
+
+	if req.SourceState == nil {
+		// See organizationUserMoveStateDecodeFailed for why this errors
+		// instead of skipping to Core's generic message.
+		resp.Diagnostics.AddError(
+			fmt.Sprintf("Cannot read anyscale_organization_invitation state at schema version %d", req.SourceSchemaVersion),
+			"The source state for a move into anyscale_iam_organization_invitation did not "+
+				"match the schema. Remove the resource from state and re-import it under the "+
+				"new name with the invitation ID as the import ID:\n\n"+
+				"terraform state rm <old address>\n"+
+				"terraform import anyscale_iam_organization_invitation.example <invitation ID>",
+		)
 		return
 	}
 
@@ -75,11 +88,9 @@ func (r *OrganizationInvitationResource) moveStateOrganizationInvitationUnsuppor
 
 	resp.Diagnostics.AddError(
 		fmt.Sprintf("Cannot move anyscale_organization_invitation state at schema version %d", req.SourceSchemaVersion),
-		fmt.Sprintf(
-			"This resource only understands anyscale_organization_invitation state at schema version 0. "+
-				"Remove the resource from state and re-import it under the new name with the invitation ID as the import ID:\n\n"+
-				"terraform state rm <old address>\n"+
-				"terraform import anyscale_iam_organization_invitation.example <invitation ID>",
-		),
+		"This resource only understands anyscale_organization_invitation state at schema version 0. "+
+			"Remove the resource from state and re-import it under the new name with the invitation ID as the import ID:\n\n"+
+			"terraform state rm <old address>\n"+
+			"terraform import anyscale_iam_organization_invitation.example <invitation ID>",
 	)
 }

@@ -80,8 +80,16 @@ func (r *OrganizationUserResource) MoveState(ctx context.Context) []resource.Sta
 func (r *OrganizationUserResource) moveStateOrganizationUserV1(ctx context.Context, req resource.MoveStateRequest, resp *resource.MoveStateResponse) {
 	if req.SourceTypeName != organizationUserMoveStateSourceTypeName ||
 		req.SourceSchemaVersion != 1 ||
-		!moveStateSourceProviderMatches(req.SourceProviderAddress) ||
-		req.SourceState == nil {
+		!moveStateSourceProviderMatches(req.SourceProviderAddress) {
+		return
+	}
+
+	if req.SourceState == nil {
+		// The gates matched but the framework could not decode the source
+		// state with this mover's schema. Skipping would fall through to
+		// Core's generic "no move implemented" and hide the real cause, so
+		// fail loudly with the same recovery as an unsupported version.
+		organizationUserMoveStateDecodeFailed(req, resp)
 		return
 	}
 
@@ -97,8 +105,12 @@ func (r *OrganizationUserResource) moveStateOrganizationUserV1(ctx context.Conte
 func (r *OrganizationUserResource) moveStateOrganizationUserV0(ctx context.Context, req resource.MoveStateRequest, resp *resource.MoveStateResponse) {
 	if req.SourceTypeName != organizationUserMoveStateSourceTypeName ||
 		req.SourceSchemaVersion != 0 ||
-		!moveStateSourceProviderMatches(req.SourceProviderAddress) ||
-		req.SourceState == nil {
+		!moveStateSourceProviderMatches(req.SourceProviderAddress) {
+		return
+	}
+
+	if req.SourceState == nil {
+		organizationUserMoveStateDecodeFailed(req, resp)
 		return
 	}
 
@@ -112,6 +124,23 @@ func (r *OrganizationUserResource) moveStateOrganizationUserV0(ctx context.Conte
 	resp.TargetPrivate = req.SourcePrivate
 }
 
+// organizationUserMoveStateDecodeFailed is reported when the type name,
+// provider address, and schema version all match but the source state could
+// not be decoded with the mover's schema. Recovery is the same as for an
+// unsupported version: remove and re-import.
+func organizationUserMoveStateDecodeFailed(req resource.MoveStateRequest, resp *resource.MoveStateResponse) {
+	resp.Diagnostics.AddError(
+		fmt.Sprintf("Cannot read anyscale_organization_user state at schema version %d", req.SourceSchemaVersion),
+		fmt.Sprintf(
+			"The source state for a move into anyscale_iam_organization_user did not match the "+
+				"schema version. Remove the resource from state and re-import it under the new "+
+				"name with the email as the import ID:\n\n"+
+				"terraform state rm <old address>\n"+
+				"terraform import anyscale_iam_organization_user.example <email>",
+		),
+	)
+}
+
 func (r *OrganizationUserResource) moveStateOrganizationUserUnsupportedVersion(ctx context.Context, req resource.MoveStateRequest, resp *resource.MoveStateResponse) {
 	if req.SourceTypeName != organizationUserMoveStateSourceTypeName ||
 		!moveStateSourceProviderMatches(req.SourceProviderAddress) ||
@@ -121,11 +150,9 @@ func (r *OrganizationUserResource) moveStateOrganizationUserUnsupportedVersion(c
 
 	resp.Diagnostics.AddError(
 		fmt.Sprintf("Cannot move anyscale_organization_user state at schema version %d", req.SourceSchemaVersion),
-		fmt.Sprintf(
-			"This resource only understands anyscale_organization_user state at schema version 0 or 1. "+
-				"Remove the resource from state and re-import it under the new name with the email as the import ID:\n\n"+
-				"terraform state rm <old address>\n"+
-				"terraform import anyscale_iam_organization_user.example <email>",
-		),
+		"This resource only understands anyscale_organization_user state at schema version 0 or 1. "+
+			"Remove the resource from state and re-import it under the new name with the email as the import ID:\n\n"+
+			"terraform state rm <old address>\n"+
+			"terraform import anyscale_iam_organization_user.example <email>",
 	)
 }
