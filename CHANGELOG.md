@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.41.0] - 2026-11-10
+
+### Changed
+
+- provider: Build with Go 1.27.4, so release binaries now require macOS 13.0 or later (previously macOS 12); on macOS and Windows, setting SSL_CERT_FILE or SSL_CERT_DIR now replaces the system certificate store for TLS verification, so set GODEBUG=x509sslcertoverrideplatform=0 to restore the previous behavior.
+
 ## [0.40.0] - 2026-11-10
 
 ### Breaking Changes
@@ -1408,7 +1414,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.40.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.41.0...HEAD
+[0.41.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.41.0
 [0.40.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.40.0
 [0.39.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.39.0
 [0.38.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.38.0
