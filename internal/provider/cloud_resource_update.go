@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -52,12 +51,13 @@ func findCloudResourceByName(results []CloudDeploymentResult, name string) *Clou
 func buildCloudResourceUpdateRequest(
 	live *CloudDeploymentResult,
 	planFileStorage *FileStorage,
+	subnets *subnetUpdate,
 	isPrivateCloud bool,
 	wantProvider, wantComputeStack, wantRegion string,
 ) (*CloudResourceUpdateRequest, error) {
 	if live.Provider != wantProvider || live.ComputeStack != wantComputeStack || live.Region != wantRegion {
 		return nil, fmt.Errorf(
-			"cloud resource %s: live provider/compute_stack/region (%s/%s/%s) disagree with Terraform state (%s/%s/%s); refusing to update file_storage under a possibly-wrong identity",
+			"cloud resource %s: live provider/compute_stack/region (%s/%s/%s) disagree with Terraform state (%s/%s/%s); refusing to update under a possibly-wrong identity",
 			live.CloudResourceID, live.Provider, live.ComputeStack, live.Region, wantProvider, wantComputeStack, wantRegion,
 		)
 	}
@@ -84,11 +84,17 @@ func buildCloudResourceUpdateRequest(
 			if live.AWSConfig != nil {
 				if live.AWSConfig.AnyscaleIAMRoleID == "" {
 					return nil, fmt.Errorf(
-						"cannot update file_storage on cloud resource %s in place: the Anyscale API did not return this deployment's Anyscale IAM role, so echoing its AWS configuration back would erase it; use the Anyscale CLI to make this change instead",
+						"cannot update cloud resource %s in place: the Anyscale API did not return this deployment's Anyscale IAM role, so echoing its AWS configuration back would erase it; use the Anyscale CLI to make this change instead",
 						live.CloudResourceID,
 					)
 				}
-				req.AWSConfig = live.AWSConfig
+				// Subnet changes replace ONLY the parallel subnet_ids/zones
+				// arrays, and always both together - subnet_ids without
+				// zones makes the backend derive zones by positional pairing
+				// and store the WRONG pairs (live-proven, Gate 1 s2). The
+				// plan cannot reach here that way: subnet_ids set changes
+				// are refused at plan time.
+				req.AWSConfig = applySubnetsToLiveAWSConfig(live.AWSConfig, subnets)
 			}
 		case "GCP":
 			req.GCPConfig = live.GCPConfig
@@ -96,36 +102,6 @@ func buildCloudResourceUpdateRequest(
 	}
 
 	return req, nil
-}
-
-// updateCloudResourceFileStorage issues the resources PUT built by
-// buildCloudResourceUpdateRequest. Callers must gate on an actual plan-vs-state file_storage diff
-// first - every resources PUT unconditionally rewrites provider/compute_stack/region/
-// networking_mode on the record, so an unneeded call is pure downside, never a no-op.
-//
-// The response body is intentionally discarded: the endpoint returns null, so the written values
-// are read back by listing the resources afterward (see updateFileStorageIfChanged).
-func updateCloudResourceFileStorage(
-	ctx context.Context,
-	client *Client,
-	cloudID string,
-	live *CloudDeploymentResult,
-	planFileStorage *FileStorage,
-	isPrivateCloud bool,
-	wantProvider, wantComputeStack, wantRegion string,
-) error {
-	reqBody, err := buildCloudResourceUpdateRequest(live, planFileStorage, isPrivateCloud, wantProvider, wantComputeStack, wantRegion)
-	if err != nil {
-		return err
-	}
-
-	body, err := MarshalRequestBody([]*CloudResourceUpdateRequest{reqBody})
-	if err != nil {
-		return fmt.Errorf("failed to marshal cloud resource update request: %w", err)
-	}
-
-	_, err = DoRequestRaw(ctx, client, http.MethodPut, fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), body, http.StatusOK)
-	return err
 }
 
 // isAnyscaleManaged reports whether the deployment was created by `anyscale cloud setup` rather
@@ -156,22 +132,27 @@ const anyscaleManagedFileStorageRefusal = "`file_storage` cannot be changed in p
 	"The Anyscale API refuses every update to an Anyscale-managed cloud resource. Registered clouds " +
 	"(`anyscale cloud register`) and Kubernetes clouds can be updated in place."
 
-// addFileStorageUpdateError turns a failed resources PUT into a designed diagnostic. The three
-// refusals the backend can raise all arrive as the same opaque 400, so they are told apart by their
-// message body.
+const anyscaleManagedCloudUpdateRefusal = "This change cannot be made in place on a cloud created with `anyscale cloud setup`. " +
+	"The Anyscale API refuses every update to an Anyscale-managed cloud resource. Registered clouds " +
+	"(`anyscale cloud register`) and Kubernetes clouds can be updated in place."
+
+// addCloudResourceUpdateError turns a failed resources PUT into a designed diagnostic. The
+// refusals the backend can raise all arrive as the same opaque 400, so they are told apart by
+// their message body. It serves both the file_storage and the AWS subnet in-place updates.
 //
 // The substrings below are taken from backend source, NOT from a captured response (see the Gate 1
-// results table in docs/decisions/cloud-file-storage-lifecycle/README.md). So a match adds guidance and a miss falls
-// through to the generic branch; neither presents backend wording as the provider's own, and the
-// API's real message is always included so an unmatched refusal is still actionable.
-func addFileStorageUpdateError(diags *diag.Diagnostics, cloudResourceID string, err error) {
+// results table in docs/decisions/cloud-file-storage-lifecycle/README.md; the active-cluster
+// wording is also source-traced, no live capture exists). So a match adds guidance and a miss
+// falls through to the generic branch; neither presents backend wording as the provider's own, and
+// the API's real message is always included so an unmatched refusal is still actionable.
+func addCloudResourceUpdateError(diags *diag.Diagnostics, cloudResourceID string, err error) {
 	var statusErr *UnexpectedStatusError
 	if errors.As(err, &statusErr) {
 		body := strings.ToLower(statusErr.Body)
 		switch {
 		case strings.Contains(body, "active clusters"):
 			diags.AddError(
-				"Cannot Update file_storage While Clusters Are Running",
+				"Cannot Update the Cloud While Clusters Are Running",
 				fmt.Sprintf("The Anyscale API refuses to update cloud resource %s while clusters are running on it. "+
 					"Terminate them and apply again, or make the change with `anyscale cloud update`.\n\nAPI response: %s",
 					cloudResourceID, statusErr.Body),
@@ -179,8 +160,8 @@ func addFileStorageUpdateError(diags *diag.Diagnostics, cloudResourceID string, 
 			return
 		case strings.Contains(body, "anyscale-managed"):
 			diags.AddError(
-				"Cannot Update file_storage on an Anyscale-Managed Cloud",
-				fmt.Sprintf("%s\n\nAPI response: %s", anyscaleManagedFileStorageRefusal, statusErr.Body),
+				"Cannot Update an Anyscale-Managed Cloud",
+				fmt.Sprintf("%s\n\nAPI response: %s", anyscaleManagedCloudUpdateRefusal, statusErr.Body),
 			)
 			return
 		case strings.Contains(body, "infrastructure manager") || strings.Contains(body, "infrastructure_manager_id"):
@@ -188,73 +169,30 @@ func addFileStorageUpdateError(diags *diag.Diagnostics, cloudResourceID string, 
 			// field. If it fires, the echo is broken - say so rather than blaming the practitioner.
 			diags.AddError(
 				"Cloud Resource Update Rejected an Unchanged Field",
-				fmt.Sprintf("Updating file_storage on cloud resource %s was rejected over the Infrastructure Manager ID, "+
+				fmt.Sprintf("Updating cloud resource %s was rejected over the Infrastructure Manager ID, "+
 					"which this provider echoes back unchanged. That points at a provider bug rather than the "+
 					"configuration; please report it.\n\nAPI response: %s", cloudResourceID, statusErr.Body),
 			)
 			return
+		case strings.Contains(statusErr.Body, "subnet IDs do not match zones"):
+			// Count-mismatch 400 surfaces verbatim (Gate 1 s3); the config
+			// gives the practitioner the same check the backend ran.
+			diags.AddError(
+				"Cannot Update Subnets",
+				fmt.Sprintf("The Anyscale API refused the subnet update on cloud resource %s. "+
+					"Check that every entry in aws_config.subnet_ids_to_az names a subnet and a zone.\n\nAPI response: %s",
+					cloudResourceID, statusErr.Body),
+			)
+			return
 		}
 	}
-	AddAPIError(diags, "update cloud file_storage", err)
+	AddAPIError(diags, "update cloud resource", err)
 }
 
-// updateFileStorageIfChanged issues the resources PUT when planFileStorage differs from
-// stateFileStorage, and does nothing otherwise. Shared verbatim by anyscale_cloud and
-// anyscale_cloud_resource, whose Update paths differ only in which model holds these values.
-//
-// It reports whether a PUT was made and, if so, the deployment's file_storage as the backend now
-// holds it. The PUT response is null, and the backend derives mount_targets and mount_path from
-// file_storage_id when the request omits them, so the only source for those values is a fresh
-// listing after the write. Callers resolve their unknown plan values from it. On any error the
-// diagnostics carry it and the returned values are meaningless.
-func updateFileStorageIfChanged(
-	ctx context.Context,
-	client *Client,
-	diags *diag.Diagnostics,
-	cloudID, cloudResourceID string,
-	planFileStorage, stateFileStorage types.Object,
-	isPrivateCloud bool,
-	wantProvider, wantComputeStack, wantRegion string,
-) (updated bool, live *FileStorage) {
-	if planFileStorage.Equal(stateFileStorage) {
-		return false, nil
-	}
-
-	fileStorage, err := expandFileStorage(ctx, planFileStorage)
-	if err != nil {
-		diags.AddError("Update Error", fmt.Sprintf("failed to convert file_storage: %s", err))
-		return false, nil
-	}
-
-	results, err := listCloudResources(ctx, client, cloudID)
-	if err != nil {
-		AddAPIError(diags, "list cloud resources before updating file_storage", err)
-		return false, nil
-	}
-	current := findCloudResourceByID(results, cloudResourceID)
-	if current == nil {
-		diags.AddError("Update Error", fmt.Sprintf("cloud resource %s not found while updating file_storage", cloudResourceID))
-		return false, nil
-	}
-
-	if err := updateCloudResourceFileStorage(ctx, client, cloudID, current, fileStorage, isPrivateCloud,
-		wantProvider, wantComputeStack, wantRegion); err != nil {
-		addFileStorageUpdateError(diags, cloudResourceID, err)
-		return false, nil
-	}
-
-	results, err = listCloudResources(ctx, client, cloudID)
-	if err != nil {
-		AddAPIError(diags, "list cloud resources after updating file_storage", err)
-		return true, nil
-	}
-	after := findCloudResourceByID(results, cloudResourceID)
-	if after == nil {
-		diags.AddError("Update Error", fmt.Sprintf("cloud resource %s not found after updating file_storage", cloudResourceID))
-		return true, nil
-	}
-	return true, after.FileStorage
-}
+// updateFileStorageIfChanged is superseded by updateCloudResourceIfChanged
+// (cloud_subnet_update.go), which carries file_storage and the plan's
+// explicit subnet pairs in one PUT. Both resources' Update paths now call
+// that directly.
 
 // refuseFileStorageChangeOnManagedCloud raises the Anyscale-managed refusal at plan time, so the
 // practitioner sees it before an apply starts writing. cloudResourceID may be empty or unknown on a

@@ -203,11 +203,35 @@ func validateSubnetIDsSupported(computeStack string, awsConfig *AWSConfigModel) 
 	if subnetIDsToAZSet {
 		attr = "subnet_ids_to_az"
 	}
-	return rejectFieldOnK8S(computeStack, true,
+	if k8sDiags := rejectFieldOnK8S(computeStack, true,
 		path.Root("aws_config").AtName(attr),
 		fmt.Sprintf("%s Not Supported On Kubernetes Compute", attr),
 		fmt.Sprintf("%s is a VM-compute concept - EKS networking comes entirely from kubernetes_config.zones. Setting it on a Kubernetes cloud does not do what you expect: depending on which subnet attribute is used it either silently corrupts the registered networking (subnet_ids_to_az) or triggers an unrelated backend error about subnet and zone counts not matching (subnet_ids) - confirmed by tracing the actual conversion code either way. Remove %s for Kubernetes compute; it has no role there.", attr, attr),
-	)
+	); k8sDiags.HasError() {
+		return k8sDiags
+	}
+
+	// Anyscale requires at least two subnets, in at least two availability
+	// zones (the CLI's verify_aws_subnets enforces this at register/update
+	// time with local AWS credentials). Plan-time, provider-side: >= 2
+	// subnet ENTRIES is checkable without AWS credentials; the provider
+	// cannot verify VPC membership, subnets being in the same VPC, or
+	// capacity - the CLI does those with local AWS credentials, and the
+	// provider deliberately does not pretend to.
+	count := 0
+	if subnetIDsToAZSet {
+		count = len(awsConfig.SubnetIDsToAZ.Elements())
+	} else {
+		count = len(awsConfig.SubnetIDs.Elements())
+	}
+	if count < 2 {
+		var diags diag.Diagnostics
+		diags.AddAttributeError(path.Root("aws_config").AtName(attr),
+			fmt.Sprintf("%s Needs At Least Two Subnets", attr),
+			fmt.Sprintf("Anyscale requires at least two subnets; %d is set. The provider cannot verify VPC membership or subnet capacity - the CLI checks those with local AWS credentials.", count))
+		return diags
+	}
+	return nil
 }
 
 // listAllClouds returns every cloud from GET /api/v2/clouds across all pages,
@@ -705,70 +729,88 @@ func stringSetsEqual(a, b []string) bool {
 	return true
 }
 
-// awsSubnetIDsRequiresReplaceUnlessEquivalent and
-// awsSubnetIDsToAZRequiresReplaceUnlessEquivalent replace RequiresReplace on
-// aws_config.subnet_ids and subnet_ids_to_az.
+// awsSubnetIDsPlanModifier governs aws_config.subnet_ids changes: AWS subnet
+// changes update IN PLACE, never replaces (the resources PUT is the same route
+// `anyscale cloud update` uses). One exception is refused outright, at plan
+// time: changing the subnet SET through the list form. subnet_ids names no
+// zones, so the backend would derive them from AWS and pair them positionally
+// with the request order - live-proven on UPDATE to store the WRONG
+// subnet-AZ pairs (Gate 1 s2, real AWS 2026-11-09; CREATE pairs correctly, so
+// create keeps working). The replacement this used to be is strictly worse:
+// destroying the cloud re-creates it through the same derivation. The map form
+// (subnet_ids_to_az) names zones explicitly and updates in place, so the error
+// points there.
 //
-// The API returns subnets only as parallel arrays, so import recovers
-// subnet_ids_to_az and leaves subnet_ids null. A config written with the list
-// form therefore differs from the imported state on both attributes, though
-// both describe the same subnets. These modifiers suppress the replacement when
-// the two forms name the same subnet IDs, and never touch the plan value: Core
-// rejects a plan that differs from a known, non-null config value on a
-// non-Computed attribute, which is what rewriting the plan to the recovered
-// state produced ("Provider produced invalid plan"). The result is a one-time
-// in-place update that records the configured form; a real change of subnets
-// still replaces. Create and destroy never replace, as with RequiresReplace.
-type awsSubnetIDsRequiresReplaceUnlessEquivalent struct{}
+// A reorder that names the same SET of subnets is not a change: the plan value
+// is normalized to the state's element order, so it produces no diff and no
+// in-place PUT. Element order never reaches the backend - the resources PUT
+// regroups subnets by zone - so the state's order is the one to keep.
+// (Gate 2 caveat: on an update plan, rewriting a non-Computed attribute's
+// value away from the config value is normally rejected by Core as "provider
+// produced invalid plan"; the acceptance suite (U2) documents the real
+// behavior. If Core rejects the rewrite, drop the resp.PlanValue assignment
+// and let the one-time in-place record-form normalization absorb reorders.)
+//
+// Unchanged config against a REFRESHED state (Read refreshes the live subnet
+// set into state) reproduces the same error: diagnosing it as a set change is
+// the designed guidance - the fix is adopting the map form either way.
+//
+// Create and destroy do nothing, as with RequiresReplace.
+type awsSubnetIDsPlanModifier struct{}
 
-func (awsSubnetIDsRequiresReplaceUnlessEquivalent) Description(context.Context) string {
-	return "Requires replacement when subnet_ids changes, unless it names the same subnets as the subnet_ids_to_az recorded at import."
+func (awsSubnetIDsPlanModifier) Description(context.Context) string {
+	return "Subnet changes update in place; a subnet_ids set change is refused at plan time because Anyscale derives zones itself and can pair them with the wrong subnets."
 }
 
-func (m awsSubnetIDsRequiresReplaceUnlessEquivalent) MarkdownDescription(ctx context.Context) string {
+func (m awsSubnetIDsPlanModifier) MarkdownDescription(ctx context.Context) string {
 	return m.Description(ctx)
 }
 
-func (awsSubnetIDsRequiresReplaceUnlessEquivalent) PlanModifyList(ctx context.Context, req planmodifier.ListRequest, resp *planmodifier.ListResponse) {
+func (awsSubnetIDsPlanModifier) PlanModifyList(ctx context.Context, req planmodifier.ListRequest, resp *planmodifier.ListResponse) {
 	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() || req.PlanValue.Equal(req.StateValue) {
 		return
 	}
-	if req.StateValue.IsNull() && !req.PlanValue.IsNull() && !req.PlanValue.IsUnknown() {
+	if req.PlanValue.IsUnknown() || req.PlanValue.IsNull() {
+		// The plan dropped the list form (form switch to the map, or removal);
+		// in-place Update records the planned form, nothing to refuse.
+		return
+	}
+	if !req.StateValue.IsNull() && !req.StateValue.IsUnknown() {
+		// Same attribute in state: compare as sets (order is irrelevant).
+		var planIDs, stateIDs []string
+		if !req.PlanValue.ElementsAs(ctx, &planIDs, false).HasError() &&
+			!req.StateValue.ElementsAs(ctx, &stateIDs, false).HasError() {
+			if stringSetsEqual(planIDs, stateIDs) {
+				// Reorder of the same set: keep the state's order.
+				resp.PlanValue = req.StateValue
+				return
+			}
+			awsRefuseSubnetSetChange(&resp.Diagnostics, req.Path)
+			return
+		}
+		return
+	}
+	// State's list is null (state holds the map form, or nothing yet):
+	// compare against the map's keys when one is recorded.
+	var stateSubnetToAZ map[string]string
+	if !req.State.GetAttribute(ctx, path.Root("aws_config").AtName("subnet_ids_to_az"), &stateSubnetToAZ).HasError() {
 		var planIDs []string
-		var stateSubnetToAZ map[string]string
-		if !req.PlanValue.ElementsAs(ctx, &planIDs, false).HasError() && len(planIDs) > 0 &&
-			!req.State.GetAttribute(ctx, path.Root("aws_config").AtName("subnet_ids_to_az"), &stateSubnetToAZ).HasError() &&
-			stringSetsEqual(planIDs, mapKeys(stateSubnetToAZ)) {
+		if !req.PlanValue.ElementsAs(ctx, &planIDs, false).HasError() && len(planIDs) > 0 {
+			if stringSetsEqual(planIDs, mapKeys(stateSubnetToAZ)) {
+				// Same subnets through the list form: records the configured
+				// form in place; no zones are written either way.
+				return
+			}
+			awsRefuseSubnetSetChange(&resp.Diagnostics, req.Path)
 			return
 		}
 	}
-	resp.RequiresReplace = true
 }
 
-type awsSubnetIDsToAZRequiresReplaceUnlessEquivalent struct{}
-
-func (awsSubnetIDsToAZRequiresReplaceUnlessEquivalent) Description(context.Context) string {
-	return "Requires replacement when subnet_ids_to_az changes, unless the config omits it and names the same subnets through subnet_ids."
-}
-
-func (m awsSubnetIDsToAZRequiresReplaceUnlessEquivalent) MarkdownDescription(ctx context.Context) string {
-	return m.Description(ctx)
-}
-
-func (awsSubnetIDsToAZRequiresReplaceUnlessEquivalent) PlanModifyMap(ctx context.Context, req planmodifier.MapRequest, resp *planmodifier.MapResponse) {
-	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() || req.PlanValue.Equal(req.StateValue) {
-		return
-	}
-	if req.PlanValue.IsNull() && !req.StateValue.IsNull() && !req.StateValue.IsUnknown() {
-		var stateSubnetToAZ map[string]string
-		var configSubnetIDs []string
-		if !req.StateValue.ElementsAs(ctx, &stateSubnetToAZ, false).HasError() && len(stateSubnetToAZ) > 0 &&
-			!req.Config.GetAttribute(ctx, path.Root("aws_config").AtName("subnet_ids"), &configSubnetIDs).HasError() &&
-			len(configSubnetIDs) > 0 && stringSetsEqual(configSubnetIDs, mapKeys(stateSubnetToAZ)) {
-			return
-		}
-	}
-	resp.RequiresReplace = true
+func awsRefuseSubnetSetChange(diags *diag.Diagnostics, p path.Path) {
+	diags.AddAttributeError(p, "Changing subnets in place requires aws_config.subnet_ids_to_az",
+		"With subnet_ids, Anyscale derives availability zones itself and can pair them with the wrong subnets. "+
+			"Rewrite the setting as subnet_ids_to_az with each subnet's zone; the change then applies in place.")
 }
 
 func mapKeys(m map[string]string) []string {

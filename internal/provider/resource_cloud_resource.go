@@ -302,18 +302,15 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					"subnet_ids": schema.ListAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
-						MarkdownDescription: "List of subnet IDs for Anyscale resources. Use this OR `subnet_ids_to_az`; if both are set, `subnet_ids_to_az` is used and this is ignored. VM compute only: EKS networking comes from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time.",
+						MarkdownDescription: "List of subnet IDs for Anyscale resources. Use this OR `subnet_ids_to_az`; if both are set, `subnet_ids_to_az` is used and this is ignored. At least two subnets are required. This form cannot be changed after creation: Anyscale derives the availability zones itself and can pair them with the wrong subnets, so changing the subnet set is rejected at plan time. To change subnets, rewrite this as `subnet_ids_to_az`, which updates in place. VM compute only: EKS networking comes from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time.",
 						PlanModifiers: []planmodifier.List{
-							guardPrimaryList(awsSubnetIDsRequiresReplaceUnlessEquivalent{}),
+							awsSubnetIDsPlanModifier{},
 						},
 					},
 					"subnet_ids_to_az": schema.MapAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
-						MarkdownDescription: "Map of subnet ID to availability zone (e.g., {\"subnet-123\": \"us-east-2a\"}). Preferred over `subnet_ids`, which is ignored when both are set. VM compute only: EKS networking comes from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time.",
-						PlanModifiers: []planmodifier.Map{
-							guardPrimaryMap(awsSubnetIDsToAZRequiresReplaceUnlessEquivalent{}),
-						},
+						MarkdownDescription: "Map of subnet ID to availability zone (e.g., {\"subnet-123\": \"us-east-2a\"}). Preferred over `subnet_ids`, which is ignored when both are set. At least two subnets are required. This is the only subnet form that can change after creation: a change applies in place, with each subnet paired to the zone named here. VM compute only: EKS networking comes from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time.",
 					},
 					"security_group_ids": schema.ListAttribute{
 						ElementType:         types.StringType,
@@ -887,7 +884,7 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 	}
 
 	// Read back the resource to get all computed fields
-	if err := r.readCloudResource(ctx, cloudID, resourceName, &plan, nil); err != nil {
+	if _, err := r.readCloudResource(ctx, cloudID, resourceName, &plan, nil); err != nil {
 		AddAPIError(&resp.Diagnostics, "read cloud resource after creation", err)
 		return
 	}
@@ -912,7 +909,8 @@ func (r *CloudResourceResource) Read(ctx context.Context, req resource.ReadReque
 
 	tflog.Info(ctx, "Reading Anyscale Cloud Resource", map[string]any{"cloud_id": cloudID, "name": resourceName})
 
-	if err := r.readCloudResource(ctx, cloudID, resourceName, &state, &resp.Diagnostics); err != nil {
+	foundResource, err := r.readCloudResource(ctx, cloudID, resourceName, &state, &resp.Diagnostics)
+	if err != nil {
 		if isGoneOrForbidden(err) {
 			tflog.Warn(ctx, "Cloud resource not found, removing from state", map[string]any{"cloud_id": cloudID, "name": resourceName})
 			addForbiddenTreatedAsDeletedWarning(&resp.Diagnostics, "Cloud Resource", state.ID.ValueString(), err)
@@ -920,6 +918,18 @@ func (r *CloudResourceResource) Read(ctx context.Context, req resource.ReadReque
 			return
 		}
 		AddAPIError(&resp.Diagnostics, "read cloud resource", err)
+		return
+	}
+
+	// Read-only subnet drift refresh - Read only, never the Create/Update
+	// readback (same C12 reasoning as anyscale_cloud). Only the subnet
+	// attribute the state already uses is touched.
+	refreshedAWS, refreshDiags := refreshSubnetDrift(ctx, state.AWSConfig, foundResource)
+	resp.Diagnostics.Append(refreshDiags...)
+	if !refreshDiags.HasError() {
+		state.AWSConfig = refreshedAWS
+	}
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
@@ -966,9 +976,10 @@ func (r *CloudResourceResource) Update(ctx context.Context, req resource.UpdateR
 		return
 	}
 
-	// See docs/decisions/cloud-file-storage-lifecycle/README.md.
-	_, liveFileStorage := updateFileStorageIfChanged(ctx, r.client, &resp.Diagnostics, cloudID, state.CloudResourceID.ValueString(),
-		plan.FileStorage, state.FileStorage, plan.IsPrivate.ValueBool(),
+	// See docs/decisions/cloud-file-storage-lifecycle/README.md. The same PUT
+	// carries file_storage and the plan's explicit subnet pairs.
+	_, liveFileStorage := updateCloudResourceIfChanged(ctx, r.client, &resp.Diagnostics, cloudID, state.CloudResourceID.ValueString(),
+		plan.FileStorage, state.FileStorage, plan.AWSConfig, state.AWSConfig, plan.IsPrivate.ValueBool(),
 		state.CloudProvider.ValueString(), state.ComputeStack.ValueString(), state.Region.ValueString())
 	if resp.Diagnostics.HasError() {
 		return
@@ -994,7 +1005,7 @@ func (r *CloudResourceResource) Update(ctx context.Context, req resource.UpdateR
 	}
 	state.AWSConfig = awsConfig
 
-	if err := r.readCloudResource(ctx, cloudID, resourceName, &state, nil); err != nil {
+	if _, err := r.readCloudResource(ctx, cloudID, resourceName, &state, nil); err != nil {
 		AddAPIError(&resp.Diagnostics, "read cloud resource", err)
 		return
 	}
@@ -1189,7 +1200,7 @@ func parseCloudResourceID(id string) (cloudID, resourceName string, err error) {
 //
 // driftDiags is the opt-in hook for file_storage drift warnings: nil from Create/Update (see readCloudState
 // in resource_cloud.go, same reasoning), &resp.Diagnostics from Read.
-func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, resourceName string, state *CloudResourceResourceModel, driftDiags *diag.Diagnostics) error {
+func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, resourceName string, state *CloudResourceResourceModel, driftDiags *diag.Diagnostics) (*CloudDeploymentResult, error) {
 	// listCloudResources pages through every page rather than just the first:
 	// Read calls this and removes the resource from state on a "not found", so
 	// a resource whose name only appears past page 1 would otherwise be
@@ -1198,9 +1209,9 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 	results, err := listCloudResources(ctx, r.client, cloudID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			return fmt.Errorf("%w: cloud not found", ErrNotFound)
+			return nil, fmt.Errorf("%w: cloud not found", ErrNotFound)
 		}
-		return err
+		return nil, err
 	}
 
 	foundResource := findCloudResourceByName(results, resourceName)
@@ -1211,7 +1222,7 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 		// findOrgCollaboratorByEmail (resource_organization_user_role.go), so a caller can
 		// treat "this named resource isn't in the list" the same as "the cloud is gone"
 		// without needing a second, string-matched condition.
-		return fmt.Errorf("%w: cloud resource not found", ErrNotFound)
+		return nil, fmt.Errorf("%w: cloud resource not found", ErrNotFound)
 	}
 
 	// Update state from API response
@@ -1251,7 +1262,7 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 	}
 
 	tflog.Info(ctx, "Cloud resource read successfully", map[string]any{"cloud_id": cloudID, "name": resourceName})
-	return nil
+	return foundResource, nil
 }
 
 // expandAWSConfig extracts AWS configuration from the Terraform plan

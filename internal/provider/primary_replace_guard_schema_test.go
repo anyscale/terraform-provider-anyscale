@@ -21,6 +21,9 @@ var cloudResourceNonReplacingModifierTypes = map[string]bool{
 	"provider.bucketNameSemanticEqualPlanModifier":  true,
 	"provider.fileStorageDerivedListModifier":       true,
 	"provider.fileStorageDerivedStringModifier":     true,
+	// Subnet changes update in place; the modifier refuses a subnet_ids set
+	// change at plan time instead of ever forcing replacement.
+	"provider.awsSubnetIDsPlanModifier": true,
 }
 
 var cloudResourceGuardTypes = map[string]bool{

@@ -1,0 +1,10 @@
+```markdown
+### New Features
+
+#### `anyscale_cloud` / `anyscale_cloud_resource`: AWS subnets now update in place
+
+* `aws_config.subnet_ids_to_az` changes now update the cloud in place instead of replacing it, using the same API route as `anyscale cloud update`. [Read more](https://registry.terraform.io/providers/anyscale/anyscale/latest/docs/resources/cloud#subnet_ids_to_az)
+* Out-of-band subnet changes (made with the Anyscale CLI) are now surfaced: `terraform plan` refreshes the live subnets and the apply reverts them in place - the `ignore_changes` workaround can be dropped once the config matches the live cloud.
+* A change to the subnet set through the plain `subnet_ids` list is now an error at plan time instead of a replacement: Anyscale derives availability zones itself and can pair them with the wrong subnets (confirmed live). Rewrite the setting as `subnet_ids_to_az` with each subnet's zone; the change then applies in place.
+* At least two subnets are now required and validated at plan time. VPC membership and subnet capacity are not verified by the provider - the CLI checks those with local AWS credentials.
+```

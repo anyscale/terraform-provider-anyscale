@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
-	"strings"
+
 	"sync/atomic"
 	"testing"
 
@@ -186,26 +186,22 @@ func runSubnetForms(t *testing.T, c subnetFormsCase, cloudID string) {
 		})
 	})
 
-	t.Run("list form for different subnets still replaces", func(t *testing.T) {
+	t.Run("list form for different subnets is refused", func(t *testing.T) {
+		// 2026-11-09 revision: a subnet_ids set change no longer replaces - the
+		// re-create would run through the same backend zone derivation that
+		// mis-pairs subnets (live-proven, Gate 1 s2), so replacement is strictly
+		// worse. Same set through the list form still updates in place (above);
+		// a DIFFERENT set is refused at plan time with the map-form guidance.
 		url := subnetFormsServer(t, cloudID).URL
-		step := resource.TestStep{
-			Config: c.config(url, cloudID, subnetOther),
-			ConfigPlanChecks: resource.ConfigPlanChecks{
-				PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(c.address, plancheck.ResourceActionDestroyBeforeCreate)},
-			},
-		}
-		if strings.HasPrefix(c.address, "anyscale_cloud_resource.") {
-			// The mock's resource is the cloud's primary, which cannot be replaced: the
-			// replacement the subnet modifier still reports is refused at plan time,
-			// naming the attribute that forced it.
-			step = resource.TestStep{
-				Config:      c.config(url, cloudID, subnetOther),
-				ExpectError: regexp.MustCompile(`(?s)Cannot Replace a Primary Cloud Resource.*aws_config\.subnet_ids cannot be changed on a cloud's primary resource`),
-			}
-		}
 		resource.Test(t, resource.TestCase{
 			ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-			Steps:                    []resource.TestStep{importStep(url, subnetOther), step},
+			Steps: []resource.TestStep{
+				importStep(url, subnetOther),
+				{
+					Config:      c.config(url, cloudID, subnetOther),
+					ExpectError: regexp.MustCompile(`Changing subnets in place requires aws_config\.subnet_ids_to_az`),
+				},
+			},
 		})
 	})
 }

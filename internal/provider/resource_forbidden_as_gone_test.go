@@ -522,7 +522,7 @@ func TestReadCloudState_ForbiddenIsTyped(t *testing.T) {
 	t.Cleanup(server.Close)
 	r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
 
-	err := r.readCloudState(context.Background(), "cld_forbidden", &CloudResourceModel{}, nil)
+	_, err := r.readCloudState(context.Background(), "cld_forbidden", &CloudResourceModel{}, nil)
 	if !isHTTPStatus(err, http.StatusForbidden) {
 		t.Fatalf("403 error = %v, want an UnexpectedStatusError with status 403", err)
 	}
@@ -531,7 +531,7 @@ func TestReadCloudState_ForbiddenIsTyped(t *testing.T) {
 	}
 
 	// Any other status is an error carrying its own status, not a 403.
-	err = r.readCloudState(context.Background(), "cld_bad", &CloudResourceModel{}, nil)
+	_, err = r.readCloudState(context.Background(), "cld_bad", &CloudResourceModel{}, nil)
 	if !isHTTPStatus(err, http.StatusBadRequest) {
 		t.Errorf("400 error = %v, want an UnexpectedStatusError with status 400", err)
 	}
