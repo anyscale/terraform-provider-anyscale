@@ -372,8 +372,9 @@ A few more things worth knowing:
   registered with the plain list form. A plan modifier now treats the two forms as equivalent
   whenever they describe the same set of subnets, regardless of order. Import records the map form,
   so a config that writes the list form for the same subnets against an imported cloud shows a
-  one-time in-place update that records the list form. Adding, removing, or swapping a subnet still
-  replaces.
+  one-time in-place update that records the list form. Adding, removing, or swapping a subnet no longer
+  replaces the cloud: on the map form it updates in place, and on the list form it is a
+  plan-time error - rewrite it as `subnet_ids_to_az`.
 - **`aws_config.memorydb_cluster_arn`/`memorydb_cluster_endpoint` and `gcp_config.memorystore_endpoint`
   are Computed and now round-trip cleanly whether or not your configuration sets them.** All three
   are backend-derived from `memorydb_cluster_name` (AWS) or `memorystore_instance_name` (GCP)
