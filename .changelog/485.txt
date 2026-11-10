@@ -1,0 +1,2 @@
+release-note:changed
+provider: Build with Go 1.27.4, so release binaries now require macOS 13.0 or later (previously macOS 12); on macOS and Windows, setting SSL_CERT_FILE or SSL_CERT_DIR now replaces the system certificate store for TLS verification, so set GODEBUG=x509sslcertoverrideplatform=0 to restore the previous behavior.
