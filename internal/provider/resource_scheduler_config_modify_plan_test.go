@@ -151,7 +151,7 @@ func TestSchedulerConfigModifyPlan_WarnsAndProceedsWhenValidateIsUnreachable(t *
 	}
 
 	// Sentinel: the warning's presence alone would also be produced by a
-	// config that never carried the fixture at all - forge's own control run
+	// config that never carried the fixture at all - an earlier control run
 	// got this same warning on a populated-but-all-null Config whose wire body
 	// was `{"config":{}}`, an empty document, because the mock's 501 fires
 	// unconditionally regardless of what was sent. Asserting the flavor name
@@ -213,7 +213,7 @@ func schedulerConfigGap2KnownRaw(t *testing.T, flavorName string) (schema.Schema
 // schedulerConfigGap2FlavorNamePath is the path to the one leaf gap 2 flips
 // between known and unknown: resource_flavors[0].name. It is inside a
 // serialized section (resource_flavors), not a top-level attribute -
-// deliberately, per the architect's requirement 2. The shipped gate
+// deliberately, per requirement 2 of the design. The shipped gate
 // (req.Config.Raw.IsFullyKnown(), resource_scheduler_config.go:703) is
 // whole-config today, so an unknown at top level and one inside a section are
 // indistinguishable to it - but this test is written against the documented
@@ -247,7 +247,7 @@ func runSchedulerConfigModifyPlanRaw(t *testing.T, client *Client, s schema.Sche
 }
 
 // TestSchedulerConfigModifyPlan_SkipsValidateSilentlyWhenSectionHasUnknownValue
-// is gap 2 from the PR #280 review, per the architect's spec: nothing today
+// is gap 2 from the PR #280 review, per the design spec: nothing today
 // proves that an unknown value inside one of the four config sections (as
 // opposed to the whole config being null, which the destroy short-circuit
 // already covers) makes ModifyPlan skip the cross-reference validate call

@@ -142,7 +142,7 @@ func TestOrganizationInvitationMoveState_UnsupportedVersionErrors(t *testing.T) 
 }
 
 // TestOrganizationInvitationMoveState_NilSourceStateErrors pins the
-// architect/forge agreement: gates all match but SourceState is nil (decode
+// agreed contract: gates all match but SourceState is nil (decode
 // failure) -> ERROR, not skip.
 func TestOrganizationInvitationMoveState_NilSourceStateErrors(t *testing.T) {
 	r := &OrganizationInvitationResource{}
