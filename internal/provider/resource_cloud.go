@@ -282,7 +282,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					"subnet_ids": schema.ListAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
-						MarkdownDescription: "List of subnet IDs for Anyscale resources. Use this OR `subnet_ids_to_az`; if both are set, `subnet_ids_to_az` is used and this is ignored. This form cannot be changed after creation: Anyscale derives the availability zones itself and can pair them with the wrong subnets, so changing the subnet set is rejected at plan time. To change subnets, rewrite this as `subnet_ids_to_az`, which updates in place. VM compute only: EKS networking comes from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time.",
+						MarkdownDescription: "List of subnet IDs, compared as a set: reordering alone is never a change; changing which subnets it contains is rejected at plan time because Anyscale derives the zones itself and can pair them with the wrong subnets - change subnets in place by rewriting them as `subnet_ids_to_az` (it wins when both are set). A subnet change made outside Terraform also surfaces as this error. VPC membership and capacity are not verified by the provider. VM compute only: rejected on a Kubernetes cloud, whose networking comes from `kubernetes_config.zones`.",
 						PlanModifiers: []planmodifier.List{
 							awsSubnetIDsPlanModifier{},
 						},
@@ -290,7 +290,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					"subnet_ids_to_az": schema.MapAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
-						MarkdownDescription: "Map of subnet ID to availability zone (e.g., {\"subnet-123\": \"us-east-2a\"}). Preferred over `subnet_ids`, which is ignored when both are set. This is the only subnet form that can change after creation: a change applies in place, with each subnet paired to the zone named here. VM compute only: EKS networking comes from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time. Also the source for inferring `region` on AWS.",
+						MarkdownDescription: "Map of subnet ID to availability zone (e.g., {\"subnet-123\": \"us-east-2a\"}). Preferred over `subnet_ids` and used instead of it when both are set. The only subnet form that can change after creation: a change applies in place with each subnet paired to the zone named here, and apply reverts a subnet change made outside Terraform. VPC membership and capacity are not verified by the provider. Also the source for inferring `region` on AWS. VM compute only: rejected on a Kubernetes cloud, whose networking comes from `kubernetes_config.zones`.",
 					},
 					"security_group_ids": schema.ListAttribute{
 						ElementType:         types.StringType,
