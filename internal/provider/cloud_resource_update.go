@@ -215,6 +215,9 @@ func refuseFileStorageChangeOnManagedCloud(
 		return
 	}
 	if isAnyscaleManaged(findCloudResourceByID(results, cloudResourceID)) {
-		diags.AddError("Cannot Update file_storage on an Anyscale-Managed Cloud", anyscaleManagedFileStorageRefusal)
+		// Title is operation-neutral like the apply-time translation; the
+		// body stays file_storage-specific because this plan-time check only
+		// fires on a file_storage change.
+		diags.AddError("Cannot Update an Anyscale-Managed Cloud", anyscaleManagedFileStorageRefusal)
 	}
 }

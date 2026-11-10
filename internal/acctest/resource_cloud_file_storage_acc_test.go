@@ -612,7 +612,7 @@ resource "anyscale_cloud" "test" {
 					// Changing the value forces an Update, which does go
 					// through the PUT the putHook intercepts.
 					Config:      configWithPVC(server.URL, "ray-shared-pvc-v2"),
-					ExpectError: regexp.MustCompile(`(?s)Cannot Update file_storage While Clusters Are Running.*active\s+clusters`),
+					ExpectError: regexp.MustCompile(`(?s)Cannot Update the Cloud While Clusters Are Running.*active\s+clusters`),
 				},
 			},
 		})
@@ -700,7 +700,7 @@ resource "anyscale_cloud" "test" {
 		}`, managedFieldJSON)
 	}
 
-	const managedDiagnosticPattern = `(?s)Cannot Update file_storage on an Anyscale-Managed Cloud`
+	const managedDiagnosticPattern = `(?s)Cannot Update an Anyscale-Managed Cloud`
 
 	planTimeCases := []struct {
 		name             string
