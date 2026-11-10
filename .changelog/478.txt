@@ -1,0 +1,4 @@
+```
+release-note:fixed
+resource/anyscale_cloud: a settings failure at create (`auto_add_user`, `lineage_tracking_enabled` or `aggregated_logs_enabled` refused by the API) no longer taints the cloud, so the next apply no longer replaces it. The settings are now applied before the cloud resource is added; on a failure the new cloud is deleted and the apply fails. Clouds tainted by earlier versions still need `terraform untaint`.
+```

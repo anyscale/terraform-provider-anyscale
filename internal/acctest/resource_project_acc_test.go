@@ -89,9 +89,12 @@ func TestAccProjectResource_WithDescription(t *testing.T) {
 					},
 				},
 			},
-			// regression test for task 452e7154: the API has no endpoint to update a
-			// project's description in place, so an explicit, intentional description
-			// change plans a replace (not a perpetual diff, not a silent no-op).
+			// regression test, continued from task 452e7154: that task made an
+			// intentional description change plan a replace because the API
+			// had no in-place route. It does now (PATCH /api/v2/projects/{id},
+			// confirmed in production 2026-11-09), so the same explicit change
+			// must plan an in-place update - not a replace, not a perpetual
+			// diff, not a silent no-op.
 			{
 				Config: testAccProjectResourceWithDescriptionConfig(cloudID, projectName, description+" (changed)"),
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -100,7 +103,7 @@ func TestAccProjectResource_WithDescription(t *testing.T) {
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("anyscale_project.test", plancheck.ResourceActionReplace),
+						plancheck.ExpectResourceAction("anyscale_project.test", plancheck.ResourceActionUpdate),
 					},
 					PostApplyPostRefresh: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
