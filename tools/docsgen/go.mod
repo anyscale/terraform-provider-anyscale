@@ -1,6 +1,6 @@
 module github.com/anyscale/terraform-provider-anyscale/tools/docsgen
 
-go 1.26.10
+go 1.27.4
 
 tool github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs
 
