@@ -150,7 +150,7 @@ jobs:
         # Fails only when the code calls a vulnerable symbol; findings in
         # modules the code does not call are reported but do not fail. Pinned so
         # a new govulncheck release cannot change the result of an unchanged PR.
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
       - name: tools/docsgen go directive not below root
         if: matrix.shard == 'lint-and-unit'
@@ -172,7 +172,7 @@ jobs:
         # tools/docsgen is a separate module (it pins tfplugindocs for `make
         # docs`), so `./...` above never scans it. Scanned against the tool
         # package because the module has no packages of its own.
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 -C tools/docsgen github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -C tools/docsgen github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs
 
       - name: Validate Examples
         if: matrix.shard == 'lint-and-unit'
