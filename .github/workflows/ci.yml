@@ -107,7 +107,7 @@ jobs:
         if: matrix.shard == 'lint-and-unit'
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: v2.13.2
+          version: v2.15.0
 
       - name: Install TFLint
         if: matrix.shard == 'lint-and-unit'
