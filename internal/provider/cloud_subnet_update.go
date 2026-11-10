@@ -194,8 +194,8 @@ func mapStringStringEqual(a, b map[string]string) bool {
 	return true
 }
 
-// updateCloudResourceIfChanged supersedes updateFileStorageIfChanged: it
-// issues ONE resources PUT whenever file_storage OR the plan's explicit
+// updateCloudResourceIfChanged issues ONE resources PUT whenever
+// file_storage OR the plan's explicit
 // subnet pairs differ, carrying both in the same request (one PUT carries
 // subnet AND file_storage changes together; the
 // PUT rewrites provider/compute_stack/region/networking_mode on the record,

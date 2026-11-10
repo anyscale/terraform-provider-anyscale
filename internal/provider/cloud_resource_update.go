@@ -190,11 +190,6 @@ func addCloudResourceUpdateError(diags *diag.Diagnostics, cloudResourceID string
 	AddAPIError(diags, "update cloud resource", err)
 }
 
-// updateFileStorageIfChanged is superseded by updateCloudResourceIfChanged
-// (cloud_subnet_update.go), which carries file_storage and the plan's
-// explicit subnet pairs in one PUT. Both resources' Update paths now call
-// that directly.
-
 // refuseFileStorageChangeOnManagedCloud raises the Anyscale-managed refusal at plan time, so the
 // practitioner sees it before an apply starts writing. cloudResourceID may be empty or unknown on a
 // plan that has not resolved it yet, in which case there is nothing to look up and the apply-time
