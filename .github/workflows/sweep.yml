@@ -41,7 +41,7 @@ jobs:
           go-version-file: "go.mod"
 
       - name: Setup Terraform
-        # Not kept in sync with ci.yml/scheduled-acctest.yml's 1.15.7 pin, and does
+        # Not kept in sync with ci.yml/scheduled-acctest.yml's 1.17.1 pin, and does
         # not need to be: those pin 1.15.0+ because terraform init under
         # dev_overrides 404s for an unpublished provider source below that version
         # (see ci.yml's Setup Terraform step). The sweeper only calls the Anyscale

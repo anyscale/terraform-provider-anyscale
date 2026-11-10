@@ -100,7 +100,7 @@ jobs:
         # lint-and-unit -- verified those two stay green before landing this.
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
-          terraform_version: "1.15.9"
+          terraform_version: "1.17.1"
           terraform_wrapper: false
 
       - name: Install golangci-lint
