@@ -20,21 +20,19 @@ import (
 )
 
 // subnetsInPlaceServer fronts newMockCloudCreateTimeServer and owns the AWS
-// subnet lifecycle, so tests can prove the in-place subnet contract
-// (2026-11-09):
+// subnet lifecycle, so tests can prove the in-place subnet behavior:
 //
 //   - PUT /api/v2/clouds/{id}/resources is scripted and captured: every
 //     request body is parsed and retained, so a test can assert the exact
 //     wire shape (subnet_ids and zones always paired, file_storage carried
 //     in the same PUT) and that list-form subnet_ids without zones is never
 //     sent.
-//   - Mirrors the live-proven backend behaviors from the Gate 1 log
-//     (cl.../gate1-cloud/gate1.log, real AWS 2026-11-09): 422 extra_forbidden
-//     on GET-only fields (s-probe first runs), 400 "subnet IDs do not match
-//     zones" for a count mismatch (s3, captured verbatim), positional
-//     zone-derivation mis-pairing when zones are omitted (s2), zone-sorted
-//     regrouping on the stored arrays (s5), and the active-cluster 400
-//     (source-traced in the contract; no live capture exists).
+//   - Mirrors backend behaviors confirmed by live testing on real AWS
+//     (2026-11-09): 422 extra_forbidden on GET-only fields, 400 "subnet IDs
+//     do not match zones" for a count mismatch (captured verbatim), positional
+//     zone-derivation mis-pairing when zones are omitted, zone-sorted
+//     regrouping on the stored arrays, and the active-cluster 400 (traced
+//     from backend source; no live capture exists).
 type subnetsInPlaceServer struct {
 	mu sync.Mutex
 	// Deployment modeled on the base mock's static resource: same VPC, SG,
@@ -49,14 +47,14 @@ type subnetsInPlaceServer struct {
 	putStatusBody string   // scripted status body; empty = 200
 	method        int      // scripted status; 0 = success
 	// requireSubnetZones, when true (the default), fails the PUT with the
-	// live-proven 400 when subnet_ids arrive without zones. The mutation
+	// 400 when subnet_ids arrive without zones. The mutation
 	// proof inverts it.
 	requireSubnetZones bool
 	// deployed tracks the primary deployment's existence: false hides it
 	// from GET /resources entirely (the anyscale_cloud_resource flow removes
 	// it at destroy; the anyscale_cloud flow never does).
 	deployed bool
-	// deriveZonesWhenOmitted, when true, simulates the live s2 behavior: a
+	// deriveZonesWhenOmitted, when true, simulates the live mis-pairing: a
 	// zones-less PUT is ACCEPTED (200) but zones are derived in
 	// describe-subnets response order and stored against the REQUEST order -
 	// the positional mis-pairing the provider must make impossible. Off by
@@ -222,7 +220,7 @@ func derivedZonesLocked(ids []string) []string {
 }
 
 // zoneSortLocked regroups the parallel arrays by zone ascending - the
-// live-proven storage order (s5: GET is zone-sorted after both s1 and s2).
+// The live storage order: GET reports the arrays zone-sorted after every write.
 func zoneSortLocked(ids, zones []string) ([]string, []string) {
 	type pair struct{ id, zone string }
 	pairs := make([]pair, len(ids))
@@ -296,13 +294,13 @@ func (s *subnetsInPlaceServer) handleResourcesPut(w http.ResponseWriter, r *http
 				ids = append(ids, fmt.Sprint(v))
 			}
 			if !zonesOK || len(zonesAny) == 0 {
-				// s2 shape: zones omitted. Either refuse (the provider is
+				// Zones omitted. Either refuse (the provider is
 				// never allowed to send this) or mis-pair the way the real
 				// backend does on UPDATE.
 				if s.requireSubnetZones {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusBadRequest)
-					_, _ = fmt.Fprint(w, `{"error":{"detail":"mock: subnets PUT without zones - the provider must always pair subnet ids with zones (live s2 mis-pairing)"}}`)
+					_, _ = fmt.Fprint(w, `{"error":{"detail":"mock: subnets PUT without zones - the provider must always pair subnet ids with zones (live mis-pairing)"}}`)
 					return
 				}
 				if s.deriveZonesWhenOmitted {
@@ -321,7 +319,7 @@ func (s *subnetsInPlaceServer) handleResourcesPut(w http.ResponseWriter, r *http
 				return
 			}
 			if len(idsAny) != len(zonesAny) {
-				// s3, captured verbatim from the live backend.
+				// Captured verbatim from a real API run (2026-11-09).
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadRequest)
 				_, _ = fmt.Fprintf(w, `{"error":{"detail":"Failed to update resource %s in cloud %s: convert cloud resource: subnet IDs do not match zones"}}`, s.resourceID, s.cloudID)
@@ -331,7 +329,7 @@ func (s *subnetsInPlaceServer) handleResourcesPut(w http.ResponseWriter, r *http
 			for _, v := range zonesAny {
 				zones = append(zones, fmt.Sprint(v))
 			}
-			// s5: stored zone-sorted.
+			// The backend stores the arrays zone-sorted.
 			s.subnetIDs, s.zones = zoneSortLocked(ids, zones)
 		}
 		// Unchanged/absent subnet_ids: backend leaves the stored network
@@ -492,7 +490,7 @@ func sortedMapKeys(m map[string]string) []string {
 // TestAccCloudResource_SubnetsToAZChangeUpdatesInPlace proves the headline
 // behavior: changing subnet_ids_to_az plans an Update - never a Replace - and
 // Update issues exactly one resources PUT whose subnet_ids and zones are the
-// map's own pairs. The zones are explicit per the live s2 finding: derived
+// map's own pairs. The zones are explicit because live testing showed
 // zones get paired positionally with the request order and mis-pair.
 func TestAccCloudResource_SubnetsToAZChangeUpdatesInPlace(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -582,7 +580,7 @@ func TestAccCloudResource_SubnetIDsReorderIsEmptyPlan(t *testing.T) {
 // TestAccCloudResource_SubnetIDsSetChangeRefusedAtPlanTime: changing the
 // subnet SET through the list form never reaches the API - it errors at plan
 // time with the subnet_ids_to_az guidance, because Anyscale derives zones
-// itself and can pair them with the wrong subnets (live-proven on UPDATE, s2).
+// itself and can pair them with the wrong subnets (confirmed live on update).
 func TestAccCloudResource_SubnetIDsSetChangeRefusedAtPlanTime(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	server, mock := newSubnetsInPlaceServer(t)
@@ -640,7 +638,8 @@ func TestAccCloudResource_SubnetIDsListFormDriftRefusedWithGuidance(t *testing.T
 // ─── U4: list -> map switch heals mis-paired zones ─────────────────────────
 
 // TestAccCloudResource_SubnetIDsToAZSwitchHealsMisPairing: a list-form cloud
-// whose stored zones are paired with the wrong subnets (the live s2 outcome)
+// whose stored zones are paired with the wrong subnets (the live outcome of
+// letting the backend derive zones on update)
 // is healed by switching the config to the map form with the SAME subnets and
 // the true zones: Update PUTs once - the form switch counts as a change - and
 // writes the correct pairs.
@@ -658,7 +657,7 @@ func TestAccCloudResource_SubnetIDsToAZSwitchHealsMisPairing(t *testing.T) {
 			{Config: subnetsInPlaceCloudConfig(server.URL, nil, list, "")},
 			{
 				PreConfig: func() {
-					// The live mis-pairing s2 produced: positional derivation
+					// The live mis-pairing: positional derivation
 					// stored the zones reversed against these subnet ids.
 					mock.setLiveSubnets([]string{"subnet-realct1", "subnet-realct2"},
 						[]string{"us-east-2b", "us-east-2a"})
@@ -735,7 +734,7 @@ func TestAccCloudResource_SubnetsToAZDriftShowsUpdateAndReverts(t *testing.T) {
 
 // ─── U6: PUT refusals error cleanly, never taint ───────────────────────────
 
-// A count-mismatch 400 (live-captured verbatim, s3) surfaces as an Update
+// A count-mismatch 400 (captured verbatim from a real API run) surfaces as an Update
 // error; the cloud is not tainted, and the next apply with the error cleared
 // proceeds as an ordinary in-place Update.
 func TestAccCloudResource_SubnetUpdateCountMismatchErrorsNotTaints(t *testing.T) {
@@ -870,7 +869,7 @@ func TestAccCloudResource_SubnetAndFileStorageUpdateTogether(t *testing.T) {
 
 // The subnet in-place machinery is shared with anyscale_cloud_resource, whose
 // Update and Read wiring are distinct code paths - these two smoke tests prove
-// the same contract holds on the second resource with the same mocked backend.
+// the same behavior holds on the second resource with the same mocked backend.
 
 // subnetsInPlaceCloudResourceConfig renders an anyscale_cloud (empty of
 // embedded config, so the cloud resource owns the deployment) plus one

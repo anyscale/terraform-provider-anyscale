@@ -11,14 +11,14 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
-// In-place AWS subnet updates (see the in-place subnets decision doc and the
-// pr-subnets-inplace contract, 2026-11-09). The resources PUT
+// In-place AWS subnet updates. The resources PUT
 // (PUT /api/v2/clouds/{id}/resources, the same route `anyscale cloud update`
 // uses) accepts subnet_ids + zones; the backend stores them,
 // regrouped and zone-sorted. Sending subnet_ids WITHOUT zones makes the
 // backend derive zones from AWS in describe-subnets response order and pair
 // them positionally with the request's subnet order - live-proven to
-// mis-pair them (Gate 1 s2, real AWS 2026-11-09). So this path only ever
+// mis-pairs them (live testing on real AWS, 2026-11-09, showed the backend
+// mis-pairing derived zones on update). So this path only ever
 // sends both arrays together, paired by the practitioner's own
 // subnet_ids_to_az map; subnet_ids-only configuration can never reach it
 // (its set changes are refused at plan time - see awsSubnetIDsPlanModifier).
@@ -196,8 +196,8 @@ func mapStringStringEqual(a, b map[string]string) bool {
 
 // updateCloudResourceIfChanged supersedes updateFileStorageIfChanged: it
 // issues ONE resources PUT whenever file_storage OR the plan's explicit
-// subnet pairs differ, carrying both in the same request (see the
-// contract: one PUT carries subnet AND file_storage changes together; the
+// subnet pairs differ, carrying both in the same request (one PUT carries
+// subnet AND file_storage changes together; the
 // PUT rewrites provider/compute_stack/region/networking_mode on the record,
 // so an unneeded call is pure downside).
 //

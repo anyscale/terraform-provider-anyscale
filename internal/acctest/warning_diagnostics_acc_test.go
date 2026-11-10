@@ -237,7 +237,7 @@ resource "anyscale_cloud" "test" {
 
   aws_config {
     vpc_id             = "vpc-test123"
-    subnet_ids_to_az   = { "subnet-test1" = "us-east-2a", "subnet-test2" = "us-east-2b" }
+    subnet_ids_to_az   = { "subnet-test1" = "us-east-2a" }
     security_group_ids = ["sg-test1"]
   }
 }

@@ -211,26 +211,13 @@ func validateSubnetIDsSupported(computeStack string, awsConfig *AWSConfigModel) 
 		return k8sDiags
 	}
 
-	// Anyscale requires at least two subnets, in at least two availability
-	// zones (the CLI's verify_aws_subnets enforces this at register/update
-	// time with local AWS credentials). Plan-time, provider-side: >= 2
-	// subnet ENTRIES is checkable without AWS credentials; the provider
-	// cannot verify VPC membership, subnets being in the same VPC, or
-	// capacity - the CLI does those with local AWS credentials, and the
-	// provider deliberately does not pretend to.
-	count := 0
-	if subnetIDsToAZSet {
-		count = len(awsConfig.SubnetIDsToAZ.Elements())
-	} else {
-		count = len(awsConfig.SubnetIDs.Elements())
-	}
-	if count < 2 {
-		var diags diag.Diagnostics
-		diags.AddAttributeError(path.Root("aws_config").AtName(attr),
-			fmt.Sprintf("%s Needs At Least Two Subnets", attr),
-			fmt.Sprintf("Anyscale requires at least two subnets; %d is set. The provider cannot verify VPC membership or subnet capacity - the CLI checks those with local AWS credentials.", count))
-		return diags
-	}
+	// No subnet-count validation here, deliberately: single-subnet clouds are
+	// legal (the backend accepts them, and this provider has always created
+	// them), so a >=2 plan-time check would hard-fail every plan of an
+	// existing single-subnet cloud after upgrade. The CLI's verify_aws_subnets
+	// two-subnet rule is an Anyscale-side requirement the API does not
+	// enforce, and VPC membership/capacity are checkable only with local AWS
+	// credentials anyway - the provider does not pretend to either.
 	return nil
 }
 
@@ -734,9 +721,9 @@ func stringSetsEqual(a, b []string) bool {
 // `anyscale cloud update` uses). One exception is refused outright, at plan
 // time: changing the subnet SET through the list form. subnet_ids names no
 // zones, so the backend would derive them from AWS and pair them positionally
-// with the request order - live-proven on UPDATE to store the WRONG
-// subnet-AZ pairs (Gate 1 s2, real AWS 2026-11-09; CREATE pairs correctly, so
-// create keeps working). The replacement this used to be is strictly worse:
+// with the request order - live testing on real AWS (2026-11-09) showed the
+// backend storing the WRONG subnet-AZ pairs on update (CREATE pairs
+// correctly, so create keeps working). The replacement this used to be is strictly worse:
 // destroying the cloud re-creates it through the same derivation. The map form
 // (subnet_ids_to_az) names zones explicitly and updates in place, so the error
 // points there.
@@ -744,12 +731,11 @@ func stringSetsEqual(a, b []string) bool {
 // A reorder that names the same SET of subnets is not a change: the plan value
 // is normalized to the state's element order, so it produces no diff and no
 // in-place PUT. Element order never reaches the backend - the resources PUT
-// regroups subnets by zone - so the state's order is the one to keep.
-// (Gate 2 caveat: on an update plan, rewriting a non-Computed attribute's
-// value away from the config value is normally rejected by Core as "provider
-// produced invalid plan"; the acceptance suite (U2) documents the real
-// behavior. If Core rejects the rewrite, drop the resp.PlanValue assignment
-// and let the one-time in-place record-form normalization absorb reorders.)
+// regroups subnets by zone - so the state's order is the one to keep. The
+// set-equal rewrite is accepted by Terraform Core (verified by a real
+// resource.Test plan run; the earlier "provider produced invalid plan"
+// precedent concerned rewriting a value to a DIFFERENT representation, not
+// normalizing list order between equal sets).
 //
 // Unchanged config against a REFRESHED state (Read refreshes the live subnet
 // set into state) reproduces the same error: diagnosing it as a set change is

@@ -91,9 +91,9 @@ func buildCloudResourceUpdateRequest(
 				// Subnet changes replace ONLY the parallel subnet_ids/zones
 				// arrays, and always both together - subnet_ids without
 				// zones makes the backend derive zones by positional pairing
-				// and store the WRONG pairs (live-proven, Gate 1 s2). The
-				// plan cannot reach here that way: subnet_ids set changes
-				// are refused at plan time.
+				// and store the WRONG pairs (live testing on real AWS,
+				// 2026-11-09). The plan cannot reach here that way:
+				// subnet_ids set changes are refused at plan time.
 				req.AWSConfig = applySubnetsToLiveAWSConfig(live.AWSConfig, subnets)
 			}
 		case "GCP":
@@ -140,9 +140,9 @@ const anyscaleManagedCloudUpdateRefusal = "This change cannot be made in place o
 // refusals the backend can raise all arrive as the same opaque 400, so they are told apart by
 // their message body. It serves both the file_storage and the AWS subnet in-place updates.
 //
-// The substrings below are taken from backend source, NOT from a captured response (see the Gate 1
-// results table in docs/decisions/cloud-file-storage-lifecycle/README.md; the active-cluster
-// wording is also source-traced, no live capture exists). So a match adds guidance and a miss
+// The substrings below are taken from backend source rather than a captured
+// response (the count-mismatch message excepted: that one is verbatim from a
+// real API run, 2026-11-09). So a match adds guidance and a miss
 // falls through to the generic branch; neither presents backend wording as the provider's own, and
 // the API's real message is always included so an unmatched refusal is still actionable.
 func addCloudResourceUpdateError(diags *diag.Diagnostics, cloudResourceID string, err error) {
@@ -175,8 +175,9 @@ func addCloudResourceUpdateError(diags *diag.Diagnostics, cloudResourceID string
 			)
 			return
 		case strings.Contains(statusErr.Body, "subnet IDs do not match zones"):
-			// Count-mismatch 400 surfaces verbatim (Gate 1 s3); the config
-			// gives the practitioner the same check the backend ran.
+			// Count-mismatch 400 surfaces verbatim (real API capture,
+			// 2026-11-09); the config gives the practitioner the same check
+			// the backend ran.
 			diags.AddError(
 				"Cannot Update Subnets",
 				fmt.Sprintf("The Anyscale API refused the subnet update on cloud resource %s. "+
