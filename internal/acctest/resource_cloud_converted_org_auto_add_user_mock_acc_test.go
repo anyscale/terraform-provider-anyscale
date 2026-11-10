@@ -257,27 +257,63 @@ func TestAccCloudResource_ConvertedOrgAutoAddUserCreateDeletesCloud(t *testing.T
 	}
 }
 
-// If deleting the refused cloud fails, the cloud stays in state, tainted, and
-// the error names the manual recovery.
-func TestAccCloudResource_ConvertedOrgAutoAddUserCreateDeleteFailsTaints(t *testing.T) {
+// If deleting the refused cloud fails, the create no longer taints the
+// cloud: it downgrades to a warning and succeeds (2026-11-09 revision of
+// decision 3). The recorded configured value surfaces the conflict on the
+// next plan as an update - which errors without tainting, like Update's
+// own converted-org path - instead of leaving a tainted replacement behind.
+func TestAccCloudResource_ConvertedOrgAutoAddUserCreateDeleteFailsWarnsInstead(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
-	deletes := convOrgCreateThenPlan(t, convOrgConvertedDetail, http.StatusBadRequest,
-		regexp.MustCompile(`(?s)deleting\s+the\s+cloud\s+also\s+failed.*terraform\s+untaint`),
-		plancheck.ResourceActionDestroyBeforeCreate)
-	if deletes != 1 {
-		t.Errorf("cloud DELETEs during the failed create = %d, want 1 (the attempt that failed)", deletes)
-	}
+	server, mock := newConvOrgCloudServer(t)
+	mock.set(http.StatusConflict, convOrgConvertedDetail)
+	mock.setDeleteStatus(http.StatusBadRequest)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				// No ExpectError: the create SUCCEEDS with a warning. The
+				// plan is deliberately NOT empty afterwards: state records
+				// the configured value while the cloud reports the refused
+				// one, so the next refresh reads the real value and the
+				// next plan is an update (exit (b), checked in the next
+				// step).
+				Config:             convOrgCloudConfig(server.URL, true),
+				ExpectNonEmptyPlan: true,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "auto_add_user", "true"),
+				),
+			},
+			{
+				PreConfig: func() {
+					if got := mock.deleteCount(); got != 1 {
+						t.Errorf("cloud DELETE attempts during the create = %d, want 1 (the failed rollback)", got)
+					}
+					mock.set(0, "")
+					mock.setDeleteStatus(0)
+				},
+				Config: convOrgCloudConfig(server.URL, true),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_cloud.test", plancheck.ResourceActionUpdate),
+					},
+				},
+			},
+		},
+	})
 }
 
-// A 409 that is not the converted-organization refusal is not deterministic:
-// the cloud must not be deleted, and it stays in state tainted as before.
-func TestAccCloudResource_UnrecognizedAutoAddUserConflictAtCreateKeepsCloud(t *testing.T) {
+// A 409 that is not the converted-organization refusal rolls the create back
+// like any other settings failure (2026-11-09 revision: a refused setting is
+// "not created", whether or not the refusal is recognized): the cloud is
+// deleted, nothing is left in state, and the next apply is an ordinary
+// create.
+func TestAccCloudResource_UnrecognizedAutoAddUserConflictAtCreateRollsBack(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	deletes := convOrgCreateThenPlan(t, convOrgUnrecognizedDetail, 0,
-		regexp.MustCompile(`another\s+membership\s+change`),
-		plancheck.ResourceActionDestroyBeforeCreate)
-	if deletes != 0 {
-		t.Errorf("cloud DELETEs during the failed create = %d, want 0: only the converted-org refusal deletes the cloud", deletes)
+		regexp.MustCompile(`(?s)Cloud\s+Not\s+Created.*auto_add_user.*Nothing\s+was\s+left\s+behind`),
+		plancheck.ResourceActionCreate)
+	if deletes != 1 {
+		t.Errorf("cloud DELETEs during the failed create = %d, want 1 (the rollback)", deletes)
 	}
 }
 

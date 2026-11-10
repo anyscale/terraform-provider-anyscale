@@ -829,6 +829,23 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		plan.ID = types.StringValue(existingCloudID)
 		plan.IsEmptyCloud = types.BoolValue(isEmptyCloud)
 
+		// Same unknown-to-null init as the fresh-create path below (search
+		// "Initialize CloudResourceID"): an empty cloud has no resource id,
+		// and for a cloud with resources readCloudState's backfill below
+		// overwrites this with the real id. Either way the State.Set below
+		// must never persist an unknown value.
+		if plan.CloudResourceID.IsUnknown() {
+			plan.CloudResourceID = types.StringNull()
+		}
+
+		// Capture the configured settings BEFORE readCloudState overwrites
+		// the model with the adopted cloud's real values: if the
+		// configuration asks for a different value than the adopted cloud
+		// holds, the settings are PUT so the apply does not end as an
+		// inconsistent result. This provider did not create the cloud, so a
+		// failure here is only ever a warning - never a delete.
+		configured := cloudSettingsOf(plan)
+
 		// Read the existing cloud to populate state
 		if err := r.readCloudState(ctx, existingCloudID, &plan, nil); err != nil {
 			AddAPIError(&resp.Diagnostics, "read existing cloud "+existingCloudID, err)
@@ -838,6 +855,8 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		if resp.Diagnostics.HasError() {
 			return
 		}
+
+		r.reconcileAdoptedCloudSettings(ctx, existingCloudID, &plan, configured, &resp.Diagnostics)
 
 		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 		return
@@ -998,18 +1017,48 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 	tflog.Info(ctx, "Cloud created successfully", map[string]any{"id": cloudID, "name": name})
 
-	// auto_add_user is applied before anything else, on empty clouds too: the backend accepts it
-	// on a cloud that is still being created (confirmed against the real API), and a converted
-	// organization's refusal then costs no resource add or readiness wait before the cloud is
-	// undone. See docs/decisions/cloud-create-settings-atomicity.
-	if plan.AutoAddUser.ValueBool() {
-		if err := r.updateCloudBoolField(ctx, cloudID, "auto_add_user", true); err != nil {
-			if isOrgConvertedConflict(err) {
-				r.undoCreateRefusedAutoAddUser(ctx, cloudID, err, resp)
+	// Step 1b: apply every configured cloud-level setting NOW, while the
+	// cloud is still empty - before add_resource, before the readiness wait,
+	// on empty clouds too. Every settings refusal this provider has seen
+	// (converted-org auto_add_user, the lineage_tracking 403) fires at this
+	// point, and the rollback DELETE is at its cheapest: no resources have
+	// been added, nothing has been waited on. These settings are NOT part of
+	// CreateCloudRequest/add_resource - the backend only exposes them via
+	// their own single-field PUT routes (the same ones Update calls), and a
+	// freshly created cloud reports all three false (confirmed against the
+	// real API, 2026-11-09): each PUT goes out only where the plan holds
+	// true.
+	//
+	// A failure here must never taint: the framework taints on ANY Create
+	// error once state is set, and a tainted cloud is destroyed and
+	// recreated by the next apply. So a refused setting rolls the whole
+	// create back - DELETE, remove from state, error - while the DELETE is
+	// still free, and if even that DELETE fails, downgrades to a warning and
+	// lets the create finish (see docs/decisions/cloud-create-settings-
+	// atomicity, Revision 2026-11-09).
+	failedSettings := map[string]bool{}
+	setting, settingErr := r.applyCreateCloudSettings(ctx, cloudID, &plan, failedSettings)
+	if settingErr != nil {
+		if setting == "auto_add_user" && isOrgConvertedConflict(settingErr) {
+			if r.undoCreateRefusedAutoAddUser(ctx, cloudID, settingErr, resp) {
 				return
 			}
-			resp.Diagnostics.AddError("Failed to Apply Cloud Settings", fmt.Sprintf("Cloud %s was created, but applying its configured settings failed: update auto_add_user: %s", cloudID, err.Error()))
+			// The rollback delete failed; undoCreateRefusedAutoAddUser has
+			// already added the exit-(b) warning. Finish the create with the
+			// configured (refused) value recorded in state.
+		} else if delErr := r.deleteJustCreatedCloud(ctx, cloudID); delErr == nil {
+			resp.State.RemoveResource(ctx)
+			resp.Diagnostics.AddError("Cloud Not Created",
+				fmt.Sprintf("Cloud %s was not created: applying %s failed: %s. Nothing was left behind. Fix the configuration and apply again.",
+					name, setting, settingErr.Error()))
 			return
+		} else {
+			addAppliedSettingWarning(&resp.Diagnostics, cloudID, "created", setting, settingErr,
+				fmt.Sprintf("rolling the create back by deleting the cloud also failed (%s)", extractAPIErrorDetail(delErr)))
+			// Exit (b): the create finishes; state records the configured
+			// value for the refused setting (reapplySettingsAfterReadback
+			// skips it, so the warning's account stands until the next
+			// refresh).
 		}
 	}
 
@@ -1017,18 +1066,14 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		// Skip add_resource call - resources will be added via anyscale_cloud_resource
 		tflog.Info(ctx, "Created empty cloud - resources should be added via anyscale_cloud_resource", map[string]any{"id": cloudID})
 
-		// The remaining toggles too, with step 4's semantics: without this, a configured true
-		// reads back false and the apply fails as an inconsistent result.
-		if err := r.updateMutableFields(ctx, cloudID, plan, createdCloudSettings(plan)); err != nil {
-			resp.Diagnostics.AddError("Failed to Apply Cloud Settings", fmt.Sprintf("Cloud %s was created, but applying its configured settings failed: %s", cloudID, err.Error()))
-			return
-		}
-
-		// Read back to get final state
+		// Read back to get final state, then re-attempt any setting the
+		// backend did not hold after all.
+		plannedSettings := cloudSettingsOf(plan)
 		if err := r.readCloudState(ctx, cloudID, &plan, nil); err != nil {
 			AddAPIError(&resp.Diagnostics, "read cloud", err)
 			return
 		}
+		reapplySettingsAfterReadback(ctx, r, cloudID, &plan, plannedSettings, failedSettings, &resp.Diagnostics)
 
 		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 		return
@@ -1054,65 +1099,193 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 	tflog.Info(ctx, "Cloud is ready", map[string]any{"id": cloudID})
 
-	// Step 4: apply the remaining cloud-level boolean toggles the user configured. auto_add_user
-	// was applied right after the POST above, so its baseline here is the planned value.
-	// These are NOT part of CreateCloudRequest/add_resource - the backend only
-	// exposes them via their own single-field PUT routes (same ones Update
-	// calls) - so without this step, setting any of them in the very first
-	// apply's config would never actually reach the API: the plan would show
-	// the configured value, but the final readCloudState below would then
-	// overwrite it with the backend's untouched default, producing "Provider
-	// produced inconsistent result after apply" on the first apply for any
-	// cloud that sets one of these. A freshly created cloud always starts
-	// with all three false, so comparing plan against that fixed
-	// zero-value baseline (rather than a real prior state, which doesn't
-	// exist yet) reuses the exact same diff-and-call logic Update() already
-	// uses and has already been proven against.
-	if err := r.updateMutableFields(ctx, cloudID, plan, createdCloudSettings(plan)); err != nil {
-		resp.Diagnostics.AddError("Failed to Apply Cloud Settings", fmt.Sprintf("Cloud %s was created, but applying its configured settings failed: %s", cloudID, err.Error()))
-		return
-	}
-
-	// Read back final state
+	// Step 4 (readback): the settings were applied to the empty cloud before
+	// add_resource (Step 1b). Confirm the backend still holds each one and
+	// re-attempt any that drifted, once, during the resource add. A
+	// mismatch that survives - or a re-attempt that fails - is a warning,
+	// never an error: the create has succeeded for real, and an error here
+	// would taint a fully working cloud for a settings drift.
+	plannedSettings := cloudSettingsOf(plan)
 	if err := r.readCloudState(ctx, cloudID, &plan, nil); err != nil {
 		AddAPIError(&resp.Diagnostics, "read cloud", err)
 		return
 	}
+	reapplySettingsAfterReadback(ctx, r, cloudID, &plan, plannedSettings, failedSettings, &resp.Diagnostics)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-// createdCloudSettings is the baseline updateMutableFields diffs a new cloud's plan against: a
-// freshly created cloud starts with every toggle false, except auto_add_user, which Create has
-// already applied by the time the others are.
-func createdCloudSettings(plan CloudResourceModel) CloudResourceModel {
-	return CloudResourceModel{
-		AutoAddUser:            plan.AutoAddUser,
-		LineageTrackingEnabled: types.BoolValue(false),
-		AggregatedLogsEnabled:  types.BoolValue(false),
-	}
-}
-
 // undoCreateRefusedAutoAddUser handles an organization converted to role bindings refusing
 // auto_add_user on a cloud Create just made. The refusal is deterministic, so leaving the cloud
-// in state would taint it and the next apply would replace it. Instead the cloud is deleted and
-// removed from state, and the next apply after the config fix is an ordinary create. If the
-// delete fails, the cloud stays in state (tainted, as Create errors) with the manual recovery.
-func (r *CloudResource) undoCreateRefusedAutoAddUser(ctx context.Context, cloudID string, refusal error, resp *resource.CreateResponse) {
-	_, delErr := DoRequestRaw(ctx, r.client, "DELETE", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil,
-		http.StatusOK, http.StatusNoContent, http.StatusNotFound)
-	if delErr == nil {
+// in state as an ERROR would taint it and the next apply would replace it. Instead the cloud is
+// deleted and removed from state, and the next apply after the config fix is an ordinary
+// create. Reports whether the cloud was deleted and removed from state: when even the delete
+// fails, the caller takes exit (b) instead - a warning, the create finishes, and the recorded
+// configured value surfaces the conflict again on the next plan as an update (which errors
+// without tainting, the same as Update's converted-org path).
+func (r *CloudResource) undoCreateRefusedAutoAddUser(ctx context.Context, cloudID string, refusal error, resp *resource.CreateResponse) bool {
+	if delErr := r.deleteJustCreatedCloud(ctx, cloudID); delErr == nil {
 		tflog.Info(ctx, "Deleted the cloud created in this apply after auto_add_user was refused", map[string]any{"id": cloudID})
 		resp.State.RemoveResource(ctx)
 		addOrgConvertedError(&resp.Diagnostics, refusal, "The cloud was not created: Terraform deleted the cloud it had just "+
 			"created because Anyscale refused auto_add_user. Set auto_add_user = false or remove it from the configuration, then apply again.")
-		return
+		return true
+	} else {
+		tflog.Error(ctx, "Failed to delete the cloud after auto_add_user was refused", map[string]any{"id": cloudID, "error": delErr.Error()})
+		addAppliedSettingWarning(&resp.Diagnostics, cloudID, "created", "auto_add_user", refusal,
+			fmt.Sprintf("Anyscale refuses auto_add_user in this organization, and rolling the create back by deleting the cloud also failed (%s)", extractAPIErrorDetail(delErr)))
+		return false
 	}
-	tflog.Error(ctx, "Failed to delete the cloud after auto_add_user was refused", map[string]any{"id": cloudID, "error": delErr.Error()})
-	addOrgConvertedError(&resp.Diagnostics, refusal, fmt.Sprintf("Cloud %s was created, but Anyscale refused to set auto_add_user, "+
-		"and deleting the cloud also failed (%s), so Terraform has marked the cloud tainted. Before the next apply, run "+
-		"'terraform untaint' on this resource's address AND set auto_add_user = false or remove it from the configuration. "+
-		"Otherwise the next apply destroys and recreates the cloud.", cloudID, extractAPIErrorDetail(delErr)))
+}
+
+// cloudSettings holds the three cloud-level boolean settings Create
+// reconciles around a create or adoption: auto_add_user,
+// lineage_tracking_enabled and aggregated_logs_enabled.
+type cloudSettings struct {
+	AutoAddUser           types.Bool
+	LineageTracking       types.Bool
+	AggregatedLogsEnabled types.Bool
+}
+
+// cloudSettingsOf snapshots the settings of a model, for comparing against a
+// real read-back later without holding the whole model.
+func cloudSettingsOf(m CloudResourceModel) cloudSettings {
+	return cloudSettings{
+		AutoAddUser:           m.AutoAddUser,
+		LineageTracking:       m.LineageTrackingEnabled,
+		AggregatedLogsEnabled: m.AggregatedLogsEnabled,
+	}
+}
+
+// settingDiffers reports whether a configured settings value is known (not
+// unknown, not null) and different from the cloud's real value. Unknown or
+// absent config takes the remote value: no PUT is issued for it.
+func settingDiffers(configured, remote types.Bool) bool {
+	return !configured.IsUnknown() && !configured.IsNull() && !configured.Equal(remote)
+}
+
+// applyCreateCloudSettings PUTs each of the three cloud-level settings the
+// plan holds true, in this order: auto_add_user, lineage_tracking_enabled,
+// aggregated_logs_enabled. A freshly created cloud reports all three false,
+// so a planned false already matches and needs no PUT. Stops at the first
+// failure and records it in failed, so the caller can name it and skip its
+// re-attempt at read-back.
+func (r *CloudResource) applyCreateCloudSettings(ctx context.Context, cloudID string, plan *CloudResourceModel, failed map[string]bool) (string, error) {
+	if plan.AutoAddUser.ValueBool() {
+		if err := r.updateCloudBoolField(ctx, cloudID, "auto_add_user", true); err != nil {
+			failed["auto_add_user"] = true
+			return "auto_add_user", err
+		}
+	}
+	if plan.LineageTrackingEnabled.ValueBool() {
+		if err := r.updateCloudBoolField(ctx, cloudID, "lineage_tracking_enabled", true); err != nil {
+			failed["lineage_tracking_enabled"] = true
+			return "lineage_tracking_enabled", err
+		}
+	}
+	if plan.AggregatedLogsEnabled.ValueBool() {
+		if err := r.updateCloudAggregatedLogsConfig(ctx, cloudID, true); err != nil {
+			failed["aggregated_logs_enabled"] = true
+			return "aggregated_logs_enabled", err
+		}
+	}
+	return "", nil
+}
+
+// deleteJustCreatedCloud rolls back a create whose settings were refused,
+// while the cloud is still empty. A 404 counts as success: the goal is that
+// nothing is left behind, and an already-absent cloud satisfies it.
+func (r *CloudResource) deleteJustCreatedCloud(ctx context.Context, cloudID string) error {
+	_, err := DoRequestRaw(ctx, r.client, "DELETE", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil,
+		http.StatusOK, http.StatusNoContent, http.StatusNotFound)
+	return err
+}
+
+// addAppliedSettingWarning is the exit-(b) diagnostic shared by every path
+// where a setting could not be applied but the create must still succeed:
+// adopted clouds, failed rollback deletes, and failed read-back re-attempts.
+// verb distinguishes a fresh create ("created") from an adoption ("adopted") -
+// the adopt path reaches this warning without anything having been created.
+// State records the configured value, so until the next refresh the state
+// misreports the setting (either way: over- or under-) and the next plan is an
+// update of it - the warning says both.
+func addAppliedSettingWarning(diags *diag.Diagnostics, cloudID, verb, setting string, err error, escalation string) {
+	diags.AddWarning("Cloud Setting Not Applied",
+		fmt.Sprintf("Cloud %s was %s, but applying %s failed: %s (%s). Terraform has recorded the configured value "+
+			"in state, so until the next refresh the state misreports %s, and the next plan is an update of it; that "+
+			"update fails with the same error until the setting, or access to it, is fixed.",
+			cloudID, verb, setting, err.Error(), escalation, setting))
+}
+
+// reconcileAdoptedCloudSettings reconciles the settings of a cloud Create is
+// adopting by name rather than creating: where the configuration holds a
+// known value that differs from the adopted cloud's real value, PUT it, so
+// the adoption does not end as an inconsistent result on a value the apply
+// could have fixed. This provider did not create the cloud, so a failure
+// here never deletes anything: the setting's configured value is recorded in
+// state with a warning, and the next plan surfaces the conflict as an update.
+func (r *CloudResource) reconcileAdoptedCloudSettings(ctx context.Context, cloudID string, plan *CloudResourceModel, configured cloudSettings, diags *diag.Diagnostics) {
+	if settingDiffers(configured.AutoAddUser, plan.AutoAddUser) {
+		if err := r.updateCloudBoolField(ctx, cloudID, "auto_add_user", configured.AutoAddUser.ValueBool()); err != nil {
+			addAppliedSettingWarning(diags, cloudID, "adopted", "auto_add_user", err,
+				"the cloud was left untouched, since this provider did not create it")
+		}
+		plan.AutoAddUser = configured.AutoAddUser
+	}
+	if settingDiffers(configured.LineageTracking, plan.LineageTrackingEnabled) {
+		if err := r.updateCloudBoolField(ctx, cloudID, "lineage_tracking_enabled", configured.LineageTracking.ValueBool()); err != nil {
+			addAppliedSettingWarning(diags, cloudID, "adopted", "lineage_tracking_enabled", err,
+				"the cloud was left untouched, since this provider did not create it")
+		}
+		plan.LineageTrackingEnabled = configured.LineageTracking
+	}
+	if settingDiffers(configured.AggregatedLogsEnabled, plan.AggregatedLogsEnabled) {
+		if err := r.updateCloudAggregatedLogsConfig(ctx, cloudID, configured.AggregatedLogsEnabled.ValueBool()); err != nil {
+			addAppliedSettingWarning(diags, cloudID, "adopted", "aggregated_logs_enabled", err,
+				"the cloud was left untouched, since this provider did not create it")
+		}
+		plan.AggregatedLogsEnabled = configured.AggregatedLogsEnabled
+	}
+}
+
+// reapplySettingsAfterReadback runs after Create's final readCloudState: any
+// setting the backend no longer holds (a reset during add_resource - not
+// expected, see the readback log) is re-attempted exactly once. Settings
+// that already failed before the resource add are skipped, and a failed or
+// persisting mismatch exit-(b)s: a warning, state records the configured
+// value, the create still succeeds. Never errors: by now the cloud is fully
+// built and an error would taint a working cloud for a settings drift.
+func reapplySettingsAfterReadback(ctx context.Context, r *CloudResource, cloudID string, plan *CloudResourceModel, planned cloudSettings, failed map[string]bool, diags *diag.Diagnostics) {
+	// applySetting re-attempts a drifted setting once. failed settings are
+	// not re-attempted (the fresh-create path already warned about them) but
+	// STILL record the planned value: the apply promised the configured
+	// value, and Core rejects a Create result that contradicts the plan.
+	applySetting := func(field string, plannedValue, real types.Bool, put func(context.Context, bool) error, set func(v types.Bool)) {
+		if failed[field] {
+			set(plannedValue)
+			return
+		}
+		if !settingDiffers(plannedValue, real) {
+			return
+		}
+		if err := put(ctx, plannedValue.ValueBool()); err != nil {
+			addAppliedSettingWarning(diags, cloudID, "created", field, err, "the read-back re-attempt also failed")
+		}
+		set(plannedValue)
+	}
+	applySetting("auto_add_user", planned.AutoAddUser, plan.AutoAddUser,
+		func(ctx context.Context, v bool) error {
+			return r.updateCloudBoolField(ctx, cloudID, "auto_add_user", v)
+		},
+		func(v types.Bool) { plan.AutoAddUser = v })
+	applySetting("lineage_tracking_enabled", planned.LineageTracking, plan.LineageTrackingEnabled,
+		func(ctx context.Context, v bool) error {
+			return r.updateCloudBoolField(ctx, cloudID, "lineage_tracking_enabled", v)
+		},
+		func(v types.Bool) { plan.LineageTrackingEnabled = v })
+	applySetting("aggregated_logs_enabled", planned.AggregatedLogsEnabled, plan.AggregatedLogsEnabled,
+		func(ctx context.Context, v bool) error { return r.updateCloudAggregatedLogsConfig(ctx, cloudID, v) },
+		func(v types.Bool) { plan.AggregatedLogsEnabled = v })
 }
 
 // Read refreshes the Terraform state with the latest data.
