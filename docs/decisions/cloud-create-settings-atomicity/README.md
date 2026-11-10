@@ -84,7 +84,7 @@ organizations end in the same state as today. No schema or state change. Changel
 
 ## Revision 2026-11-09
 
-Status: pending user approval (overrides the user-approved decision 4).
+Status: approved by the user 2026-11-09 (merge of #478).
 
 Supersedes decision 4 and decision 6b's taint clause; revises decision 3. Decisions 1, 2, 5
 and 6 stand. Gate 1 re-run the same day (real API, test org, throwaway cloud, deleted; log
@@ -108,6 +108,9 @@ resource-less cloud, so the rollback `DELETE` is cheap and never loses a provisi
   next plan then shows an in-place Update of that setting, and a failed Update never taints.
 - **Post-ready readback mismatch** (a setting the backend reset during `add_resource`): re-`PUT`
   once at most; a failure or a persistent mismatch becomes a warning, never an error.
+- **Gate 1-b (2026-11-09, real AWS, 2 runs):** `aggregated_logs_enabled` applied before the
+  resource add survives `add_resource` and readiness, so the re-`PUT` above is defensive only.
+  Lineage could not be tested (the test org refuses enabling it); its survival is unverified.
 - **Unchanged and out of scope:** `add_resource` failure and readiness-wait timeout still
   taint; the converted-organization 409 keeps its decision-2 text; the Update path is
   untouched.
