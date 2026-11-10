@@ -62,7 +62,7 @@ output "project_directory_name" {
 
 ### Optional
 
-- `description` (String) Description of the project. If omitted on create, the API generates one; an empty string is rejected at plan time. Changing this value updates the project in place. A cloud's default project cannot be modified, so changing its description errors at plan time.
+- `description` (String) Description of the project. If omitted on create, the API generates one; an empty string is rejected at plan time, so a description cannot be cleared. Changing this value updates the project in place; removing the attribute from the configuration leaves the stored description unchanged. A cloud's default project cannot be modified, so changing its description errors at plan time.
 
 ### Read-Only
 

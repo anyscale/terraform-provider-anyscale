@@ -119,7 +119,7 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 			"description": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
-				MarkdownDescription: "Description of the project. If omitted on create, the API generates one; an empty string is rejected at plan time. Changing this value updates the project in place. A cloud's default project cannot be modified, so changing its description errors at plan time.",
+				MarkdownDescription: "Description of the project. If omitted on create, the API generates one; an empty string is rejected at plan time, so a description cannot be cleared. Changing this value updates the project in place; removing the attribute from the configuration leaves the stored description unchanged. A cloud's default project cannot be modified, so changing its description errors at plan time.",
 				Validators: []validator.String{
 					stringvalidator.LengthAtLeast(1),
 				},
