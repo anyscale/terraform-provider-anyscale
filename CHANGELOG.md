@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.40.0] - 2026-11-10
+
+### Breaking Changes
+
+- resource/anyscale_cloud: changing which subnets `subnet_ids` lists is now an error at plan time instead of replacing the cloud — rewrite the list form as `subnet_ids_to_az` (the same applies to `anyscale_cloud_resource`). Reordering `subnet_ids` is not a change.
+
+### Changed
+
+- resource/anyscale_project: `description` now updates the project in place instead of forcing its replacement.
+- resource/anyscale_cloud: changing `aws_config.subnet_ids_to_az` now updates the cloud's subnets in place instead of replacing it (the same applies to `anyscale_cloud_resource`).
+- resource/anyscale_cloud: the plan now shows subnet changes made outside Terraform (for example by `anyscale cloud update`), and apply reverts them to the configuration — `ignore_changes` on the subnets can be dropped once the configuration matches the live cloud (the same applies to `anyscale_cloud_resource`).
+
+### Fixed
+
+- resource/anyscale_cloud: a settings failure at create (`auto_add_user`, `lineage_tracking_enabled` or `aggregated_logs_enabled` refused by the API) no longer taints the cloud, so the next apply no longer replaces it. The settings are now applied before the cloud resource is added; on a failure the new cloud is deleted and the apply fails. Clouds tainted by earlier versions still need `terraform untaint`.
+
 ## [0.39.0] - 2026-11-09
 
 ### Breaking Changes
@@ -1392,7 +1408,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.39.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.40.0...HEAD
+[0.40.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.40.0
 [0.39.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.39.0
 [0.38.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.38.0
 [0.37.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.37.0

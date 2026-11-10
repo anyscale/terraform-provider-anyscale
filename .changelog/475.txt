@@ -1,4 +1,0 @@
-```
-release-note:changed
-resource/anyscale_project: `description` now updates the project in place instead of forcing its replacement.
-```
