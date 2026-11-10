@@ -101,7 +101,7 @@ func TestReadCloudState_NeverTouchesAlreadyPopulatedConfigBlock(t *testing.T) {
 		GCPConfig:     types.ObjectNull(gcpConfigAttrTypes()),
 	}
 
-	if err := r.readCloudState(context.Background(), "cloud-1", state, nil); err != nil {
+	if _, err := r.readCloudState(context.Background(), "cloud-1", state, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -153,7 +153,7 @@ func TestReadCloudState_NeverInjectsIntoNullConfigBlock(t *testing.T) {
 		FileStorage:      types.ObjectNull(fileStorageAttrTypes()),
 	}
 
-	if err := r.readCloudState(context.Background(), "cloud-k8s", state, nil); err != nil {
+	if _, err := r.readCloudState(context.Background(), "cloud-k8s", state, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -200,7 +200,7 @@ func TestReadCloudState_ComputedFieldsStillBackfillOnImport(t *testing.T) {
 		AWSConfig:       types.ObjectNull(awsConfigAttrTypes()),
 	}
 
-	if err := r.readCloudState(context.Background(), "cloud-2", state, nil); err != nil {
+	if _, err := r.readCloudState(context.Background(), "cloud-2", state, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -247,7 +247,7 @@ func TestReadCloudState_EmptyCloudStaysEmptyEvenAfterResourceAttached(t *testing
 		CloudProvider:   types.StringValue("AWS"),
 	}
 
-	if err := r.readCloudState(context.Background(), "cloud-3", state, nil); err != nil {
+	if _, err := r.readCloudState(context.Background(), "cloud-3", state, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -278,7 +278,7 @@ func TestReadCloudState_CredentialsNeverPopulated(t *testing.T) {
 	r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
 	state := &CloudResourceModel{ID: types.StringValue("cloud-4"), Credentials: types.StringNull()}
 
-	if err := r.readCloudState(context.Background(), "cloud-4", state, nil); err != nil {
+	if _, err := r.readCloudState(context.Background(), "cloud-4", state, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -303,7 +303,7 @@ func TestReadCloudResource_NeverTouchesAlreadyPopulatedConfigBlock(t *testing.T)
 	originalAWSConfig := buildAWSConfigState(t, "vpc-ORIGINAL")
 	state := &CloudResourceResourceModel{AWSConfig: originalAWSConfig}
 
-	if err := r.readCloudResource(context.Background(), "cloud-id", "r1", state, nil); err != nil {
+	if _, err := r.readCloudResource(context.Background(), "cloud-id", "r1", state, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -328,7 +328,7 @@ func TestReadCloudResource_NeverInjectsIntoNullConfigBlock(t *testing.T) {
 		AWSConfig: types.ObjectNull(awsConfigAttrTypes()),
 	}
 
-	if err := r.readCloudResource(context.Background(), "cloud-id", "r1", state, nil); err != nil {
+	if _, err := r.readCloudResource(context.Background(), "cloud-id", "r1", state, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -710,7 +710,7 @@ func TestReadCloudState_FileStorageDriftWarning(t *testing.T) {
 		originalFileStorage := state.FileStorage
 
 		var diags diag.Diagnostics
-		if err := r.readCloudState(context.Background(), "cloud-fs-1", state, &diags); err != nil {
+		if _, err := r.readCloudState(context.Background(), "cloud-fs-1", state, &diags); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -756,7 +756,7 @@ func TestReadCloudState_FileStorageDriftWarning(t *testing.T) {
 		}
 
 		var diags diag.Diagnostics
-		if err := r.readCloudState(context.Background(), "cloud-fs-2", state, &diags); err != nil {
+		if _, err := r.readCloudState(context.Background(), "cloud-fs-2", state, &diags); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -808,7 +808,7 @@ func TestReadCloudState_FileStorageDriftWarning(t *testing.T) {
 		}
 
 		var diags diag.Diagnostics
-		if err := r.readCloudState(context.Background(), "cloud-fs-3", state, &diags); err != nil {
+		if _, err := r.readCloudState(context.Background(), "cloud-fs-3", state, &diags); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -846,7 +846,7 @@ func TestReadCloudState_FileStorageDriftWarning(t *testing.T) {
 
 		// nil is exactly what Create/Update pass - see the call sites in
 		// resource_cloud.go. This must not panic and must not touch state.
-		if err := r.readCloudState(context.Background(), "cloud-fs-4", state, nil); err != nil {
+		if _, err := r.readCloudState(context.Background(), "cloud-fs-4", state, nil); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})

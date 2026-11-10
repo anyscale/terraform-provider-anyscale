@@ -27,7 +27,8 @@ func TestCloudRequestsCarryHTTPStatus(t *testing.T) {
 
 	cases := map[string]func() error{
 		"anyscale_cloud readCloudState": func() error {
-			return (&CloudResource{client: client}).readCloudState(ctx, "cld_x", &CloudResourceModel{}, nil)
+			_, err := (&CloudResource{client: client}).readCloudState(ctx, "cld_x", &CloudResourceModel{}, nil)
+			return err
 		},
 		"anyscale_cloud add_resource": func() error {
 			plan := CloudResourceModel{AWSConfig: preflightAWSConfig(t)}

@@ -282,18 +282,15 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					"subnet_ids": schema.ListAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
-						MarkdownDescription: "List of subnet IDs for Anyscale resources. Use this OR `subnet_ids_to_az`; if both are set, `subnet_ids_to_az` is used and this is ignored. VM compute only: EKS networking comes from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time.",
+						MarkdownDescription: "List of subnet IDs, compared as a set: reordering alone is never a change; changing which subnets it contains is rejected at plan time because Anyscale derives the zones itself and can pair them with the wrong subnets - change subnets in place by rewriting them as `subnet_ids_to_az` (it wins when both are set). A subnet change made outside Terraform also surfaces as this error. VPC membership and capacity are not verified by the provider. VM compute only: rejected on a Kubernetes cloud, whose networking comes from `kubernetes_config.zones`.",
 						PlanModifiers: []planmodifier.List{
-							awsSubnetIDsRequiresReplaceUnlessEquivalent{},
+							awsSubnetIDsPlanModifier{},
 						},
 					},
 					"subnet_ids_to_az": schema.MapAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
-						MarkdownDescription: "Map of subnet ID to availability zone (e.g., {\"subnet-123\": \"us-east-2a\"}). Preferred over `subnet_ids`, which is ignored when both are set. VM compute only: EKS networking comes from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time. Also the source for inferring `region` on AWS.",
-						PlanModifiers: []planmodifier.Map{
-							awsSubnetIDsToAZRequiresReplaceUnlessEquivalent{},
-						},
+						MarkdownDescription: "Map of subnet ID to availability zone (e.g., {\"subnet-123\": \"us-east-2a\"}). Preferred over `subnet_ids` and used instead of it when both are set. The only subnet form that can change after creation: a change applies in place with each subnet paired to the zone named here, and apply reverts a subnet change made outside Terraform. VPC membership and capacity are not verified by the provider. Also the source for inferring `region` on AWS. VM compute only: rejected on a Kubernetes cloud, whose networking comes from `kubernetes_config.zones`.",
 					},
 					"security_group_ids": schema.ListAttribute{
 						ElementType:         types.StringType,
@@ -847,7 +844,7 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		configured := cloudSettingsOf(plan)
 
 		// Read the existing cloud to populate state
-		if err := r.readCloudState(ctx, existingCloudID, &plan, nil); err != nil {
+		if _, err := r.readCloudState(ctx, existingCloudID, &plan, nil); err != nil {
 			AddAPIError(&resp.Diagnostics, "read existing cloud "+existingCloudID, err)
 			return
 		}
@@ -1069,7 +1066,7 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		// Read back to get final state, then re-attempt any setting the
 		// backend did not hold after all.
 		plannedSettings := cloudSettingsOf(plan)
-		if err := r.readCloudState(ctx, cloudID, &plan, nil); err != nil {
+		if _, err := r.readCloudState(ctx, cloudID, &plan, nil); err != nil {
 			AddAPIError(&resp.Diagnostics, "read cloud", err)
 			return
 		}
@@ -1099,14 +1096,14 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 	tflog.Info(ctx, "Cloud is ready", map[string]any{"id": cloudID})
 
-	// Step 4 (readback): the settings were applied to the empty cloud before
-	// add_resource (Step 1b). Confirm the backend still holds each one and
-	// re-attempt any that drifted, once, during the resource add. A
-	// mismatch that survives - or a re-attempt that fails - is a warning,
-	// never an error: the create has succeeded for real, and an error here
-	// would taint a fully working cloud for a settings drift.
+	// Step 4 (readback): the settings were applied before add_resource
+	// (Step 1b). Confirm the backend still holds each one and re-attempt any
+	// that drifted, once, during the resource add. A mismatch that survives -
+	// or a re-attempt that fails - is a warning, never an error: the create
+	// has succeeded for real, and an error here would taint a fully working
+	// cloud for a settings drift.
 	plannedSettings := cloudSettingsOf(plan)
-	if err := r.readCloudState(ctx, cloudID, &plan, nil); err != nil {
+	if _, err := r.readCloudState(ctx, cloudID, &plan, nil); err != nil {
 		AddAPIError(&resp.Diagnostics, "read cloud", err)
 		return
 	}
@@ -1300,7 +1297,8 @@ func (r *CloudResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	cloudID := state.ID.ValueString()
 	tflog.Info(ctx, "Reading Anyscale Cloud", map[string]any{"id": cloudID})
 
-	if err := r.readCloudState(ctx, cloudID, &state, &resp.Diagnostics); err != nil {
+	defaultResource, err := r.readCloudState(ctx, cloudID, &state, &resp.Diagnostics)
+	if err != nil {
 		if isGoneOrForbidden(err) {
 			tflog.Warn(ctx, "Cloud not found, removing from state", map[string]any{"id": cloudID})
 			addForbiddenTreatedAsDeletedWarning(&resp.Diagnostics, "Cloud", cloudID, err)
@@ -1308,6 +1306,19 @@ func (r *CloudResource) Read(ctx context.Context, req resource.ReadRequest, resp
 			return
 		}
 		AddAPIError(&resp.Diagnostics, "read cloud", err)
+		return
+	}
+
+	// Read-only subnet drift refresh: deliberately Read, never the
+	// Create/Update readback (the config blocks are not refreshed there -
+	// the C12 inconsistent-apply rule). Only the subnet attribute the state
+	// already uses is touched; the other form is never materialized.
+	refreshedAWS, refreshDiags := refreshSubnetDrift(ctx, state.AWSConfig, defaultResource)
+	resp.Diagnostics.Append(refreshDiags...)
+	if !refreshDiags.HasError() {
+		state.AWSConfig = refreshedAWS
+	}
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
@@ -1391,8 +1402,8 @@ func (r *CloudResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	// Issue the resources PUT before updateMutableFields - see
 	// docs/decisions/cloud-file-storage-lifecycle/README.md. No transaction spans these calls, so
 	// the failure-prone one (running clusters can 400 this) goes first.
-	updated, liveFileStorage := updateFileStorageIfChanged(ctx, r.client, &resp.Diagnostics, cloudID, state.CloudResourceID.ValueString(),
-		plan.FileStorage, state.FileStorage, plan.IsPrivateCloud.ValueBool(),
+	updated, liveFileStorage := updateCloudResourceIfChanged(ctx, r.client, &resp.Diagnostics, cloudID, state.CloudResourceID.ValueString(),
+		plan.FileStorage, state.FileStorage, plan.AWSConfig, state.AWSConfig, plan.IsPrivateCloud.ValueBool(),
 		state.CloudProvider.ValueString(), state.ComputeStack.ValueString(), state.Region.ValueString())
 	if resp.Diagnostics.HasError() {
 		return
@@ -1421,7 +1432,7 @@ func (r *CloudResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	tflog.Info(ctx, "Cloud updated successfully", map[string]any{"id": cloudID})
 
 	// Read back updated state
-	if err := r.readCloudState(ctx, cloudID, &plan, nil); err != nil {
+	if _, err := r.readCloudState(ctx, cloudID, &plan, nil); err != nil {
 		AddAPIError(&resp.Diagnostics, "read cloud after update", err)
 		return
 	}
@@ -2063,15 +2074,15 @@ func (r *CloudResource) resolveAdoptedDerivedFields(ctx context.Context, cloudID
 // must not warn mid-apply (Create can legitimately see a legacy mount_path value resolve, and a
 // just-applied Update has nothing to warn about yet). Read passes &resp.Diagnostics so the warning
 // actually surfaces.
-func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, state *CloudResourceModel, driftDiags *diag.Diagnostics) error {
+func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, state *CloudResourceModel, driftDiags *diag.Diagnostics) (*CloudDeploymentResult, error) {
 	// A 403 comes back as an UnexpectedStatusError, so Read can tell it apart:
 	// the API answers 403 for a deleted cloud.
 	cloudResp, err := DoRequestAndParse[CloudResponse](ctx, r.client, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil, http.StatusOK)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			return fmt.Errorf("%w: cloud not found", ErrNotFound)
+			return nil, fmt.Errorf("%w: cloud not found", ErrNotFound)
 		}
-		return err
+		return nil, err
 	}
 
 	// Update state with API response (only update fields that aren't ForceNew or that we track)
@@ -2102,6 +2113,7 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 	// ImportState (see there), which runs once, before Terraform's own
 	// plan-consistency machinery is in the loop at all.
 	resources, err := listCloudResources(ctx, r.client, cloudID)
+	var defaultResource *CloudDeploymentResult
 	if err != nil {
 		tflog.Warn(ctx, "Failed to list cloud resources; skipping Computed-field backfill and compute_stack correction this read", map[string]any{"cloud_id": cloudID, "error": err.Error()})
 		// compute_stack (see below): no resources available to consult this
@@ -2126,7 +2138,7 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 		// resource exists. Only fall back to the cloud-level derived value for
 		// a genuinely empty cloud (zero resources - nothing to consult, and the
 		// cloud-level VM default is correct there).
-		defaultResource := findDefaultInCloudResources(resources)
+		defaultResource = findDefaultInCloudResources(resources)
 		// Hardening: if nothing is flagged is_default but there is EXACTLY one
 		// resource, there is no ambiguity to resolve - use it directly. This
 		// guards a cold-imported cloud (e.g. registered via the CLI, never
@@ -2153,7 +2165,7 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 	}
 
 	tflog.Info(ctx, "Cloud state read successfully", map[string]any{"id": cloudID, "name": cloudResp.Result.Name})
-	return nil
+	return defaultResource, nil
 }
 
 // backfillComputedCloudFields fills in is_empty_cloud and cloud_resource_id

@@ -58,7 +58,7 @@ func TestListCloudResourcesPrefixAppearsOnce(t *testing.T) {
 		server := cloudResourcesBadJSONServer(t, http.StatusOK)
 		r := &CloudResourceResource{client: NewClientWithToken(server.URL, "test-token")}
 		var state CloudResourceResourceModel
-		err := r.readCloudResource(ctx, "cld_x", "res", &state, nil)
+		_, err := r.readCloudResource(ctx, "cld_x", "res", &state, nil)
 		if err == nil {
 			t.Fatal("want an error from the unparseable resource list, got nil")
 		}
