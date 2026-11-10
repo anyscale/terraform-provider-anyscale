@@ -94,7 +94,7 @@ pre-commit run --all-files
   dev_overrides' own warning text. At >= 1.15 init is safe and sometimes necessary to run for
   unrelated reasons (locking another provider, fetching modules) — it installs every other provider
   normally and reports the overridden one as "not installed as part of init." This is why
-  `ci.yml`/`scheduled-acctest.yml` pin `1.15.7`; see the comment on ci.yml's Setup Terraform step.
+  `ci.yml`/`scheduled-acctest.yml` pin the latest stable (currently `1.17.1`); see the comment on ci.yml's Setup Terraform step.
 - Rebuild (`make build`) before every `terraform plan`/`apply`.
 
 ```bash
