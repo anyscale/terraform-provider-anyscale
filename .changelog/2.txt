@@ -1,12 +1,14 @@
 ```
 release-note:changed
-resource/anyscale_cloud: `aws_config.subnet_ids_to_az` changes now update the cloud in place instead of replacing it, using the same API route as `anyscale cloud update` (also anyscale_cloud_resource).
+resource/anyscale_cloud: changing `aws_config.subnet_ids_to_az` now updates the cloud's subnets in place instead of replacing it (the same applies to `anyscale_cloud_resource`).
 ```
+
 ```
 release-note:changed
-resource/anyscale_cloud: subnet changes made outside Terraform (for example with the Anyscale CLI) now show in `terraform plan`, and apply reverts them in place - `ignore_changes` on subnets can be dropped once the configuration matches the live cloud (also anyscale_cloud_resource).
+resource/anyscale_cloud: the plan now shows subnet changes made outside Terraform (for example by `anyscale cloud update`), and apply reverts them to the configuration — `ignore_changes` on the subnets can be dropped once the configuration matches the live cloud (the same applies to `anyscale_cloud_resource`).
 ```
+
 ```
 release-note:breaking-change
-resource/anyscale_cloud: changing the set of subnets in `aws_config.subnet_ids` is now an error at plan time instead of a replacement. Anyscale derives the availability zones itself and live testing showed the backend can pair them with the wrong subnets; rewrite the setting as `subnet_ids_to_az` with each subnet's zone and the change then applies in place (also anyscale_cloud_resource).
+resource/anyscale_cloud: changing which subnets `subnet_ids` lists is now an error at plan time instead of replacing the cloud — rewrite the list form as `subnet_ids_to_az` (the same applies to `anyscale_cloud_resource`). Reordering `subnet_ids` is not a change.
 ```
