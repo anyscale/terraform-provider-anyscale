@@ -1,0 +1,3 @@
+```release-note:fixed
+resource/anyscale_cloud: Importing a cloud whose resource list could not be read now reports the failure once, instead of repeating "list cloud resources" in the error message.
+```
