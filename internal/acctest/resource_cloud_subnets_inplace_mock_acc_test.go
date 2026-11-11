@@ -61,7 +61,12 @@ type subnetsInPlaceServer struct {
 	// default: the provider never sends that shape, so reaching this branch
 	// at all fails loudly via requireSubnetZones.
 	deriveZonesWhenOmitted bool
-	base                   *mockCloudCreateTimeServer
+	// managed, when true, marks the deployment as Anyscale-managed (`anyscale
+	// cloud setup` provenance): the GET carries aws_config.cloudformation_id
+	// and every resources PUT is refused with the backend's real
+	// "anyscale-managed" 400.
+	managed bool
+	base    *mockCloudCreateTimeServer
 }
 
 const subnetsInPlaceListTemplate = `{
@@ -75,7 +80,7 @@ const subnetsInPlaceListTemplate = `{
 			"security_group_ids": ["sg-realct1"],
 			"anyscale_iam_role_id": "arn:aws:iam::123456789012:role/real-crossaccount",
 			"cluster_iam_role_id": "arn:aws:iam::123456789012:role/real-cluster-node",
-			"external_id": "org_real-external-id-ct"
+			"external_id": "org_real-external-id-ct"%s
 		},
 		"object_storage": {"bucket_name": "s3://real-ct-bucket"},
 		"file_storage": %s,
@@ -103,7 +108,12 @@ func (s *subnetsInPlaceServer) listJSONLocked() string {
 		b, _ := json.Marshal(s.fileStorage)
 		fs = string(b)
 	}
-	return fmt.Sprintf(subnetsInPlaceListTemplate, s.resourceName, s.resourceID, strings.Join(ids, ","), strings.Join(zones, ","), fs)
+	managed := ""
+	if s.managed {
+		managed = `,
+			"cloudformation_id": "cfn-managed-mock"`
+	}
+	return fmt.Sprintf(subnetsInPlaceListTemplate, s.resourceName, s.resourceID, strings.Join(ids, ","), strings.Join(zones, ","), managed, fs)
 }
 
 func newSubnetsInPlaceServer(t *testing.T) (*httptest.Server, *subnetsInPlaceServer) {
@@ -264,6 +274,19 @@ func (s *subnetsInPlaceServer) handleResourcesPut(w http.ResponseWriter, r *http
 		return
 	}
 	req := reqs[0]
+
+	// An Anyscale-managed deployment refuses every update - same opaque 400
+	// the real backend raises (_validate_anyscale_managed_resource_update).
+	// The body echoes the substring addCloudResourceUpdateError matches, so
+	// an apply that reaches this PUT reports the same title the plan-time
+	// refusal raised (that overlap is exactly why the plan-time test's
+	// mutation proof keys on putCount, not on the error text).
+	if s.managed {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprint(w, `{"error":{"detail":"Cannot update: cloud resource is anyscale-managed"}}`)
+		return
+	}
 
 	// Live-proven (gate1.log, first probe run): every GET-only field is
 	// rejected with this exact 422 body. The typed request already omits
@@ -969,5 +992,66 @@ func TestAccCloudResourceResource_SubnetIDsSetChangeRefusedAtPlanTime(t *testing
 	})
 	if got := mock.putCount(); got != 0 {
 		t.Errorf("resources PUTs = %d, want 0 (the refusal must fire before any apply)", got)
+	}
+}
+
+// ─── D2: Anyscale-managed cloud refuses a subnet map change at plan time ────
+
+// TestAccCloudResource_SubnetsToAZChangeManagedCloudRefusal: on a cloud created
+// with `anyscale cloud setup` (aws_config.cloudformation_id in the live
+// deployment is the provenance marker isAnyscaleManaged reads), a
+// subnet_ids_to_az change is refused at PLAN time, before any apply starts
+// writing. The plan-time refusal and the apply-time translation
+// (addCloudResourceUpdateError's anyscale-managed branch) produce the same
+// title, so the error text alone cannot tell them apart; the discriminator is
+// the resources-PUT count, asserted after the errored step from a later step's
+// state - a plan-time refusal never PUTs, and a refusal that first surfaced at
+// apply time would have (one PUT recorded before the 400 came back).
+func TestAccCloudResource_SubnetsToAZChangeManagedCloudRefusal(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	server, mock := newSubnetsInPlaceServer(t)
+	mock.managed = true
+	three := map[string]string{
+		"subnet-realct1": "us-east-2a",
+		"subnet-realct2": "us-east-2b",
+		"subnet-realct3": "us-east-2c",
+	}
+	changed := map[string]string{
+		"subnet-realct1": "us-east-2a",
+		"subnet-realct3": "us-east-2c",
+	}
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: subnetsInPlaceCloudConfig(server.URL, three, nil, ""),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "aws_config.subnet_ids_to_az.subnet-realct2", "us-east-2b"),
+				),
+			},
+			{
+				Config:      subnetsInPlaceCloudConfig(server.URL, changed, nil, ""),
+				ExpectError: regexp.MustCompile(`Cannot Update an Anyscale-Managed Cloud`),
+			},
+			{
+				// Reverting the config must plan clean against the state the
+				// errored step left untouched - and the PUT count proves the
+				// step-2 error was the plan-time refusal, not the apply-time
+				// backstop, because a backstop run would have PUT once before
+				// the 400 came back.
+				Config: subnetsInPlaceCloudConfig(server.URL, three, nil, ""),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "aws_config.subnet_ids_to_az.subnet-realct2", "us-east-2b"),
+				),
+			},
+		},
+	})
+	if got := mock.putCount(); got != 0 {
+		t.Errorf("resources PUTs = %d, want 0: the refusal must fire at plan time, before any apply writes", got)
 	}
 }

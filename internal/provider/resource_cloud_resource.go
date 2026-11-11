@@ -936,10 +936,10 @@ func (r *CloudResourceResource) Read(ctx context.Context, req resource.ReadReque
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-// ModifyPlan surfaces the Anyscale-managed file_storage refusal at plan time rather than letting
+// ModifyPlan surfaces the Anyscale-managed refusals (file_storage and aws_config.subnet_ids_to_az) at plan time rather than letting
 // the apply discover it - see docs/decisions/cloud-file-storage-lifecycle/README.md.
 func (r *CloudResourceResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	// Null state is a create and null plan is a destroy; neither updates file_storage.
+	// Null state is a create and null plan is a destroy; neither updates in place.
 	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
 		return
 	}
@@ -959,6 +959,8 @@ func (r *CloudResourceResource) ModifyPlan(ctx context.Context, req resource.Mod
 
 	refuseFileStorageChangeOnManagedCloud(ctx, r.client, &resp.Diagnostics,
 		cloudID, state.CloudResourceID.ValueString(), plan.FileStorage, state.FileStorage)
+	refuseSubnetIDsToAZChangeOnManagedCloud(ctx, r.client, &resp.Diagnostics,
+		cloudID, state.CloudResourceID.ValueString(), plan.AWSConfig, state.AWSConfig)
 }
 
 func (r *CloudResourceResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {

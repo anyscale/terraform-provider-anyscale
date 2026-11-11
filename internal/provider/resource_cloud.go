@@ -1348,8 +1348,8 @@ func (r *CloudResource) refuseAutoAddUserOnAzure(ctx context.Context, req resour
 }
 
 // ModifyPlan runs the create-time checks of an all-in-one cloud, and on an update surfaces the
-// Anyscale-managed file_storage refusal at plan time rather than letting the apply discover it - see
-// docs/decisions/cloud-file-storage-lifecycle/README.md.
+// Anyscale-managed refusals (file_storage, aws_config.subnet_ids_to_az) at plan time rather than
+// letting the apply discover it - see docs/decisions/cloud-file-storage-lifecycle/README.md.
 func (r *CloudResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	// A null plan is a destroy; nothing to check.
 	if req.Plan.Raw.IsNull() {
@@ -1385,6 +1385,8 @@ func (r *CloudResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 
 	refuseFileStorageChangeOnManagedCloud(ctx, r.client, &resp.Diagnostics,
 		state.ID.ValueString(), state.CloudResourceID.ValueString(), plan.FileStorage, state.FileStorage)
+	refuseSubnetIDsToAZChangeOnManagedCloud(ctx, r.client, &resp.Diagnostics,
+		state.ID.ValueString(), state.CloudResourceID.ValueString(), plan.AWSConfig, state.AWSConfig)
 }
 
 func (r *CloudResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
