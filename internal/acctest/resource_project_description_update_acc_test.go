@@ -110,6 +110,84 @@ resource "anyscale_project" "test" {
 	})
 }
 
+// Omitting the description after it was set must be a no-op: no PATCH, no
+// replace, and the stored value stays in state. This follows from the
+// Optional+Computed + UseStateForUnknown shape of the attribute, so a test
+// proves it rather than assuming it (mutation check below). If the remote
+// value ever drifted out of band, refresh would surface it as an ordinary
+// in-place update - covered by the explicit-change tests above, not here.
+func TestAccProjectResource_OmitDescriptionKeepsValue_MockServer(t *testing.T) {
+	t.Parallel()
+	SkipIfNotAcceptanceTest(t)
+
+	server, mock := newMockProjectServerWithCounts(t)
+	const name = "project-desc-omit-mock"
+
+	step1Config := testAccProviderBlock(server.URL) + fmt.Sprintf(`
+resource "anyscale_project" "test" {
+  name        = %[1]q
+  cloud_id    = "cld_mock"
+  description = "first description"
+}
+`, name)
+
+	var step1ID atomic.Value
+
+	step2Config := testAccProviderBlock(server.URL) + fmt.Sprintf(`
+resource "anyscale_project" "test" {
+  name      = %[1]q
+  cloud_id  = "cld_mock"
+}
+`, name)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: step1Config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_project.test", "description", "first description"),
+					captureProjectID(&step1ID),
+				),
+			},
+			{
+				// Mutation-proofed against a build with the description
+				// attribute's Computed:true removed: the omitted value
+				// plans as null against state "first description", the
+				// plan becomes a non-empty update, and the PreApply
+				// ExpectEmptyPlan below fails there (empirically; use
+				// that mutation if re-proving). Dropping
+				// UseStateForUnknown does NOT redden this step - Core
+				// fills a null-config Optional+Computed attribute from
+				// prior state, so the modifier is inert here (checked).
+				Config: step2Config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_project.test", "description", "first description"),
+					captureProjectIDMatches(&step1ID, "the project must not have been replaced: the id changed"),
+					func(s *terraform.State) error {
+						posts, patches, deletes := mock.RequestCounts()
+						if patches != 0 {
+							return fmt.Errorf("step 2 must issue no PATCH (an omitted description must not be sent), got %d", patches)
+						}
+						if posts != 1 {
+							return fmt.Errorf("step 2 must issue no further POST, got %d total", posts)
+						}
+						if deletes != 0 {
+							return fmt.Errorf("step 2 must issue no DELETE, got %d", deletes)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
 // new405OnPatchServer delegates everything to a real mockProjectServer
 // except PATCH, which answers 405 - the deployment whose behavior this
 // exercises predates the PATCH route.

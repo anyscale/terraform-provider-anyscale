@@ -301,8 +301,10 @@ func (r *ProjectResource) Update(ctx context.Context, req resource.UpdateRequest
 	// route rejects any other key (422 extra_forbidden) and a null value
 	// (422 string_type), so the body is a dedicated struct, never the full
 	// model. LengthAtLeast(1) on the schema keeps "" out of the plan, and a
-	// null cannot reach here: UseStateForUnknown resolves an unconfigured
-	// description to the stored value, which is never null after create.
+	// null cannot reach here: the attribute is Optional+Computed, so Core
+	// plans an unconfigured description from prior state, which is never
+	// null after create. UseStateForUnknown additionally keeps an explicit
+	// change to some other attribute from marking the description unknown.
 	if !plan.Description.Equal(state.Description) {
 		patchReq := struct {
 			Description string `json:"description"`
