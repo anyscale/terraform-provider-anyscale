@@ -303,8 +303,7 @@ func (r *ProjectResource) Update(ctx context.Context, req resource.UpdateRequest
 	// model. LengthAtLeast(1) on the schema keeps "" out of the plan, and a
 	// null cannot reach here: the attribute is Optional+Computed, so Core
 	// plans an unconfigured description from prior state, which is never
-	// null after create. UseStateForUnknown additionally keeps an explicit
-	// change to some other attribute from marking the description unknown.
+	// null after create.
 	if !plan.Description.Equal(state.Description) {
 		patchReq := struct {
 			Description string `json:"description"`

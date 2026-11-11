@@ -111,11 +111,11 @@ resource "anyscale_project" "test" {
 }
 
 // Omitting the description after it was set must be a no-op: no PATCH, no
-// replace, and the stored value stays in state. This follows from the
-// Optional+Computed + UseStateForUnknown shape of the attribute, so a test
-// proves it rather than assuming it (mutation check below). If the remote
-// value ever drifted out of band, refresh would surface it as an ordinary
-// in-place update - covered by the explicit-change tests above, not here.
+// replace, and the stored value stays in state. Core plans an omitted
+// Optional+Computed attribute from prior state; this test pins that
+// (mutation check below). If the remote value ever drifted out of band,
+// refresh would surface it as an ordinary in-place update - covered by the
+// explicit-change tests above, not here.
 func TestAccProjectResource_OmitDescriptionKeepsValue_MockServer(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
@@ -155,11 +155,10 @@ resource "anyscale_project" "test" {
 				// attribute's Computed:true removed: the omitted value
 				// plans as null against state "first description", the
 				// plan becomes a non-empty update, and the PreApply
-				// ExpectEmptyPlan below fails there (empirically; use
-				// that mutation if re-proving). Dropping
-				// UseStateForUnknown does NOT redden this step - Core
-				// fills a null-config Optional+Computed attribute from
-				// prior state, so the modifier is inert here (checked).
+				// ExpectEmptyPlan below fails there. Dropping
+				// UseStateForUnknown does not: Core already plans the
+				// omitted value from state, so the modifier never runs
+				// in this step.
 				Config: step2Config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
