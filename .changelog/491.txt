@@ -1,0 +1,3 @@
+```release-note:changed
+resource/anyscale_project: The `description` documentation now states that a project description cannot be cleared (empty values are rejected at plan time) and that removing it from configuration keeps the current value.
+```

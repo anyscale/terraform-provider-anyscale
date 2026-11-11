@@ -119,7 +119,7 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 			"description": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
-				MarkdownDescription: "Description of the project. If omitted on create, the API generates one; an empty string is rejected at plan time. Changing this value updates the project in place. A cloud's default project cannot be modified, so changing its description errors at plan time.",
+				MarkdownDescription: "Description of the project. If omitted on create, the API generates one; an empty string is rejected at plan time, so a description cannot be cleared. Changing this value updates the project in place; removing the attribute from the configuration leaves the stored description unchanged. A cloud's default project cannot be modified, so changing its description errors at plan time.",
 				Validators: []validator.String{
 					stringvalidator.LengthAtLeast(1),
 				},
@@ -301,8 +301,9 @@ func (r *ProjectResource) Update(ctx context.Context, req resource.UpdateRequest
 	// route rejects any other key (422 extra_forbidden) and a null value
 	// (422 string_type), so the body is a dedicated struct, never the full
 	// model. LengthAtLeast(1) on the schema keeps "" out of the plan, and a
-	// null cannot reach here: UseStateForUnknown resolves an unconfigured
-	// description to the stored value, which is never null after create.
+	// null cannot reach here: the attribute is Optional+Computed, so Core
+	// plans an unconfigured description from prior state, which is never
+	// null after create.
 	if !plan.Description.Equal(state.Description) {
 		patchReq := struct {
 			Description string `json:"description"`
