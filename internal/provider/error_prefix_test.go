@@ -84,4 +84,26 @@ func TestListCloudResourcesPrefixAppearsOnce(t *testing.T) {
 			t.Errorf("error %q no longer names the cloud", msg)
 		}
 	})
+
+	t.Run("anyscale_cloud import", func(t *testing.T) {
+		// ImportState's own op used to be "list cloud resources during
+		// import, ...", repeating listCloudResources' opening phrase on
+		// non-status errors; the op now names only the import consequence.
+		// ImportState itself cannot run in a plain unit harness (its
+		// State.SetAttribute needs a schema-backed state), so pin the op
+		// constant against the real listCloudResources error text.
+		server := cloudResourcesBadJSONServer(t, http.StatusOK)
+		_, err := listCloudResources(ctx, NewClientWithToken(server.URL, "test-token"), "cld_x")
+		if err == nil {
+			t.Fatal("want an error from the unparseable resource list, got nil")
+		}
+		var diags diag.Diagnostics
+		AddAPIError(&diags, cloudImportRecoverOp, err)
+		if got := strings.Count(diags[0].Detail(), phrase); got != 1 {
+			t.Errorf("%q occurs %d times in %q, want 1", phrase, got, diags[0].Detail())
+		}
+		if !strings.Contains(diags[0].Detail(), "retry the import") {
+			t.Errorf("detail %q no longer tells the practitioner to retry the import", diags[0].Detail())
+		}
+	})
 }
