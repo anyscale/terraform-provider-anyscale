@@ -11,9 +11,12 @@ import (
 	"time"
 
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
+	"github.com/hashicorp/terraform-plugin-testing/compare"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/statecheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
 func TestAccProjectResource_Basic(t *testing.T) {
@@ -71,6 +74,10 @@ func TestAccProjectResource_WithDescription(t *testing.T) {
 	projectName := UniqueName(t, "project-desc")
 	description := "Test project with description"
 
+	// The same id is collected at every step below and required equal, so a
+	// replacement anywhere in the sequence fails the test.
+	idSame := statecheck.CompareValue(compare.ValuesSame())
+
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
@@ -83,6 +90,7 @@ func TestAccProjectResource_WithDescription(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_project.test", "description", description),
 					testAccCheckProjectExistsInAPI("anyscale_project.test"),
 				),
+				ConfigStateChecks: []statecheck.StateCheck{idSame.AddStateValue("anyscale_project.test", tfjsonpath.New("id"))},
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PostApplyPostRefresh: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
@@ -101,9 +109,29 @@ func TestAccProjectResource_WithDescription(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_project.test", "description", description+" (changed)"),
 					testAccCheckProjectExistsInAPI("anyscale_project.test"),
 				),
+				ConfigStateChecks: []statecheck.StateCheck{idSame.AddStateValue("anyscale_project.test", tfjsonpath.New("id"))},
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction("anyscale_project.test", plancheck.ResourceActionUpdate),
+					},
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+			// Removing description from the config must keep the stored
+			// value: the attribute is Optional+Computed, so the omitted
+			// value plans from state, and no PATCH goes out.
+			{
+				Config: testAccProjectResourceNameOnlyConfig(cloudID, projectName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_project.test", "description", description+" (changed)"),
+					testAccCheckProjectExistsInAPI("anyscale_project.test"),
+				),
+				ConfigStateChecks: []statecheck.StateCheck{idSame.AddStateValue("anyscale_project.test", tfjsonpath.New("id"))},
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
 					},
 					PostApplyPostRefresh: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
@@ -133,6 +161,15 @@ resource "anyscale_project" "test" {
   name        = "%s"
   cloud_id    = "%s"
   description = "Test project created by acceptance tests"
+}
+`, projectName, cloudID)
+}
+
+func testAccProjectResourceNameOnlyConfig(cloudID, projectName string) string {
+	return fmt.Sprintf(`
+resource "anyscale_project" "test" {
+  name     = "%s"
+  cloud_id = "%s"
 }
 `, projectName, cloudID)
 }
