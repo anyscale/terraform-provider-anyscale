@@ -10,14 +10,17 @@ permissions:
   contents: read
   pull-requests: read # needed by dorny/paths-filter (docs-only acctest skip)
 
-# Cancel a stale in-progress run only for PR pushes: a follow-up commit to
-# an open PR supersedes its own previous run. Main runs always complete -
+# GitHub allows one running and one pending run per concurrency group, and a
+# newly queued run always cancels the pending one, whatever cancel-in-progress
+# says (it only governs the running run). So PR pushes share a group per ref
+# with cancel-in-progress: a follow-up commit supersedes its own earlier run.
+# Main pushes get a group per sha, so no queued main run is ever cancelled -
 # the release gate (release-acctest-gate.sh) reads the latest green main CI
 # as its acceptance evidence, and a cancelled main run would destroy it.
-# Cost: a rare extra full run when two merges land back to back.
+# Concurrent main runs are safe: acctests use UniqueName per run.
 # sweep.yml stays the leaked-resource backstop.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}', github.ref) || format('ci-main-{0}', github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Declared access mode of the shared test organization: legacy or converted
