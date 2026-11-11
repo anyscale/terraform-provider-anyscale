@@ -1715,6 +1715,13 @@ func (r *CloudResource) detachMachinePoolsFromCloud(ctx context.Context, cloudID
 	return nil
 }
 
+// cloudImportRecoverOp is ImportState's op for the fail-closed listing
+// refusal. It deliberately does not repeat "list cloud resources", which
+// listCloudResources opens with on non-status errors and which would double
+// in the diagnostic detail; named as a variable so the prefix-duplication
+// test can pin the phrase through the same value production uses.
+const cloudImportRecoverOp = "recover the cloud's configuration blocks during import; retry the import"
+
 // ImportState imports an existing resource into Terraform state.
 //
 // This is the ONLY place that recovers aws_config/gcp_config/
@@ -1742,13 +1749,6 @@ func (r *CloudResource) detachMachinePoolsFromCloud(ctx context.Context, cloudID
 // one-time reconcile diff after import instead of silence - add the block
 // to your .tf to match, or accept the diff; either is far better than the
 // destructive replace this fix removes.
-// cloudImportRecoverOp is ImportState's op for the fail-closed listing
-// refusal. It deliberately does not repeat "list cloud resources", which
-// listCloudResources opens with on non-status errors and which would double
-// in the diagnostic detail; named as a variable so the prefix-duplication
-// test can pin the phrase through the same value production uses.
-const cloudImportRecoverOp = "recover the cloud's configuration blocks during import; retry the import"
-
 func (r *CloudResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	cloudID, emptyPattern, err := parseCloudImportID(req.ID)
 	if err != nil {
@@ -1781,9 +1781,7 @@ func (r *CloudResource) ImportState(ctx context.Context, req resource.ImportStat
 	}
 	if err != nil {
 		// Fail closed: every config block is RequiresReplace, so importing without them would
-		// look like success and then plan a replacement of the live cloud. The op names the
-		// import consequence, not "list cloud resources": listCloudResources already opens
-		// with that phrase on non-status errors, and it repeats in the detail.
+		// look like success and then plan a replacement of the live cloud.
 		AddAPIError(&resp.Diagnostics, cloudImportRecoverOp, err)
 		return
 	}
