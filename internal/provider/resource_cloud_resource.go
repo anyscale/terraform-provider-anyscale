@@ -343,7 +343,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					},
 					"external_id": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "External ID for IAM role assumption (recommended for security). Anyscale's external IDs follow a fixed format: the organization ID, a hyphen, then a random string (e.g. `org_1234567890abcdef-1234567890abcdef`). See the [Anyscale AWS IAM documentation](https://docs.anyscale.com/iam/aws) for the full trust policy.",
+						MarkdownDescription: "External ID Anyscale passes when assuming the control-plane role for this resource; it must match the role's trust policy. Anyscale external IDs start with your organization ID (e.g. `org_1234567890abcdef-1234567890abcdef`). The cloud-level external ID, which services use, is set by `anyscale_cloud`'s `aws_config.external_id`. See the [Anyscale AWS IAM documentation](https://docs.anyscale.com/iam/aws) for the full trust policy.",
 						PlanModifiers: []planmodifier.String{
 							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
