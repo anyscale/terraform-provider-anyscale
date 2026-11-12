@@ -1717,6 +1717,13 @@ func (r *CloudResource) detachMachinePoolsFromCloud(ctx context.Context, cloudID
 	return nil
 }
 
+// cloudImportRecoverOp is ImportState's op for the fail-closed listing
+// refusal. It deliberately does not repeat "list cloud resources", which
+// listCloudResources opens with on non-status errors and which would double
+// in the diagnostic detail; named as a variable so the prefix-duplication
+// test can pin the phrase through the same value production uses.
+const cloudImportRecoverOp = "recover the cloud's configuration blocks during import; retry the import"
+
 // ImportState imports an existing resource into Terraform state.
 //
 // This is the ONLY place that recovers aws_config/gcp_config/
@@ -1777,7 +1784,7 @@ func (r *CloudResource) ImportState(ctx context.Context, req resource.ImportStat
 	if err != nil {
 		// Fail closed: every config block is RequiresReplace, so importing without them would
 		// look like success and then plan a replacement of the live cloud.
-		AddAPIError(&resp.Diagnostics, "list cloud resources during import, so the cloud's configuration blocks cannot be recovered; retry the import", err)
+		AddAPIError(&resp.Diagnostics, cloudImportRecoverOp, err)
 		return
 	}
 
