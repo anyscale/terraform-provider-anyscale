@@ -1,0 +1,3 @@
+```release-note:changed
+resource/anyscale_cloud: A `subnet_ids_to_az` change on a cloud created with `anyscale cloud setup` is now refused at plan time with the Anyscale-managed cloud error, instead of failing at apply time after the update request had already been sent.
+```

@@ -221,3 +221,54 @@ func refuseFileStorageChangeOnManagedCloud(
 		diags.AddError("Cannot Update an Anyscale-Managed Cloud", anyscaleManagedFileStorageRefusal)
 	}
 }
+
+// refuseSubnetIDsToAZChangeOnManagedCloud raises the same plan-time refusal for an
+// aws_config.subnet_ids_to_az change: the backend refuses every update to an
+// Anyscale-managed cloud, and unlike file_storage the apply-time error for a subnet
+// PUT arrives as an opaque 400 - knowing before the apply starts writing is the point.
+// It fires only when the plan's map is known and differs from state; a null or unknown
+// plan map does not name a change to check. Fail-open refusal terms match
+// refuseFileStorageChangeOnManagedCloud above.
+func refuseSubnetIDsToAZChangeOnManagedCloud(
+	ctx context.Context,
+	client *Client,
+	diags *diag.Diagnostics,
+	cloudID, cloudResourceID string,
+	planAWSConfig, stateAWSConfig types.Object,
+) {
+	if client == nil || cloudID == "" || cloudResourceID == "" {
+		return
+	}
+	planSubnets, ok := objectMapAttr(planAWSConfig, "subnet_ids_to_az")
+	if !ok || planSubnets.IsUnknown() || planSubnets.IsNull() {
+		return
+	}
+	stateSubnets, _ := objectMapAttr(stateAWSConfig, "subnet_ids_to_az")
+	if planSubnets.Equal(stateSubnets) {
+		return
+	}
+
+	results, err := listCloudResources(ctx, client, cloudID)
+	if err != nil {
+		// Fail open: same terms as the file_storage check - a transient read failure
+		// must not block a plan that would otherwise succeed.
+		return
+	}
+	if isAnyscaleManaged(findCloudResourceByID(results, cloudResourceID)) {
+		diags.AddError("Cannot Update an Anyscale-Managed Cloud", anyscaleManagedCloudUpdateRefusal)
+	}
+}
+
+// objectMapAttr reads a string-map attribute out of a config block object,
+// reporting false when the block is absent or the field is not a map.
+func objectMapAttr(obj types.Object, name string) (types.Map, bool) {
+	if obj.IsNull() || obj.IsUnknown() {
+		return types.MapNull(types.StringType), false
+	}
+	v, ok := obj.Attributes()[name]
+	if !ok {
+		return types.MapNull(types.StringType), false
+	}
+	m, ok := v.(types.Map)
+	return m, ok
+}
