@@ -520,7 +520,7 @@ func TestAccCloudResource_ImportFailsClosedWhenResourcesListFails(t *testing.T) 
 				ImportState:        true,
 				ImportStateId:      cloudID,
 				ImportStatePersist: true,
-				ExpectError:        regexp.MustCompile(`(?s)could not be recovered|cannot be recovered`),
+				ExpectError:        regexp.MustCompile(`(?s)recover the cloud's configuration blocks during import;\s+retry the\s+import`),
 			},
 			{
 				PreConfig:          func() { backend.failResourcesList.Store(false) },
@@ -566,7 +566,7 @@ func TestAccCloudResource_ImportToleratesHostedCloudResourcesList(t *testing.T) 
 		}
 	}
 	failing := step(func() { backend.failResourcesList.Store(true) })
-	failing.ExpectError = regexp.MustCompile(`(?s)cannot be recovered`)
+	failing.ExpectError = regexp.MustCompile(`(?s)recover the cloud's configuration blocks during import;\s+retry the\s+import`)
 	hosted := step(func() { backend.failResourcesList.Store(false); backend.hostedResources.Store(true) })
 	hosted.ImportStateCheck = func(states []*terraform.InstanceState) error {
 		if len(states) != 1 || states[0].ID != cloudID {
