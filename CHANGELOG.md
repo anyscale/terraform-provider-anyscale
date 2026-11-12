@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.42.0] - 2026-11-12
+
+### Changed
+
+- resource/anyscale_project: The `description` documentation now states that a project description cannot be cleared (empty values are rejected at plan time) and that removing it from configuration keeps the current value.
+- resource/anyscale_cloud: A `subnet_ids_to_az` change on a cloud created with `anyscale cloud setup` is now refused at plan time with the Anyscale-managed cloud error, instead of failing at apply time after the update request had already been sent (the same applies to `anyscale_cloud_resource`).
+- resource/anyscale_cloud_resource: The `aws_config.external_id` description now states that it is the assume-role external ID for this resource and must match the role's trust policy, and that services use the cloud-level external ID, not this one.
+
+### Fixed
+
+- resource/anyscale_cloud: Importing a cloud whose resource list could not be read now reports the failure once, instead of repeating "list cloud resources" in the error message.
+
 ## [0.41.0] - 2026-11-10
 
 ### Changed
@@ -1414,7 +1426,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.41.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.42.0...HEAD
+[0.42.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.42.0
 [0.41.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.41.0
 [0.40.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.40.0
 [0.39.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.39.0

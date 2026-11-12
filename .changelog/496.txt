@@ -1,3 +1,0 @@
-```release-note:changed
-resource/anyscale_cloud_resource: The `aws_config.external_id` description now states that it is the assume-role external ID for this resource and must match the role's trust policy, and that services use the cloud-level external ID, not this one.
-```
