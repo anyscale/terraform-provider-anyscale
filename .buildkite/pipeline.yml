@@ -1,0 +1,22 @@
+# Buildkite pipeline for this repository.
+#
+# The end-to-end coverage described in docs/decisions/e2e-coverage is not wired
+# up yet: this pipeline runs no e2e. A build that runs zero jobs used to report
+# "passed" (blocked builds included), and that phantom green was once mistaken
+# for real-infra evidence at tag time. So until real steps land here, every
+# build fails on purpose, with an annotation saying why.
+#
+# When wiring real e2e steps (docs/decisions/e2e-coverage is the plan), replace
+# the placeholder step below and revisit the pipeline's automatic-build branch
+# filter, which is limited to main and tags so PRs don't accumulate a
+# permanently red check that trains readers to ignore red.
+
+steps:
+  - label: ":no_entry: e2e not wired on purpose"
+    key: e2e-not-wired
+    command: |
+      msg="NOT RUN: no e2e is wired to this pipeline yet (docs/decisions/e2e-coverage). A green build here has never been e2e evidence. This step fails on purpose so the build cannot report passed without running anything."
+      echo "This pipeline does not run any e2e yet." >&2
+      echo "See docs/decisions/e2e-coverage for the planned coverage matrix." >&2
+      buildkite-agent annotate --style error --context e2e-not-wired "$msg"
+      exit 1
