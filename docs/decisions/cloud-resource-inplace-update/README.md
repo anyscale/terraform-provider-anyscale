@@ -165,10 +165,17 @@ created with `anyscale_cloud_resource`. Both were destroyed after the run.
   other fields were intact, and the primary deployment was byte-identical before and after.
 - The PUT body is a JSON list of deployment objects. A bare object returns 422.
 
-**GCP: blocked.** GCP `add_resource` returns a bare 500 in the test org, on a clean create
-sequence. That is a backend fault, still under investigation, so no GCP cloud could be registered
-to test against. The GCP removal-clears check is not yet confirmed on the real API. It rests on
-the backend code read cited in rule 1.
+**GCP, 2026-11-12. Passed.** A throwaway GCP VM cloud, destroyed after the run.
+
+- One PUT, built as the live record plus an overlay, changed `subnet_names` and
+  `firewall_policy_names` (reordered, with entries added). Result: 200. GET returned both lists in
+  the order sent; GCP lists are not sorted. Service accounts, project and VPC were unchanged.
+- A second PUT omitted `firewall_policy_names` inside the sent `gcp_config`. Result: 200, and GET
+  returned it cleared, confirming that a field left out of a sent block is cleared.
+- As on AWS, a bare object body returns 422.
+
+An earlier GCP attempt failed with a bare 500. The cause was a test-config error, not the API: the
+example's org ID did not match the token's org.
 
 **K8S `zones`: code read only.** It is stored and returned in the order sent
 (`cloud_deployment_model.go:41-49, 293-301`) and is never derived. Not run on EKS or GKE.
