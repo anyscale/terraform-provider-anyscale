@@ -730,8 +730,8 @@ func TestAccIAMRoleBindingResource_ReadForbidden(t *testing.T) {
 	})
 }
 
-// Criterion 12: role bindings off is the disabled error and keeps state; an
-// unconverted organization is an error naming conversion.
+// Role bindings off is the disabled error and keeps state; an unconverted
+// organization is an error naming conversion.
 func TestAccIAMRoleBindingResource_FlagOffKeepsState(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
