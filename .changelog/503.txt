@@ -1,0 +1,19 @@
+```
+release-note:changed
+resource/anyscale_cloud: `aws_config.vpc_id`, `security_group_ids`, `dataplane_iam_role_arn` and `cluster_instance_profile_id`, `gcp_config.subnet_names`, `firewall_policy_names` and `dataplane_service_account_email`, `kubernetes_config.zones`, `anyscale_operator_iam_identity` and `redis_endpoint`, and `object_storage` now update in place instead of replacing the cloud, and the plan shows changes made to them outside Terraform (the same applies to `anyscale_cloud_resource`).
+```
+
+```
+release-note:changed
+resource/anyscale_cloud: importing a cloud whose configuration omits one of those values now plans clearing it in place instead of replacing the cloud; set the value in the configuration to keep it (the same applies to `anyscale_cloud_resource`).
+```
+
+```
+release-note:breaking-change
+resource/anyscale_cloud: changing `aws_config.vpc_id` without changing the subnets, removing `vpc_id`, `gcp_config.subnet_names`, `kubernetes_config.anyscale_operator_iam_identity` or a whole `kubernetes_config` or `object_storage` block, or changing any of those values on a cloud created with `anyscale cloud setup` is now an error at plan time instead of replacing the cloud. Change the VPC together with its subnets, or keep the value in the configuration (the same applies to `anyscale_cloud_resource`).
+```
+
+```
+release-note:fixed
+resource/anyscale_cloud: changing `file_storage` on a Kubernetes cloud no longer clears the cloud's custom image registry setting (the same applies to `anyscale_cloud_resource`).
+```

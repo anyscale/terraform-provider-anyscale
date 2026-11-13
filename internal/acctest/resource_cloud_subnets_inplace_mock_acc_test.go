@@ -37,15 +37,22 @@ type subnetsInPlaceServer struct {
 	mu sync.Mutex
 	// Deployment modeled on the base mock's static resource: same VPC, SG,
 	// roles; only the subnet arrays (and file_storage) are stateful.
-	cloudID       string
-	resourceID    string
-	resourceName  string
-	subnetIDs     []string
-	zones         []string
-	fileStorage   map[string]any
-	putBodies     []string // every resources PUT body, in arrival order
-	putStatusBody string   // scripted status body; empty = 200
-	method        int      // scripted status; 0 = success
+	cloudID      string
+	resourceID   string
+	resourceName string
+	subnetIDs    []string
+	zones        []string
+	fileStorage  map[string]any
+	// In-place update state (docs/decisions/cloud-resource-inplace-update):
+	// the mutable aws_config/object_storage fields the in-place tests
+	// change, cleared-vs-present distinguished so removal tests can assert
+	// the OMITTED key (absent clears).
+	securityGroupIDs       []string
+	clusterInstanceProfile *string
+	objectStorage          map[string]any
+	putBodies              []string // every resources PUT body, in arrival order
+	putStatusBody          string   // scripted status body; empty = 200
+	method                 int      // scripted status; 0 = success
 	// requireSubnetZones, when true (the default), fails the PUT with the
 	// 400 when subnet_ids arrive without zones. The mutation
 	// proof inverts it.
@@ -77,12 +84,12 @@ const subnetsInPlaceListTemplate = `{
 			"vpc_id": "vpc-realct123",
 			"subnet_ids": [%s],
 			"zones": [%s],
-			"security_group_ids": ["sg-realct1"],
+			"security_group_ids": %s,
 			"anyscale_iam_role_id": "arn:aws:iam::123456789012:role/real-crossaccount",
 			"cluster_iam_role_id": "arn:aws:iam::123456789012:role/real-cluster-node",
-			"external_id": "org_real-external-id-ct"%s
+			"external_id": "org_real-external-id-ct"%s%s
 		},
-		"object_storage": {"bucket_name": "s3://real-ct-bucket"},
+		"object_storage": %s,
 		"file_storage": %s,
 		"created_at": "2026-11-09T23:00:00+00:00",
 		"operator_status": null, "operator_status_details": null,
@@ -108,12 +115,32 @@ func (s *subnetsInPlaceServer) listJSONLocked() string {
 		b, _ := json.Marshal(s.fileStorage)
 		fs = string(b)
 	}
+	sgs := "null"
+	if len(s.securityGroupIDs) > 0 {
+		quoted := make([]string, len(s.securityGroupIDs))
+		for i, sg := range s.securityGroupIDs {
+			quoted[i] = fmt.Sprintf("%q", sg)
+		}
+		sgs = "[" + strings.Join(quoted, ",") + "]"
+	}
+	// cluster_instance_profile_id nil = ABSENT on the wire (omitempty
+	// shape: a cleared profile and an unset one are indistinguishable).
+	profile := ""
+	if s.clusterInstanceProfile != nil {
+		profile = ",\n\t\t\t\"cluster_instance_profile_id\": " + fmt.Sprintf("%q", *s.clusterInstanceProfile)
+	}
+	storage := "null"
+	if s.objectStorage != nil {
+		b, _ := json.Marshal(s.objectStorage)
+		storage = string(b)
+	}
 	managed := ""
 	if s.managed {
 		managed = `,
 			"cloudformation_id": "cfn-managed-mock"`
 	}
-	return fmt.Sprintf(subnetsInPlaceListTemplate, s.resourceName, s.resourceID, strings.Join(ids, ","), strings.Join(zones, ","), managed, fs)
+	return fmt.Sprintf(subnetsInPlaceListTemplate, s.resourceName, s.resourceID,
+		strings.Join(ids, ","), strings.Join(zones, ","), sgs, profile, managed, storage, fs)
 }
 
 func newSubnetsInPlaceServer(t *testing.T) (*httptest.Server, *subnetsInPlaceServer) {
@@ -124,15 +151,21 @@ func newSubnetsInPlaceServer(t *testing.T) (*httptest.Server, *subnetsInPlaceSer
 		t.Fatal(err)
 	}
 	proxy := httputil.NewSingleHostReverseProxy(target)
+	profile := "arn:aws:iam::123456789012:instance-profile/real-node-profile"
 	s := &subnetsInPlaceServer{
-		cloudID:            base.cloudID,
-		resourceID:         "cldrsrc_subnetmock",
-		resourceName:       "default",
-		subnetIDs:          []string{"subnet-realct1", "subnet-realct2"},
-		zones:              []string{"us-east-2a", "us-east-2b"},
-		requireSubnetZones: true,
-		deployed:           true,
-		base:               base,
+		cloudID:                base.cloudID,
+		resourceID:             "cldrsrc_subnetmock",
+		resourceName:           "default",
+		subnetIDs:              []string{"subnet-realct1", "subnet-realct2"},
+		zones:                  []string{"us-east-2a", "us-east-2b"},
+		requireSubnetZones:     true,
+		deployed:               true,
+		securityGroupIDs:       []string{"sg-realct1"},
+		clusterInstanceProfile: &profile,
+		// s3_addressing_style is unmodeled by this provider's schema: the
+		// PUT's raw echo must carry it back or the backend clears it.
+		objectStorage: map[string]any{"bucket_name": "s3://real-ct-bucket", "s3_addressing_style": "virtual"},
+		base:          base,
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/v2/clouds/"+s.cloudID+"/remove_resource") && r.Method == http.MethodDelete {
@@ -307,6 +340,31 @@ func (s *subnetsInPlaceServer) handleResourcesPut(w http.ResponseWriter, r *http
 		s.fileStorage = nil
 	}
 
+	// In-place attribute overlays: present key = assign, ABSENT key = clear
+	// (the backend assigns every field of a sent block unconditionally).
+	if aws, ok := req["aws_config"].(map[string]any); ok {
+		if v, ok := aws["security_group_ids"].([]any); ok {
+			s.securityGroupIDs = nil
+			for _, item := range v {
+				s.securityGroupIDs = append(s.securityGroupIDs, fmt.Sprint(item))
+			}
+		} else {
+			s.securityGroupIDs = nil
+		}
+		if v, ok := aws["cluster_instance_profile_id"].(string); ok {
+			val := v
+			s.clusterInstanceProfile = &val
+		} else {
+			s.clusterInstanceProfile = nil
+		}
+	} else if _, ok := req["aws_config"]; !ok && req["provider"] != nil {
+		// No aws_config block sent at all (not this provider's shape today,
+		// but the backend would preserve the stored block) - nothing to do.
+		_ = req
+	}
+	if osBlock, ok := req["object_storage"].(map[string]any); ok {
+		s.objectStorage = osBlock
+	}
 	aws, _ := req["aws_config"].(map[string]any)
 	if aws != nil {
 		idsAny, idsOK := aws["subnet_ids"].([]any)
@@ -1054,4 +1112,20 @@ func TestAccCloudResource_SubnetsToAZChangeManagedCloudRefusal(t *testing.T) {
 	if got := mock.putCount(); got != 0 {
 		t.Errorf("resources PUTs = %d, want 0: the refusal must fire at plan time, before any apply writes", got)
 	}
+}
+
+// setLiveSecurityGroups models an out-of-band security-group change made
+// with the Anyscale CLI while Terraform config stood still.
+func (s *subnetsInPlaceServer) setLiveSecurityGroups(sgs []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.securityGroupIDs = append([]string{}, sgs...)
+}
+
+// liveSecurityGroups reports the stored security groups (the live truth a
+// drift test wants to see).
+func (s *subnetsInPlaceServer) liveSecurityGroups() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string{}, s.securityGroupIDs...)
 }

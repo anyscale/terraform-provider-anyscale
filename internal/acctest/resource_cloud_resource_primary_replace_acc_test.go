@@ -114,27 +114,26 @@ func TestAccCloudResourcePrimaryReplace_PlanError(t *testing.T) {
 				},
 			},
 			{
-				// A replace-forcing change on the primary resource fails the
-				// plan and names the attribute.
+				// A vpc_id change without its subnets fails the plan
+				// (docs/decisions/cloud-resource-inplace-update/README.md) -
+				// subnets belong to one VPC, so such a config cannot be right.
 				Config:      primaryReplaceConfig(server.URL, "us-east-2", "vpc-a2", "vpc-b"),
-				ExpectError: regexp.MustCompile(`(?s)Cannot Replace a Primary Cloud Resource.*aws_config\.vpc_id cannot be changed on a cloud's primary resource`),
+				ExpectError: regexp.MustCompile(`(?s)vpc_id Changed Without Its Subnets`),
 			},
-			{
-				// The same change on a non-primary resource plans an ordinary
-				// replace.
-				Config: primaryReplaceConfig(server.URL, "us-east-2", "vpc-a", "vpc-b2"),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("anyscale_cloud_resource.b", plancheck.ResourceActionReplace),
-						plancheck.ExpectResourceAction("anyscale_cloud_resource.a", plancheck.ResourceActionNoop),
-					},
-				},
-			},
+			// A vpc_id change WITH its subnets on a non-primary resource is
+			// now an ordinary in-place update - covered against a fully
+			// shaped deployment by the file-storage and subnet-form update
+			// tests, whose mocks carry aws_config (this mock's deployments
+			// deliberately render bare records with no config blocks, which
+			// is a shape no real AWS VM resource returns).
 			{
 				// Replacing the cloud itself leaves cloud_id unknown, so the
 				// primary resource is replaced with it. That is a legitimate
-				// new cloud, not a primary-resource change: no error.
-				Config:             primaryReplaceConfig(server.URL, "us-west-2", "vpc-a", "vpc-b2"),
+				// new cloud, not a primary-resource change: no error. The
+				// b resource's vpc_id moves with its own subnet change, so
+				// the vpc-without-subnets plan refusal does not fire.
+				Config: strings.Replace(primaryReplaceConfig(server.URL, "us-west-2", "vpc-a", "vpc-b2"),
+					`"subnet-b1" = "us-east-2a"`, `"subnet-b1" = "us-west-2a"`, 1),
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: true,
 			},

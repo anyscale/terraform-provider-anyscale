@@ -106,25 +106,3 @@ func (m primaryReplaceGuardBool) PlanModifyBool(ctx context.Context, req planmod
 		addPrimaryReplaceError(&resp.Diagnostics, req.Path)
 	}
 }
-
-type primaryReplaceGuardList struct{ inner planmodifier.List }
-
-func guardPrimaryList(inner planmodifier.List) planmodifier.List {
-	return primaryReplaceGuardList{inner: inner}
-}
-
-func (m primaryReplaceGuardList) Description(ctx context.Context) string {
-	return m.inner.Description(ctx)
-}
-
-func (m primaryReplaceGuardList) MarkdownDescription(ctx context.Context) string {
-	return m.inner.MarkdownDescription(ctx)
-}
-
-func (m primaryReplaceGuardList) PlanModifyList(ctx context.Context, req planmodifier.ListRequest, resp *planmodifier.ListResponse) {
-	m.inner.PlanModifyList(ctx, req, resp)
-	if resp.RequiresReplace && replaceIsReal(req.ConfigValue.IsNull(), resp.PlanValue.IsUnknown()) &&
-		primaryReplaceGuarded(ctx, req.State, req.Plan) {
-		addPrimaryReplaceError(&resp.Diagnostics, req.Path)
-	}
-}

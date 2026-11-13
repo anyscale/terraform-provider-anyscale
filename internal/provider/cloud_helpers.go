@@ -307,20 +307,63 @@ func resolveCloudIDFilter(ctx context.Context, client *Client, cloudID, cloudNam
 // that paginates GET /clouds/{id}/resources instead of several copies that
 // could drift (e.g. one paginating, one only reading page 1).
 func listCloudResources(ctx context.Context, client *Client, cloudID string) ([]CloudDeploymentResult, error) {
-	results, err := PaginatedRequest(
+	results, _, err := listCloudResourcesWithRaw(ctx, client, cloudID)
+	return results, err
+}
+
+// listCloudResourcesWithRaw lists the cloud's resources and returns, next to
+// the typed results, each deployment's raw JSON object keyed by
+// cloud_resource_id. The in-place update path needs the raw objects: the
+// PUT body echoes a block from the deployment's own JSON so that fields the
+// typed structs do not model (kubernetes_config.custom_image_registry,
+// object_storage.s3_addressing_style) survive the round trip - the backend
+// clears any field a sent block leaves out. See
+// docs/decisions/cloud-resource-inplace-update/README.md.
+func listCloudResourcesWithRaw(ctx context.Context, client *Client, cloudID string) ([]CloudDeploymentResult, map[string]map[string]any, error) {
+	type deployment struct {
+		typed CloudDeploymentResult
+		raw   map[string]any
+	}
+	type deploymentsPage struct {
+		Results  []json.RawMessage `json:"results"`
+		Metadata struct {
+			NextPagingToken *string `json:"next_paging_token"`
+		} `json:"metadata"`
+	}
+	pairs, err := PaginatedRequest(
 		ctx, client, fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil,
-		func(body []byte) ([]CloudDeploymentResult, *string, error) {
-			var deploymentsResp CloudDeploymentsResponse
-			if err := json.Unmarshal(body, &deploymentsResp); err != nil {
+		func(body []byte) ([]deployment, *string, error) {
+			var page deploymentsPage
+			if err := json.Unmarshal(body, &page); err != nil {
 				return nil, nil, fmt.Errorf("failed to unmarshal cloud resources: %w", err)
 			}
-			return deploymentsResp.Results, deploymentsResp.Metadata.NextPagingToken, nil
+			out := make([]deployment, 0, len(page.Results))
+			for _, item := range page.Results {
+				var d CloudDeploymentResult
+				if err := json.Unmarshal(item, &d); err != nil {
+					return nil, nil, fmt.Errorf("failed to unmarshal a cloud resource: %w", err)
+				}
+				var m map[string]any
+				if err := json.Unmarshal(item, &m); err != nil {
+					return nil, nil, fmt.Errorf("failed to unmarshal a cloud resource object: %w", err)
+				}
+				out = append(out, deployment{typed: d, raw: m})
+			}
+			return out, page.Metadata.NextPagingToken, nil
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list cloud resources: %w", err)
+		return nil, nil, fmt.Errorf("failed to list cloud resources: %w", err)
 	}
-	return results, nil
+	results := make([]CloudDeploymentResult, len(pairs))
+	byID := make(map[string]map[string]any, len(pairs))
+	for i, d := range pairs {
+		results[i] = d.typed
+		if d.typed.CloudResourceID != "" {
+			byID[d.typed.CloudResourceID] = d.raw
+		}
+	}
+	return results, byID, nil
 }
 
 // isHostedCloudResourcesError reports whether err from listCloudResources is the backend's
@@ -598,58 +641,31 @@ func (m bucketNameSemanticEqualPlanModifier) PlanModifyString(ctx context.Contex
 	}
 }
 
-// regionSemanticEqualPlanModifier is the fix for the object_storage.region
+// regionSemanticEqualPlanModifier documents the object_storage.region
 // import ambiguity (verified directly against product backend source, then
 // against a real live cloud, not assumed): backend/go/appsidecar/
 // cloud_deployment_model.go's toExternalCloudDeployment emits
 // object_storage.region ONLY when the stored bucket region differs from the
 // stored deployment region; when they are equal the key comes back JSON
 // null. updateInternalCloudResource (same file) stores an omitted region AS
-// the deployment region, so "user never set region" and "user explicitly set
-// region to the same value as the cloud" become byte-identical in storage
+// the deployment region, so "user never set region" and "user explicitly
+// set region to the same value as the cloud" are byte-identical in storage
 // before the read path ever runs - there is no real, non-null value the
-// provider could recover for this case, the backend destroys the
-// distinction upstream. So a config that explicitly sets object_storage.region
-// equal to the resource's own region always sees a null recovered state, and
-// without this modifier the plain stringplanmodifier.RequiresReplace() it
-// replaces would force a destroy-and-recreate of a live, working cloud on
-// every plan.
+// provider could recover for this case. A config that explicitly sets
+// object_storage.region equal to the resource's own region therefore sees a
+// null recovered state and, on the first plan, an in-place update that
+// writes the value into state; from then on the plan is empty.
 //
-// Unlike bucketNameSemanticEqualPlanModifier (which rewrites PlanValue to an
-// equally-valid alternate STRING representation of the same value), this
-// modifier deliberately never touches resp.PlanValue at all - it implements
-// requires-replace-with-an-exception directly via resp.RequiresReplace
-// instead of composing with a separate stringplanmodifier.RequiresReplace().
-// Rewriting PlanValue to state's null here was tried first and rejected:
-// Terraform Core validates that a planned value must equal an explicit,
-// known, non-null CONFIG value exactly for a non-Computed attribute - a
-// config of "us-east-2" paired with a rewritten plan of null fails with
-// "provider produced invalid plan" (verified against a real acceptance run,
-// not assumed). Leaving PlanValue untouched sidesteps that entirely: the
-// framework's own default (the literal config value) is always a valid
-// plan for a non-Computed Optional attribute, so only whether to REPLACE
-// needs conditional logic here, never what the value IS.
-//
-// When the plan value for object_storage.region equals the resource's own
-// top-level region and the prior state has no region recorded (null - either
-// never set, or a live cloud whose GET response omits it for the reason
-// above), this suppresses replacement. A genuinely different bucket region
-// still comes back for real from the API and compares normally - a real
-// change still replaces.
-//
-// Self-heals already-affected state: since this runs on every plan, a cloud
-// already imported with region left null under a prior provider version (the
-// withdrawn Optional+Computed design, or simply an older release) plans
-// cleanly again on its very next plan - no re-import needed, unlike the
-// withdrawn design.
-//
-// Reads the top-level region from req.Plan rather than req.Config: the
-// resource's own region is itself Optional+Computed (inferred when a config
-// omits it), so only the PLAN reflects its final resolved value once its own
-// UseStateForUnknown has run. If that resolution is still unknown at this
-// point (e.g. mid-Create, before the parent resource's own region has
-// settled), this deliberately does nothing rather than guess - the next plan
-// re-evaluates once it is known.
+// The attribute updates in place
+// (docs/decisions/cloud-resource-inplace-update/README.md); this modifier
+// exists so the ambiguity above stays documented exactly where a future
+// maintainer would otherwise re-add
+// stringplanmodifier.RequiresReplace() and reintroduce a
+// destroy-and-recreate of a live cloud over a value the backend cannot
+// distinguish from null. Rewriting PlanValue to state's null here does not
+// work: Terraform Core validates that a planned value must equal an
+// explicit, known, non-null CONFIG value exactly for a non-Computed
+// attribute (verified against a real acceptance run, not assumed).
 type regionSemanticEqualPlanModifier struct{}
 
 func (m regionSemanticEqualPlanModifier) Description(ctx context.Context) string {
@@ -661,41 +677,10 @@ func (m regionSemanticEqualPlanModifier) MarkdownDescription(ctx context.Context
 }
 
 func (m regionSemanticEqualPlanModifier) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
-	// Do not replace on resource creation or destroy - mirrors
-	// RequiresReplaceIf's own guards (requires_replace_if.go) exactly, since
-	// this modifier subsumes RequiresReplace's job for this attribute rather
-	// than composing alongside it.
-	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
-		return
-	}
-	// No change, or plan not yet resolved - nothing to decide.
-	if req.PlanValue.Equal(req.StateValue) || req.PlanValue.IsUnknown() {
-		return
-	}
-
-	if req.StateValue.IsNull() {
-		var cloudRegion types.String
-		if d := req.Plan.GetAttribute(ctx, path.Root("region"), &cloudRegion); !d.HasError() && !cloudRegion.IsUnknown() && !cloudRegion.IsNull() {
-			if req.PlanValue.Equal(cloudRegion) {
-				// The exact ambiguous case: state has nothing recorded, and
-				// the configured value matches the cloud's own region - the
-				// backend cannot have meant anything else, so this is not a
-				// real change.
-				return
-			}
-		}
-	}
-
-	resp.RequiresReplace = true
+	// object_storage.region updates in place; nothing is decided here. See
+	// the type's doc comment for what this modifier guards against.
 }
 
-// stringSetsEqual reports whether a and b contain exactly the same set of
-// strings - true bidirectional equality (same cardinality after
-// deduplication AND full mutual containment), not a one-directional subset
-// check. A subset check would wrongly treat a genuine partial-overlap
-// change (e.g. one subnet swapped for another) as unchanged; order is
-// deliberately ignored, since aws_config.subnet_ids (list) and
-// subnet_ids_to_az (map) have no shared ordering to compare.
 func stringSetsEqual(a, b []string) bool {
 	setA := make(map[string]struct{}, len(a))
 	for _, s := range a {
