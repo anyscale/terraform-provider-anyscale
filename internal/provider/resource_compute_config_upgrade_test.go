@@ -162,8 +162,8 @@ func upgradeV0Fixture(t *testing.T, v0Model computeConfigResourceModelV0) Comput
 
 func TestComputeConfigStateUpgradeV0toV1(t *testing.T) {
 	t.Run("head_node physical_resources present but all-fields-null upgrades to an equally-empty required_resources", func(t *testing.T) {
-		// The one shape confirmed to survive a real create (backend rejects
-		// any non-empty physical_resources value), per review.
+		// The one shape a real create accepts (the backend rejects any
+		// non-empty physical_resources value).
 		allNullPhysRes := types.ObjectValueMust(physicalResourcesAttrTypesV0(), map[string]attr.Value{
 			"cpu": types.Int64Null(), "memory": types.StringNull(), "gpu": types.Int64Null(),
 			"accelerator": types.StringNull(), "tpu": types.Int64Null(), "tpu_hosts": types.Int64Null(),
@@ -289,7 +289,7 @@ func TestComputeConfigStateUpgradeV0toV1(t *testing.T) {
 		// cloud_name is set on the v0 fixture (a real v0 state could have it)
 		// specifically to prove the upgrade does not error or panic on a
 		// populated value it no longer has anywhere to put - cloud_name was
-		// removed from the current model entirely (R1), so there is nothing
+		// removed from the current model entirely, so there is nothing
 		// to assert it upgraded TO, only that upgrading FROM it is safe.
 		v0Model.CloudName = types.StringValue("my-cloud")
 		v0Model.Zones = types.ListValueMust(types.StringType, []attr.Value{types.StringValue("us-west-2a")})

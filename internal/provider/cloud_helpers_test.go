@@ -202,7 +202,7 @@ func TestResolveCloudNameToID(t *testing.T) {
 		}
 	})
 
-	t.Run("name past page 1 is found (B1 mutation-proof regression guard)", func(t *testing.T) {
+	t.Run("name past page 1 is found (mutation-proof regression guard)", func(t *testing.T) {
 		// ResolveCloudNameToID used to read only page 1 of GET /api/v2/clouds
 		// via a single unpaginated request - in an org whose cloud list
 		// exceeds one page, a valid name past page 1 resolved to "not found".

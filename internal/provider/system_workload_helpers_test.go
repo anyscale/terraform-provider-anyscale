@@ -79,7 +79,7 @@ func TestEvaluateSystemClusterState(t *testing.T) {
 		{name: "TerminatingErrored is terminal failure", status: &terminatingErrored, target: systemClusterStateRunning, wantDone: true, wantErr: true, wantErrSub: "TerminatingErrored"},
 		{name: "Terminating is not terminal - continues", status: &terminating, target: systemClusterStateRunning, wantDone: false, wantErr: false},
 		{name: "Unknown is not terminal - continues", status: &unknown, target: systemClusterStateRunning, wantDone: false, wantErr: false},
-		{name: "Terminated is not terminal - continues (the normal first-poll-after-Create response)", status: &terminated, target: systemClusterStateRunning, wantDone: false, wantErr: false},
+		{name: "Terminated is not terminal - continues (confirmed live: the normal first-poll-after-Create response)", status: &terminated, target: systemClusterStateRunning, wantDone: false, wantErr: false},
 	}
 
 	for _, tt := range tests {

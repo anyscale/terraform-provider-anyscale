@@ -17,25 +17,20 @@ import (
 // The two-page shape is the point of this file, not an implementation
 // detail: ResolveCloudNameToID (cloud_helpers.go) is the shared helper
 // behind cloud_name on all five data sources (compute_config, project,
-// projects, service, services) - the only surface left after R1 removed
-// cloud_name from the three resources. Before B1's fix it issued a single
-// unpaginated GET and matched within page one only. A mock that returns
-// every cloud in one response cannot fail against
-// that bug - the page-1-only helper would find the name fine and this test
-// would go green against unfixed code, exactly the placebo shape flagged
-// when B1 was assigned. The target cloud here is placed on page 2
-// deliberately so the unfixed helper returns "no cloud found" and this test
-// fails for the right reason.
+// projects, service, services) - the only remaining surface, now that
+// cloud_name has been removed from the resources. A page-1-only resolver
+// issues a single unpaginated GET and matches within page one only: a
+// valid name past page 1 resolves to "not found", and a name duplicated
+// across pages silently resolves to the older cloud. A mock that returns
+// every cloud in one response cannot fail against a page-1-only resolver
+// - it would find the name fine and this test would go green. The target
+// cloud is placed on page 2 deliberately so a page-1-only resolver fails
+// for the right reason.
 //
-// Originally written against anyscale_project (the resource); retargeted
-// here after R1 removed cloud_name from that resource entirely, which broke
-// the build (undefined: testAccProjectResourceWithCloudNameConfig) - not
-// just a runtime failure, since the helper it called no longer exists.
-// Rewritten onto the data source instead of deleted: this coverage must not
-// be dropped, since ResolveCloudNameToID is still a live, shipped fix
-// guarding real behavior on all five data sources - deleting the test
-// because its old HCL stopped compiling would silently drop the only guard
-// on a fix this repo already shipped.
+// These tests live on data.anyscale_project because cloud_name exists
+// only on data sources. ResolveCloudNameToID is reached from every data
+// source regardless of which call site exercises it, so this coverage
+// must not be dropped.
 func newDataSourceCloudNamePaginationMockServer(t *testing.T, page1Clouds, page2Clouds []map[string]any, projects []map[string]any) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -126,17 +121,14 @@ func projectResult(id, name, createdAt, parentCloudID string) map[string]any {
 	}
 }
 
-// TestAccProjectDataSource_CloudNameResolvesAcrossPages is the mutation-proof
-// regression guard for B1 (ResolveCloudNameToID is page-1-only,
-// cloud_helpers.go:227-259), retargeted onto data.anyscale_project after R1
-// removed cloud_name from the anyscale_project resource - see this file's
-// header comment.
+// TestAccProjectDataSource_CloudNameResolvesAcrossPages is the
+// mutation-proof regression guard for ResolveCloudNameToID's pagination
+// (cloud_helpers.go) - a by-name lookup must scan every page of
+// GET /api/v2/clouds, not just the first. See this file's header comment.
 //
-// Confirmed failing-first (2026-07-25, pre-R1 form) against pre-B1 main with
-// the exact expected error - "Failed to resolve cloud name... no cloud found
-// with name..." - before B1's fix landed. Re-confirmed post-R1 that
-// this retargeted form still exercises the same helper and still passes
-// against the fixed code.
+// It fails against a page-1-only cloud-name resolver: looking up the
+// page-2 cloud returns "Failed to resolve cloud name... no cloud found
+// with name..." instead of an ID.
 func TestAccProjectDataSource_CloudNameResolvesAcrossPages(t *testing.T) {
 	const targetCloudID = "cld_page_two_target"
 	const targetCloudName = "cloud-on-page-two"
@@ -175,27 +167,23 @@ data "anyscale_project" "test" {
 	})
 }
 
-// TestAccProjectDataSource_CloudNameDuplicateAcrossPagesPicksNewest pins the
-// user-visible behavior change B1's changelog fragment promises: a duplicate
-// cloud name can now resolve to a DIFFERENT cloud than before, because the
-// most-recent tiebreak sees page-2 candidates that were previously
-// invisible. Two clouds share the same name, one on page 1 (older), one on
-// page 2 (newer) - asserts the resolver picks the newer, page-2 one.
+// TestAccProjectDataSource_CloudNameDuplicateAcrossPagesPicksNewest pins
+// user-visible behavior: a duplicate cloud name can resolve to a different
+// cloud than it would if the resolver stopped at page 1, because the
+// most-recent tiebreak also sees page-2 candidates. Two clouds share the
+// same name, one on page 1 (older), one on page 2 (newer) - asserts the
+// resolver picks the newer, page-2 one.
 //
-// This is the property flagged as most important to preserve
-// through the R1 retarget: it is the one that exposed the silent-wrong-cloud
-// bug (a not-found error is loud; picking the wrong cloud silently is not),
-// and it is the specific behavior the shipped release note now promises. A
-// version of this test originally lived on anyscale_compute_config (a
-// resource) - deleting it when R1 removed cloud_name from that resource
-// would have silently dropped the only guard on a fix already shipped in a
-// previous PR, since ResolveCloudNameToID is the same shared helper reached
-// from every data source regardless of which call site exercises it.
+// This property matters most: a not-found error is loud, but picking the
+// wrong cloud silently is not. ResolveCloudNameToID is the same shared
+// helper reached from every data source regardless of which call site
+// exercises it, so dropping this test would remove the only guard on
+// that behavior.
 //
-// Confirmed failing-first (2026-07-25, pre-R1 resource-based form) against
-// pre-B1 main: resolved to the OLDER page-1 cloud instead of the newer
-// page-2 one, since the unfixed page-1-only helper found a match on page 1
-// and returned immediately, never learning page 2's newer duplicate exists.
+// It fails against a page-1-only cloud-name resolver: it would resolve the
+// older page-1 cloud instead of the newer page-2 one, because the helper
+// finds a page-1 match and returns immediately, never learning that page
+// 2 holds a newer duplicate.
 func TestAccProjectDataSource_CloudNameDuplicateAcrossPagesPicksNewest(t *testing.T) {
 	const sharedName = "ds-dup-name-both-pages"
 	const olderCloudID = "cld_ds_dup_page_one_older"

@@ -337,8 +337,7 @@ func awsConfigBlockLifecycle(letter string) string {
 // must produce 2 distinct backend resources and a clean, empty re-plan.
 // depends_on forces block "b" to apply
 // strictly after block "a" commits - without it Terraform's default
-// parallelism could race the two Creates, which wouldn't test this scenario
-// deterministically either pre- or post-fix.
+// parallelism could race the two Creates and make the scenario flaky.
 func TestAccCloudResourceMulti_DistinctExplicitNames(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 

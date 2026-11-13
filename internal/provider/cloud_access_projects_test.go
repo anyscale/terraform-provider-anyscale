@@ -164,10 +164,10 @@ type applyProjectRolesTestMock struct {
 
 	// failGrantWith403For / failRevokeWith403For (keyed by email / identityID)
 	// return the REAL captured 403 body - {"error":{"detail":"Permission
-	// denied"}} - rather than an invented one, per AC-37.
+	// denied"}} - rather than an invented one.
 	failGrantWith403For  map[string]bool
 	failRevokeWith403For map[string]bool
-	// failReadWith403 makes the collaborator-list GET 403 too, for AC-38: the
+	// failReadWith403 makes the collaborator-list GET 403 too, because the
 	// read path must get an ordinary diagnostic, not the dual-cause message.
 	failReadWith403 bool
 }
@@ -256,10 +256,10 @@ func (m *applyProjectRolesTestMock) handler(t *testing.T) http.Handler {
 }
 
 // TestApplyProjectRoles_GrantFailureSkipsRevokesButNotOtherGrants covers the
-// project-scope half of AC-35, the same rule cloud_access_reconcile.go follows
-// for cloud-scope grants: continue attempting every grant, but skip every
-// revoke - recording it, not silently dropping it - once any grant in this
-// pass has failed.
+// project-scope half of the grant-failure rule, the same rule
+// cloud_access_reconcile.go follows for cloud-scope grants: continue
+// attempting every grant, but skip every revoke - recording it, not silently
+// dropping it - once any grant in this pass has failed.
 func TestApplyProjectRoles_GrantFailureSkipsRevokesButNotOtherGrants(t *testing.T) {
 	mock := &applyProjectRolesTestMock{
 		collaborators: map[string]map[string]string{
@@ -347,8 +347,8 @@ func TestApplyProjectRoles_PriorCloudGrantFailureSkipsProjectRevokesToo(t *testi
 
 // TestCloudAccessUnplannedProjectShortfall covers the safe fallback when the
 // project pass could not even be planned (a read failure before
-// planProjectRoles could run, most likely J.13's own timeout firing after
-// cloud-scope grants already succeeded). It must over-report rather than
+// planProjectRoles could run, most likely the bounded-retry timeout firing
+// after cloud-scope grants already succeeded). It must over-report rather than
 // under-report: every declared project role becomes ungranted, and every
 // previously-declared-but-now-dropped one becomes unmanaged, with no overlap
 // between the two channels for the same (email, project) pair.
@@ -384,9 +384,9 @@ func TestCloudAccessUnplannedProjectShortfall(t *testing.T) {
 	}
 }
 
-// cloudAccessAssertBothCausesOrdered is AC-37's core assertion: the reason
-// names both known causes of a project-scope write 403, with the token-
-// permission check before the backend-condition explanation. Anchored on
+// cloudAccessAssertBothCausesOrdered is the core both-causes assertion: the
+// reason names both known causes of a project-scope write 403, with the
+// token-permission check before the backend-condition explanation. Anchored on
 // short, stable tokens ("permission" / "authorization service") rather than
 // full phrases, since a legitimate rewording of the surrounding prose must
 // not fail this test. If this ever needs loosening, loosen the ANCHOR
@@ -407,11 +407,12 @@ func cloudAccessAssertBothCausesOrdered(t *testing.T, reason string) {
 	}
 }
 
-// TestApplyProjectRoles_GrantWrite403NamesBothCausesAndConverges is AC-37 on
-// the grant path: a 403 from the real, captured wire shape names both known
-// causes without picking, and the apply still succeeds with the failure
-// recorded in ungranted_members - a test that only checked the message
-// would pass an implementation that started erroring instead.
+// TestApplyProjectRoles_GrantWrite403NamesBothCausesAndConverges is the
+// both-causes requirement on the grant path: a 403 from the real, captured
+// wire shape names both known causes without picking, and the apply still
+// succeeds with the failure recorded in ungranted_members - a test that
+// only checked the message would pass an implementation that started
+// erroring instead.
 func TestApplyProjectRoles_GrantWrite403NamesBothCausesAndConverges(t *testing.T) {
 	mock := &applyProjectRolesTestMock{
 		collaborators:       map[string]map[string]string{},
@@ -438,9 +439,9 @@ func TestApplyProjectRoles_GrantWrite403NamesBothCausesAndConverges(t *testing.T
 	cloudAccessAssertBothCausesOrdered(t, ungranted[0].Reason.ValueString())
 }
 
-// TestApplyProjectRoles_RevokeWrite403NamesBothCausesAndConverges is AC-37 on
-// the revoke path (the per-collaborator DELETE), the other write route the
-// diagnostic must cover.
+// TestApplyProjectRoles_RevokeWrite403NamesBothCausesAndConverges is the
+// both-causes requirement on the revoke path (the per-collaborator DELETE),
+// the other write route the diagnostic must cover.
 func TestApplyProjectRoles_RevokeWrite403NamesBothCausesAndConverges(t *testing.T) {
 	mock := &applyProjectRolesTestMock{
 		collaborators: map[string]map[string]string{
@@ -498,7 +499,7 @@ func TestCloudAccessProjectWrite403Reason_MutationProof(t *testing.T) {
 	})
 }
 
-// TestListProjectCollaborators_403IsAnOrdinaryDiagnostic is AC-38: the read
+// TestListProjectCollaborators_403IsAnOrdinaryDiagnostic asserts that the read
 // path (GET .../collaborators/users) gets no dual-cause branch. A 403 there
 // surfaces as an ordinary error - specifically, it must NOT contain the
 // backend-condition language the write-path diagnostic adds, since firing

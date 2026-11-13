@@ -270,10 +270,10 @@ func TestServiceDataSourceRead_ByID(t *testing.T) {
 	}
 }
 
-// TestServiceDataSourceRead_EnumWireValues is AC-3: assert EXACT wire strings for
-// every enum-shaped field round-trip unchanged. This repo has shipped an enum wire-value bug
-// hidden by a skipping acctest before (a mismatched constant sent the wrong wire value); this
-// unit assertion is the load-bearing guard mentioned in that ruling, and does not depend on any
+// TestServiceDataSourceRead_EnumWireValues asserts EXACT wire strings for every
+// enum-shaped field round-trip unchanged. This repo has shipped an enum wire-value bug
+// hidden by a skipping acctest before (a mismatched constant sent the wrong wire value),
+// so this unit assertion is the load-bearing guard: it does not depend on any
 // acctest/real-infra path to catch a future regression.
 func TestServiceDataSourceRead_EnumWireValues(t *testing.T) {
 	const serviceID = "service2_enum"
@@ -320,7 +320,7 @@ func TestServiceDataSourceRead_EnumWireValues(t *testing.T) {
 	}
 }
 
-// TestServiceDataSourceRead_NullableFields is the AC-2 mutation-proof guard: every
+// TestServiceDataSourceRead_NullableFields is the mutation-proof guard: every
 // nullable field must map to Terraform null when the API sends JSON null, never to a zero value
 // like "" or 0. Uses a raw JSON body (not a Go struct literal) since a non-pointer field cannot
 // represent "absent" - this must actually exercise the null-decoding path, not just default-zero
@@ -414,7 +414,7 @@ func TestServiceDataSourceRead_NullableFields(t *testing.T) {
 	if !primaryVersionNullable.ConnectionIDs.IsNull() {
 		t.Errorf("primary_version.connection_ids should be null, got %#v", primaryVersionNullable.ConnectionIDs)
 	}
-	// ray_serve_config is required upstream (AC-5) - even an empty object must round-trip as a
+	// ray_serve_config is required upstream - even an empty object must round-trip as a
 	// non-null string, never collapse to Terraform null the way the other Optional fields above do.
 	if primaryVersionNullable.RayServeConfig.IsNull() {
 		t.Error("primary_version.ray_serve_config should never be null (required upstream), got null")

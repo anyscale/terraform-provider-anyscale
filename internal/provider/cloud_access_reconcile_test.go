@@ -111,7 +111,7 @@ type cloudAccessMockIdentity struct {
 	// PermissionLevel is the organization-scope permission_level reported by
 	// GET /api/v2/organization_collaborators - "owner" or "collaborator".
 	// Defaults to "collaborator" when unset, so only a test that cares about
-	// J.22's org-admin guard needs to set it.
+	// the org-admin guard needs to set it.
 	PermissionLevel string
 	// ServiceAccount marks a service account (see the list handler).
 	ServiceAccount bool
@@ -189,7 +189,7 @@ func (m *cloudAccessReconcileMock) handler(t *testing.T, cloudID string) http.Ha
 		writeJSON(w, map[string]interface{}{"results": results, "metadata": emptyMeta})
 	})
 
-	// The singular GET, keyed by user_id - what cloudAccessLikelyOrgAdmin (J.22)
+	// The singular GET, keyed by user_id - what cloudAccessLikelyOrgAdmin
 	// actually reads base_role from. Kept driven by the same PermissionLevel
 	// field as the list handler above: for this mock's purposes, one signal per
 	// test identity is enough to say "this person is an org admin", even though
@@ -703,7 +703,7 @@ func TestReconcileCloudAccess_FailedRevokeConvergesIntoUnmanagedGrants(t *testin
 	}
 }
 
-// TestReconcileCloudAccess_FailedGrantSuppressesRevokesNotRecords covers AC-35:
+// TestReconcileCloudAccess_FailedGrantSuppressesRevokesNotRecords covers the rule that
 // a grant failure records into Ungranted and warns rather than erroring - the
 // error would taint the Create/Update, and the next apply would then destroy
 // and recreate the resource, revoking every member this apply DID manage to
@@ -763,7 +763,7 @@ func TestReconcileCloudAccess_FailedGrantSuppressesRevokesNotRecords(t *testing.
 }
 
 // TestReconcileCloudAccess_GrantLoopContinuesPastAFailure covers the other
-// half of AC-35: a grant failure must not stop the loop from attempting every
+// half of the same rule: a grant failure must not stop the loop from attempting every
 // OTHER declared member. Grants are additive and per-member independent, so
 // skipping "b" because "a" failed would silently fail to attempt access the
 // configuration asked for - forbidden by the same rule that requires revokes
@@ -840,8 +840,8 @@ func TestReconcileCloudAccess_ServiceAccountMemberResolvesAndRemovalsRun(t *test
 
 // TestReconcileCloudAccess_ProjectPassReadFailureConvergesNotErrors covers the
 // gap this same round found and fixed: a read failure inside the project
-// pass (most plausibly J.13's own timeout firing after cloud-scope grants
-// already succeeded) must NOT error - it must record the shortfall via
+// pass (most plausibly the bounded-retry timeout firing after cloud-scope
+// grants already succeeded) must NOT error - it must record the shortfall via
 // cloudAccessUnplannedProjectShortfall and converge, exactly like a grant
 // failure does. The mock here has no project-scope routes at all, so the
 // project-roles read hits a genuine 404 - proving the fallback fires on a
@@ -877,12 +877,12 @@ func TestReconcileCloudAccess_ProjectPassReadFailureConvergesNotErrors(t *testin
 	}
 }
 
-// TestReconcileCloudAccess_FeatureGateOnReadSurfacesTwoFlagMessage covers AC-5
-// on the reconcile's own member-list read. Before this fix, a 501 here (the
-// read-side flag) fell through to the generic "Could Not Read The Cloud's
-// Current Members" message, which sends an operator looking at permissions or
-// the network instead of at the two feature flags that actually gate this
-// endpoint.
+// TestReconcileCloudAccess_FeatureGateOnReadSurfacesTwoFlagMessage covers
+// the two-flag gate on the reconcile's own member-list read. Before this
+// fix, a 501 here (the read-side flag) fell through to the generic "Could
+// Not Read The Cloud's Current Members" message, which sends an operator
+// looking at permissions or the network instead of at the two feature flags
+// that actually gate this endpoint.
 func TestReconcileCloudAccess_FeatureGateOnReadSurfacesTwoFlagMessage(t *testing.T) {
 	const cloudID = "cld_gate_read"
 
@@ -914,7 +914,7 @@ func TestReconcileCloudAccess_FeatureGateOnReadSurfacesTwoFlagMessage(t *testing
 }
 
 // TestReconcileCloudAccess_FeatureGateOnRoleWriteSurfacesTwoFlagMessage covers
-// AC-5 on the OTHER half of the two-flag gate - the roles PUT, which is
+// the two-flag gate on the OTHER half - the roles PUT, which is
 // reachable only through a grant. Before this fix, a 501 here fell through to
 // "Could Not Set Cloud Role", which is just as misleading as the read-side
 // generic message and for the same reason.
@@ -958,10 +958,10 @@ func TestReconcileCloudAccess_FeatureGateOnRoleWriteSurfacesTwoFlagMessage(t *te
 	}
 }
 
-// TestReconcileCloudAccess_GroupPolicyBindingRefusesRevoke covers AC-32's
+// TestReconcileCloudAccess_GroupPolicyBindingRefusesRevoke covers the
 // Present branch: a cloud carrying a group policy binding refuses before any
 // write, naming the binding, so this resource never revokes a member the
-// async group reconciler could silently re-grant later (J.20).
+// async group reconciler could silently re-grant later.
 func TestReconcileCloudAccess_GroupPolicyBindingRefusesRevoke(t *testing.T) {
 	const cloudID = "cld_grouppolicy_present"
 
@@ -990,7 +990,7 @@ func TestReconcileCloudAccess_GroupPolicyBindingRefusesRevoke(t *testing.T) {
 	}
 }
 
-// TestReconcileCloudAccess_GroupPolicyAbsentProceedsSilently covers AC-32's
+// TestReconcileCloudAccess_GroupPolicyAbsentProceedsSilently covers the
 // Absent branch, both of its two shapes: a 404 (no policy row at all - the
 // ordinary case for nearly every cloud today) and a 200 with an empty bindings
 // list. Neither should produce any diagnostic.
@@ -1030,7 +1030,7 @@ func TestReconcileCloudAccess_GroupPolicyAbsentProceedsSilently(t *testing.T) {
 }
 
 // TestReconcileCloudAccess_GroupPolicyUndeterminedWarnsAndProceeds covers
-// AC-32's Undetermined branch: a 403 (the common case for a Terraform token
+// the Undetermined branch: a 403 (the common case for a Terraform token
 // that is not an organization admin) warns loudly but does not refuse, and the
 // ordinary revoke still happens.
 func TestReconcileCloudAccess_GroupPolicyUndeterminedWarnsAndProceeds(t *testing.T) {
@@ -1062,8 +1062,8 @@ func TestReconcileCloudAccess_GroupPolicyUndeterminedWarnsAndProceeds(t *testing
 
 // TestReconcileCloudAccess_GroupPolicyCheckSkippedWithNoRevokePending covers
 // the entry-point gating: an apply that revokes nobody must not call the
-// Policy API at all, matching auto_add_user's own entry point (J.20,
-// Amendment 1) - the check would be irrelevant noise on the common case.
+// Policy API at all, matching auto_add_user's own entry point - the check
+// would be irrelevant noise on the common case.
 func TestReconcileCloudAccess_GroupPolicyCheckSkippedWithNoRevokePending(t *testing.T) {
 	const cloudID = "cld_grouppolicy_norevoke"
 
@@ -1231,7 +1231,7 @@ func TestReconcileCloudAccess_DestroyDoesNotRefuseOnAutoAddUser(t *testing.T) {
 }
 
 // TestReconcileCloudAccess_DestroyDoesNotRefuseOnGroupPolicyBinding is
-// TestReconcileCloudAccess_DestroyDoesNotRefuseOnAutoAddUser's twin for J.20's
+// TestReconcileCloudAccess_DestroyDoesNotRefuseOnAutoAddUser's twin for the
 // asymmetry: a destroy attempts every revoke on a cloud carrying a group
 // policy binding rather than refusing, for the same reason - refusing would
 // strand the resource in state with no exit but 'terraform state rm'.
@@ -1369,7 +1369,7 @@ func TestCloudAccessModifyPlan_RefusesDeclaringTheCaller(t *testing.T) {
 	})
 }
 
-// TestCloudAccessModifyPlan_RefusesDeclaringOrgAdmins covers J.22/AC-34: the
+// TestCloudAccessModifyPlan_RefusesDeclaringOrgAdmins covers the rule that the
 // cloud roles write refuses outright to change an organization admin's role,
 // and discovering that mid-reconcile - after another member's grant already
 // succeeded - is exactly the situation the never-error-after-a-successful-
@@ -1630,14 +1630,14 @@ func TestCloudAccessRevokeFailureReason(t *testing.T) {
 	}
 }
 
-// TestCloudAccessGrantFailure_NextRefreshSurfacesTheShortfall is AC-36:
-// after a failed grant, state still claims the full planned map (AC-21a -
-// `member` has no Computed sub-fields, so applyCloudAccess must write the
+// TestCloudAccessGrantFailure_NextRefreshSurfacesTheShortfall covers what
+// must happen after a failed grant: state still claims the full planned map
+// (`member` has no Computed sub-fields, so applyCloudAccess must write the
 // plan verbatim even for a member whose grant failed). The failure must not
 // stay invisible forever - the next refresh has to recover it, so the
 // following plan re-proposes the grant rather than converging on a lie.
 //
-// Chains applyCloudAccess (the AC-35 scenario) into Read directly, rather
+// Chains applyCloudAccess (the failed-grant scenario) into Read directly, rather
 // than through Create/Update, for unit-test isolation and speed. Asserting
 // the refreshed member map omits the failed grant is a deliberate proxy for a
 // real Terraform plan: it proves exactly what forces a non-empty plan - state
@@ -1658,7 +1658,7 @@ func TestCloudAccessGrantFailure_NextRefreshSurfacesTheShortfall(t *testing.T) {
 
 	// STEP 1: apply a config declaring both alice and bob. alice's grant
 	// succeeds against the backend; bob's fails and is rolled back (the same
-	// AC-35 shape the reconcile-level tests already cover) - confirmed
+	// failed-grant shape the reconcile-level tests already cover) - confirmed
 	// against the backend below, not assumed.
 	plan := &CloudAccessResourceModel{
 		ID:                  types.StringValue(cloudID),
@@ -1684,7 +1684,7 @@ func TestCloudAccessGrantFailure_NextRefreshSurfacesTheShortfall(t *testing.T) {
 	var applyDiags diag.Diagnostics
 	r.applyCloudAccess(ctx, plan, types.MapNull(cloudAccessMemberObjectType()), &applyState, &applyDiags)
 	if applyDiags.HasError() {
-		t.Fatalf("the apply itself must not error on a grant failure (AC-35): %v", applyDiags)
+		t.Fatalf("the apply itself must not error on a grant failure: %v", applyDiags)
 	}
 	if _, ok := mock.members["bob@example.com"]; ok {
 		t.Fatalf("precondition failed: bob's grant should have failed and rolled back, but the backend has him: %v", mock.memberEmails())
@@ -1698,12 +1698,12 @@ func TestCloudAccessGrantFailure_NextRefreshSurfacesTheShortfall(t *testing.T) {
 		t.Fatalf("failed to read back the post-apply state: %v", diags)
 	}
 	if _, ok := postApply.Member.Elements()["bob@example.com"]; !ok {
-		t.Fatalf("AC-21a precondition failed: post-apply state must still claim bob (the full planned map), or this test isn't exercising the shortfall AC-36 is about")
+		t.Fatalf("precondition failed: post-apply state must still claim bob (the full planned map), or this test isn't exercising the shortfall it exists to catch")
 	}
 
 	// STEP 2: refresh. The backend genuinely never granted bob, so a
 	// refresh reading the real member-search must recover THAT truth,
-	// diverging from what the (still-error-free, per AC-21a) apply claimed.
+	// diverging from what the (still-error-free) apply claimed.
 	refreshed, readDiags := runCloudAccessRead(t, client, &postApply)
 	if readDiags.HasError() {
 		t.Fatalf("unexpected error refreshing: %v", readDiags)
@@ -1730,8 +1730,8 @@ func TestCloudAccessGrantFailure_NextRefreshSurfacesTheShortfall(t *testing.T) {
 	}
 }
 
-// TestApplyCloudAccess_NeverWritesADifferentMemberThanPlanned is AC-21b, a
-// regression guard rather than a diagnostic test (design record ed5a176):
+// TestApplyCloudAccess_NeverWritesADifferentMemberThanPlanned is a
+// regression guard rather than a diagnostic test:
 // applyCloudAccess never reads `member` back on any path today, so its
 // original purpose is moot, but nothing would fail if a future edit
 // reintroduced one - this test is what would catch it.

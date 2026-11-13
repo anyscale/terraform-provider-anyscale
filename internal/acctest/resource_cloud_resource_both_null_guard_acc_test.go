@@ -10,23 +10,12 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
-// TestAccCloudResourceResource_BothNullCloudSelectorRejected was originally
-// the mutation-proof regression guard for B2: before B2's
-// fix (6b270c8), anyscale_cloud_resource had no validation requiring
-// cloud_id or cloud_name, so omitting both silently sent a create request
-// with an empty cloud instead of failing with a clear diagnostic. B2 added
-// a runtime AddConfigError guard (Create()'s first check) to close that.
-//
-// R1 (the cloud_name removal) subsequently made cloud_id Required and
-// deleted cloud_name from this resource entirely - confirmed by grep, B2's
-// own AddConfigError guard code is gone, not just unreachable. Schema-level
-// Required now enforces strictly more than B2's runtime check did: Core
-// itself rejects a config omitting cloud_id at plan time, before the
-// provider is ever invoked, which structurally cannot regress back to
-// "silently sends an empty cloud" the way an ad-hoc runtime check could
-// have. Retargeted this test onto that guarantee rather than deleting it -
-// confirmed failing against a mutated schema (Required flipped back to
-// Optional) and passing against the real one, byte-diff clean revert.
+// TestAccCloudResourceResource_BothNullCloudSelectorRejected is the
+// mutation-proof regression guard proving that declaring neither cloud_id
+// nor cloud_name fails with a clear diagnostic instead of silently sending
+// a create request with an empty cloud. Required now enforces strictly
+// more than the old runtime check did: Core rejects the plan up front,
+// before the provider is ever invoked.
 func TestAccCloudResourceResource_BothNullCloudSelectorRejected(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 

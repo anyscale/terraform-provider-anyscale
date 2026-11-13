@@ -279,8 +279,7 @@ func cloudAccessProjectRoles(ctx context.Context, client *Client, projectIDs []s
 // principals[] against the user_groups table unconditionally, with no other
 // principal shape accepted. So a non-empty bindings list IS a group-principal
 // binding by construction - there is no user-principal variant it could
-// instead be, and no need to inspect principal shape further (J.20,
-// Amendment 2).
+// instead be, and no need to inspect principal shape further.
 type resourcePolicyBinding struct {
 	RoleName   string   `json:"role_name"`
 	Principals []string `json:"principals"`
@@ -295,7 +294,7 @@ type resourcePolicyResponse struct {
 }
 
 // cloudAccessGroupPolicyStatus is the tri-state result of checking whether a
-// cloud carries a group policy binding (J.20). Kept tri-state rather than a
+// cloud carries a group policy binding. Kept tri-state rather than a
 // bool: Present and Absent are both CONFIRMED, and Undetermined - this
 // resource could not check at all - must never be conflated with either one.
 type cloudAccessGroupPolicyStatus int
@@ -318,16 +317,18 @@ const (
 // WRITE path (update_policy_for_resource) only - the GET this calls has no
 // flag gate at all, and a 404 means exactly "no resource_permission row
 // exists for this cloud." Treating 404 as Undetermined would warn on nearly
-// every apply forever, the same always-on-alarm J.2 already rejects for the
-// caller-exclusion case.
+// every apply forever, the same always-on-alarm the caller-exclusion
+// rule already rejects.
 //
 // Undetermined = a 403 (this GET requires the same update-tier, org-admin
 // permission as the write path, and the token running Terraform is usually a
-// cloud collaborator or owner rather than an org admin - see J.2's identical
-// observation about the member-search endpoint) or any other unexpected
+// cloud collaborator or owner rather than an org admin - see the identical
+// observation about the caller-exclusion case in the member-search
+// endpoint) or any other unexpected
 // status. Every Undetermined result carries a non-nil error; every Present or
 // Absent result carries a nil one, so a caller can dispatch on the status
-// alone. See J.20 in the design record for the full rationale.
+// alone. See docs/decisions/rbac-surface-consolidation for the full
+// rationale.
 func cloudAccessGroupPolicyBinding(ctx context.Context, client *Client, cloudID string) (cloudAccessGroupPolicyStatus, error) {
 	resp, err := DoRequestAndParse[resourcePolicyResponse](
 		ctx, client, "GET", fmt.Sprintf("/api/v2/policy/cloud/%s", cloudID), nil, http.StatusOK,
@@ -345,7 +346,7 @@ func cloudAccessGroupPolicyBinding(ctx context.Context, client *Client, cloudID 
 }
 
 // cloudAccessLikelyOrgAdmin reports whether email is PROBABLY an organization
-// admin, for J.22's best-effort ModifyPlan warning - see the doc comment on
+// admin, for the best-effort ModifyPlan warning - see the doc comment on
 // refuseDeclaringOrgAdmins for why this is a proxy rather than the backend's
 // actual signal (live ORG_OWNER managed-group membership, which no provider-
 // facing API exposes) and why base_role from the SINGULAR

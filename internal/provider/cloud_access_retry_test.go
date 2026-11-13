@@ -8,9 +8,9 @@ import (
 	"time"
 )
 
-// These tests cover cloudAccessDoWriteRetry, J.13's bounded retry policy for
+// These tests cover cloudAccessDoWriteRetry, the bounded retry policy for
 // this resource's write calls. Every case here asserts the REQUEST COUNT, not
-// merely the outcome (AC-25) - a 403 attempted twice would pass an
+// merely the outcome - a 403 attempted twice would pass an
 // outcome-only test and fail this one.
 
 // cloudAccessFastRetryBackoff overrides the package-level backoff vars to
@@ -46,7 +46,7 @@ func TestCloudAccessDoWriteRetry_TransientFailureThenSuccessConverges(t *testing
 		t.Fatalf("a 429 followed by success must converge: %v", err)
 	}
 	if requests != 2 {
-		t.Errorf("got %d requests, want exactly 2 (one 429, one success) - AC-25 requires asserting the count, not just the outcome", requests)
+		t.Errorf("got %d requests, want exactly 2 (one 429, one success) - this test asserts the count, not just the outcome", requests)
 	}
 }
 
@@ -136,7 +136,8 @@ func TestCloudAccessDoWriteRetry_RewindsBodyOnRetry(t *testing.T) {
 // response BODY after the code, a 403 whose body happens to contain the text
 // "unexpected status 503" (a gateway or proxy relaying upstream status,
 // plausibly) must NOT be retried. Retrying it would convert a terminal
-// decision into a slow one, the exact thing J.13 rules out.
+// decision into a slow one, the exact thing the bounded-retry policy rules
+// out.
 func TestCloudAccessDoWriteRetry_BodyEchoingAnotherStatusIsNotMisclassified(t *testing.T) {
 	cloudAccessFastRetryBackoff(t)
 
