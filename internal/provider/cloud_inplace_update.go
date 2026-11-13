@@ -9,8 +9,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
-// In-place updates for cloud config-block fields, beyond the file_storage
-// and AWS subnet paths that shipped earlier. The design lives in
+// In-place updates for cloud config-block fields, alongside the file_storage
+// and AWS subnet paths. The design lives in
 // docs/decisions/cloud-resource-inplace-update/README.md.
 //
 // The backend's resources PUT decodes the request into a full CloudDeployment
@@ -321,7 +321,7 @@ func refreshInPlaceAttributes(ctx context.Context, b inPlaceBlocks, live *CloudD
 			// deployment's own region, so a NULL live region means "unset
 			// or equal". The effective live region is the deployment's own
 			// region - refresh against that, or a config naming its own
-			// region re-diffs forever (criterion 12, contract 23d6bb9).
+			// region re-diffs forever.
 			effectiveRegion := live.Region
 			if live.ObjectStorage.Region != nil {
 				effectiveRegion = *live.ObjectStorage.Region

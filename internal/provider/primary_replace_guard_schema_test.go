@@ -117,10 +117,10 @@ func TestCloudResourceSchema_EveryReplaceModifierIsPrimaryGuarded(t *testing.T) 
 		}
 	}
 	// Positive control: the walk must actually reach the wrapped modifiers.
-	// The in-place contract (docs/decisions/cloud-resource-inplace-update/README.md)
-	// un-wrapped eleven attributes that previously carried guards; the identity
-	// and credential attributes still do, and the count keeps proving the walk
-	// reaches them.
+	// The identity and credential attributes still carry guards; the count
+	// keeps proving the walk reaches them (the remaining replace-modified
+	// attributes are listed in the in-place contract,
+	// docs/decisions/cloud-resource-inplace-update/README.md).
 	if guarded < 15 {
 		t.Errorf("found %d guarded modifiers, want at least 15: the schema walk is not reaching them", guarded)
 	}

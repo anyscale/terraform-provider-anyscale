@@ -162,8 +162,8 @@ func newSubnetsInPlaceServer(t *testing.T) (*httptest.Server, *subnetsInPlaceSer
 		deployed:               true,
 		securityGroupIDs:       []string{"sg-realct1"},
 		clusterInstanceProfile: &profile,
-		// s3_addressing_style is unmodeled by the provider: the PUT's raw
-		// echo must carry it back or the backend clears it (criterion 11).
+		// s3_addressing_style is unmodeled by this provider's schema: the
+		// PUT's raw echo must carry it back or the backend clears it.
 		objectStorage: map[string]any{"bucket_name": "s3://real-ct-bucket", "s3_addressing_style": "virtual"},
 		base:          base,
 	}

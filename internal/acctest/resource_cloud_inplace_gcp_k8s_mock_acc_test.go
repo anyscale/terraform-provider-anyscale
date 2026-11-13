@@ -17,17 +17,18 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
 
-// In-place coverage for the GCP and Kubernetes blocks against a live-shaped
-// mock, per docs/decisions/cloud-resource-inplace-update/README.md:
-//   - the K8S lossless echo (criterion 11): a live
-//     kubernetes_config.custom_image_registry - a field the provider does not
-//     model and that the typed echo silently cleared since v0.27.1 - must
-//     ride through a zones update unchanged;
-//   - a per-block change test for GCP (criterion 1);
-//   - criterion 3 (a null, unmanaged state attribute is never adopted from
-//     the live record, so the plan stays empty);
-//   - the criterion-7 removal refusals: subnet_names, the K8S operator
-//     identity, and whole kubernetes_config / object_storage blocks.
+// In-place update coverage for the GCP and Kubernetes blocks against a
+// live-shaped mock, per docs/decisions/cloud-resource-inplace-update/README.md:
+//   - the K8S lossless echo: a live kubernetes_config.custom_image_registry -
+//     a field this provider's schema does not model - must ride through a
+//     zones update unchanged, because the backend clears any field a sent
+//     block leaves out, so an update that drops it would wipe it;
+//   - a GCP block-level change that applies in place;
+//   - a null, unmanaged state attribute is never adopted from the live
+//     record, so the plan stays empty;
+//   - removing a value the backend cannot actually clear (subnet_names, the
+//     K8S operator identity, or a whole kubernetes_config / object_storage
+//     block) is refused at plan time.
 type inplaceMixedServer struct {
 	mu           sync.Mutex
 	cloudID      string
@@ -258,13 +259,12 @@ func putBlock(body, block string) map[string]any {
 	}
 }
 
-// ─── K1: K8S zones change is a lossless echo (criterion 11) ────────────────
+// ─── K8S: a zones change is a lossless echo of the live block ──────────────
 
 // TestAccCloudResource_InPlaceKubernetesZonesEchoUnmodeledRegistry proves the
-// fix for the shipped K8S echo wipe: a live
-// kubernetes_config.custom_image_registry (unmodeled by the provider) must
-// ride through a zones update unchanged, and the backend must end up storing
-// the new zones.
+// K8S echo is lossless: a live kubernetes_config.custom_image_registry
+// (unmodeled by this provider's schema) must ride through a zones update
+// unchanged, and the backend must end up storing the new zones.
 func TestAccCloudResource_InPlaceKubernetesZonesEchoUnmodeledRegistry(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	server, mock := newInplaceMixedServer(t, "K8S")
@@ -298,7 +298,7 @@ func TestAccCloudResource_InPlaceKubernetesZonesEchoUnmodeledRegistry(t *testing
 		t.Fatal("PUT carried no kubernetes_config despite the zones change")
 	}
 	if k8s["custom_image_registry"] != "us-docker.pkg.dev/my-gcp-project/anyscale" {
-		t.Errorf("PUT kubernetes_config.custom_image_registry = %v, want the live value carried back (the typed echo wiped it since v0.27.1)", k8s["custom_image_registry"])
+		t.Errorf("PUT kubernetes_config.custom_image_registry = %v, want the live value carried back", k8s["custom_image_registry"])
 	}
 	if fmt.Sprint(k8s["zones"]) != "[us-central1-a us-central1-b]" {
 		t.Errorf("PUT zones = %v, want the plan's two zones", k8s["zones"])
@@ -308,7 +308,7 @@ func TestAccCloudResource_InPlaceKubernetesZonesEchoUnmodeledRegistry(t *testing
 	}
 }
 
-// ─── K2-K4: the criterion-7 K8S removal refusals ───────────────────────────
+// ─── K8S: removing values the backend cannot clear is refused ───────────────
 
 // TestAccCloudResource_InPlaceKubernetesRemovalsRefused: removing the K8S
 // operator identity, the whole kubernetes_config block, or the whole
@@ -358,7 +358,7 @@ func TestAccCloudResource_InPlaceKubernetesRemovalsRefused(t *testing.T) {
 	}
 }
 
-// ─── G1: a GCP firewall-policy change updates in place, losslessly ─────────
+// ─── GCP: a firewall-policy change updates in place, losslessly ────────────
 
 func TestAccCloudResource_InPlaceGCPFirewallPolicyChange(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -403,12 +403,12 @@ func TestAccCloudResource_InPlaceGCPFirewallPolicyChange(t *testing.T) {
 	}
 }
 
-// ─── G2: criterion 3 - a null, unmanaged attribute is never adopted ───────
+// ─── GCP: a null, unmanaged attribute is never adopted ────────────────────
 
-// TestAccCloudResource_InPlaceGCPUnmanagedStaysNull proves criterion 3 from
-// the other side: the live record carries firewall_policy_names, but the
-// config never declared it, so state stays null and the plan stays empty -
-// the refresh must not adopt the live value as a perpetual diff.
+// TestAccCloudResource_InPlaceGCPUnmanagedStaysNull proves the null-state
+// skip from the other side: the live record carries firewall_policy_names,
+// but the config never declared it, so state stays null and the plan stays
+// empty - the refresh must not adopt the live value as a perpetual diff.
 func TestAccCloudResource_InPlaceGCPUnmanagedStaysNull(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	server, mock := newInplaceMixedServer(t, "VM")
@@ -423,7 +423,7 @@ func TestAccCloudResource_InPlaceGCPUnmanagedStaysNull(t *testing.T) {
 			},
 			{
 				// The refresh must not adopt the live policies into the null
-				// state: the plan stays empty (criterion 3).
+				// state: the plan stays empty.
 				Config:   inplaceGCPConfig(server.URL, `__OMITTED__`),
 				PlanOnly: true,
 			},
@@ -435,9 +435,9 @@ func TestAccCloudResource_InPlaceGCPUnmanagedStaysNull(t *testing.T) {
 }
 
 // TestAccCloudResource_InPlaceGCPSubnetNamesRemovalRefused: removing GCP
-// subnet_names is refused at plan time (criterion 7): the backend keeps the
-// old subnets when the sent block is empty, so the removal would otherwise
-// plan 'to null' while nothing clears - a silent lie.
+// subnet_names is refused at plan time because the backend keeps the old
+// subnets when the sent block is empty, so the removal would otherwise plan
+// 'to null' while nothing clears - a silent lie.
 func TestAccCloudResource_InPlaceGCPSubnetNamesRemovalRefused(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	server, mock := newInplaceMixedServer(t, "VM")

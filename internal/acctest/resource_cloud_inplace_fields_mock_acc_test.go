@@ -302,9 +302,10 @@ func TestAccCloudResource_InPlaceDriftShowsUpdateAndReverts_MockServer(t *testin
 
 // TestAccCloudResource_InPlaceObjectStorageEchoesUnmodeledFields_MockServer:
 // setting object_storage.endpoint overlays the change onto the live
-// object_storage block, carrying the provider-unmodeled s3_addressing_style
-// back unchanged - the exact field the old typed echo dropped and the
-// backend cleared (criterion 11).
+// object_storage block, carrying the s3_addressing_style live field back
+// unchanged - this provider's schema does not model it, and the backend
+// clears any field a sent block leaves out, so an update that drops it
+// would wipe it.
 func TestAccCloudResource_InPlaceObjectStorageEchoesUnmodeledFields_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	server, mock := newSubnetsInPlaceServer(t)
@@ -404,9 +405,9 @@ func TestAccCloudResource_VPCChangeWithoutSubnetsRefused_MockServer(t *testing.T
 
 // ─── I7: vpc_id removal is refused at plan time ────────────────────────────
 
-// TestAccCloudResource_InPlaceVPCRemovalRefused completes criterion 7's
-// removal refusals on the AWS side: removing vpc_id (a VM stack needs one)
-// must fail the plan, and no PUT may be issued.
+// TestAccCloudResource_InPlaceVPCRemovalRefused completes the removal
+// refusals on the AWS side: removing vpc_id (a VM stack needs one) must
+// fail the plan, and no PUT may be issued.
 func TestAccCloudResource_InPlaceVPCRemovalRefused_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	server, mock := newSubnetsInPlaceServer(t)

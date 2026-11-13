@@ -657,9 +657,9 @@ func (m bucketNameSemanticEqualPlanModifier) PlanModifyString(ctx context.Contex
 // writes the value into state; from then on the plan is empty.
 //
 // The attribute updates in place
-// (docs/decisions/cloud-resource-inplace-update/README.md), so this modifier
-// no longer decides anything today - it exists so the ambiguity above stays
-// documented exactly where a future maintainer would otherwise re-add
+// (docs/decisions/cloud-resource-inplace-update/README.md); this modifier
+// exists so the ambiguity above stays documented exactly where a future
+// maintainer would otherwise re-add
 // stringplanmodifier.RequiresReplace() and reintroduce a
 // destroy-and-recreate of a live cloud over a value the backend cannot
 // distinguish from null. Rewriting PlanValue to state's null here does not
