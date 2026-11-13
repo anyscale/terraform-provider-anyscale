@@ -91,20 +91,6 @@ func plannedSubnetUpdate(ctx context.Context, planAWS, stateAWS types.Object) (u
 	return u, true, d
 }
 
-// applySubnetsToLiveAWSConfig returns a copy of live's AWSConfig with the
-// subnet arrays replaced by the plan's explicitly-paired ones. The rest is
-// echoed verbatim, exactly as the file_storage update does; nothing else in
-// the block changes in place.
-func applySubnetsToLiveAWSConfig(live *AWSConfig, u *subnetUpdate) *AWSConfig {
-	if live == nil || u == nil {
-		return live
-	}
-	updated := *live
-	updated.SubnetIDs = u.ids
-	updated.Zones = u.zones
-	return &updated
-}
-
 // refreshSubnetDrift rewrites ONLY the subnet attribute the state already
 // uses, from the live deployment's parallel arrays. Read-only drift refresh:
 //   - map form in state: the map is rebuilt from the live pairs;
@@ -216,14 +202,16 @@ func updateCloudResourceIfChanged(
 	diags *diag.Diagnostics,
 	cloudID, cloudResourceID string,
 	planFileStorage, stateFileStorage types.Object,
-	planAWS, stateAWS types.Object,
+	blocks inPlaceBlocks,
 	isPrivateCloud bool,
 	wantProvider, wantComputeStack, wantRegion string,
 ) (updated bool, live *FileStorage) {
-	subnets, subnetsNeeded, d := plannedSubnetUpdate(ctx, planAWS, stateAWS)
+	subnets, subnetsNeeded, d := plannedSubnetUpdate(ctx, blocks.planAWS, blocks.stateAWS)
 	diags.Append(d...)
+	changes, cd := plannedInPlaceChanges(ctx, blocks)
+	diags.Append(cd...)
 	fileStorageChanged := !planFileStorage.Equal(stateFileStorage)
-	if diags.HasError() || (!subnetsNeeded && !fileStorageChanged) {
+	if diags.HasError() || (!subnetsNeeded && !fileStorageChanged && !changes.any()) {
 		return false, nil
 	}
 
@@ -233,7 +221,7 @@ func updateCloudResourceIfChanged(
 		return false, nil
 	}
 
-	results, err := listCloudResources(ctx, client, cloudID)
+	results, raw, err := listCloudResourcesWithRaw(ctx, client, cloudID)
 	if err != nil {
 		AddAPIError(diags, "list cloud resources before updating", err)
 		return false, nil
@@ -244,7 +232,7 @@ func updateCloudResourceIfChanged(
 		return false, nil
 	}
 
-	if err := updateCloudResource(ctx, client, cloudID, current, fileStorage, subnets, isPrivateCloud,
+	if err := updateCloudResource(ctx, client, cloudID, current, raw[current.CloudResourceID], fileStorage, subnets, changes, isPrivateCloud,
 		wantProvider, wantComputeStack, wantRegion); err != nil {
 		addCloudResourceUpdateError(diags, cloudResourceID, err)
 		return false, nil
@@ -264,24 +252,26 @@ func updateCloudResourceIfChanged(
 }
 
 // updateCloudResource issues the resources PUT with the request body built
-// by buildCloudResourceUpdateRequest. Callers must gate on an actual
+// by buildCloudResourceUpdateBody. Callers must gate on an actual
 // plan-vs-state diff first.
 func updateCloudResource(
 	ctx context.Context,
 	client *Client,
 	cloudID string,
 	live *CloudDeploymentResult,
+	raw map[string]any,
 	planFileStorage *FileStorage,
 	subnets *subnetUpdate,
+	changes inPlaceChanges,
 	isPrivateCloud bool,
 	wantProvider, wantComputeStack, wantRegion string,
 ) error {
-	reqBody, err := buildCloudResourceUpdateRequest(live, planFileStorage, subnets, isPrivateCloud, wantProvider, wantComputeStack, wantRegion)
+	reqBody, err := buildCloudResourceUpdateBody(live, raw, planFileStorage, subnets, changes, isPrivateCloud, wantProvider, wantComputeStack, wantRegion)
 	if err != nil {
 		return err
 	}
 
-	body, err := MarshalRequestBody([]*CloudResourceUpdateRequest{reqBody})
+	body, err := MarshalRequestBody([]any{reqBody})
 	if err != nil {
 		return fmt.Errorf("failed to marshal cloud resource update request: %w", err)
 	}

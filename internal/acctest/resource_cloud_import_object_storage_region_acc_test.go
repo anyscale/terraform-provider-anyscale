@@ -239,7 +239,7 @@ func TestAccCloudResource_ObjectStorageRegionSelfHealsFromNullState_AWSVM(t *tes
 	}`, cloudID)
 	resourcesJSON := `[{
 		"name": "default", "is_default": true, "cloud_resource_id": "cldrsrc_storage_region_selfheal_default",
-		"compute_stack": "VM", "region": "us-east-2",
+		"provider": "AWS", "compute_stack": "VM", "region": "us-east-2",
 		"aws_config": {
 			"vpc_id": "vpc-storageregionselfheal",
 			"subnet_ids": ["subnet-storageregionselfheal1", "subnet-storageregionselfheal2"],
@@ -320,6 +320,19 @@ resource "anyscale_cloud" "test" {
 				},
 				Check: resource.TestCheckResourceAttr(resourceName, "object_storage.region", "us-east-2"),
 			},
+			// Criterion 12 (contract 23d6bb9): the convergence must HOLD -
+			// apply settles region, the next Read refreshes against the
+			// effective live region (the deployment's own region, since the
+			// backend reports an equal bucket region back as null), and the
+			// plan stays empty. Twice, so a refresh that nulls region on
+			// every Read (the perpetual-diff bug this guards against)
+			// cannot pass on a stale first refresh.
+			{Config: configWithRegion, ConfigPlanChecks: resource.ConfigPlanChecks{
+				PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(resourceName, plancheck.ResourceActionNoop)},
+			}},
+			{Config: configWithRegion, ConfigPlanChecks: resource.ConfigPlanChecks{
+				PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(resourceName, plancheck.ResourceActionNoop)},
+			}},
 		},
 	})
 }

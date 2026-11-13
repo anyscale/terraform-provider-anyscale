@@ -782,17 +782,18 @@ func regionModifierTestObjectStorageAttrTypes() map[string]attr.Type {
 	}
 }
 
-// TestRegionSemanticEqualPlanModifier is the regression proof for the
-// object_storage.region "explicit-equal" import replace-loop
-// (OBJECT-STORAGE-REGION-DESIGN-CORRECTION.md, Fix C). Unlike
-// bucketNameSemanticEqualPlanModifier, this modifier never rewrites
-// resp.PlanValue - Terraform Core rejects a planned value that diverges
+// TestRegionSemanticEqualPlanModifier guards the object_storage.region
+// "explicit-equal" ambiguity (OBJECT-STORAGE-REGION-DESIGN-CORRECTION.md,
+// Fix C). Since the in-place contract
+// (docs/decisions/cloud-resource-inplace-update/README.md) object_storage.region
+// UPDATES IN PLACE, and the modifier never sets RequiresReplace at all: every
+// case here must leave both RequiresReplace false and PlanValue untouched.
+// The assertions still exist because the interesting failure mode this test
+// guards against is a maintainer re-adding a replace (or a PlanValue rewrite)
+// to this attribute - Terraform Core rejects a planned value that diverges
 // from an explicit, known, non-null config value for a non-Computed
-// attribute (confirmed against a real acceptance run: "provider produced
-// invalid plan" when this modifier tried the rewrite-to-null approach
-// instead). So this modifier implements requires-replace-with-an-exception
-// directly via resp.RequiresReplace, leaving PlanValue untouched in every
-// case - these assertions check RequiresReplace, not PlanValue.
+// attribute (confirmed against a real acceptance run earlier), so a real
+// region change must be an in-place update, never a rewrite or a replace.
 func TestRegionSemanticEqualPlanModifier(t *testing.T) {
 	ctx := context.Background()
 	m := regionSemanticEqualPlanModifier{}
@@ -889,9 +890,9 @@ func TestRegionSemanticEqualPlanModifier(t *testing.T) {
 		}
 	})
 
-	t.Run("existing resource, state region null, config region genuinely different from cloud region - real change, must replace", func(t *testing.T) {
-		if got := runModifier("us-east-2", "", true, false, "us-west-2"); !got {
-			t.Error("RequiresReplace = false, want true - a config value that differs from the cloud region is a real change, not the null-collapse artifact")
+	t.Run("existing resource, state region null, config region genuinely different from cloud region - real change, updates IN PLACE", func(t *testing.T) {
+		if got := runModifier("us-east-2", "", true, false, "us-west-2"); got {
+			t.Error("RequiresReplace = true, want false - a real region change is an in-place update under the in-place contract, not a replace")
 		}
 	})
 
@@ -905,9 +906,9 @@ func TestRegionSemanticEqualPlanModifier(t *testing.T) {
 		// Not the same as the null-state self-heal case: state is a real,
 		// non-null, DIFFERENT value (the bucket genuinely was in a different
 		// region before) - moving it to match the cloud region is an actual
-		// change and must still replace, not be silently swallowed.
-		if got := runModifier("us-east-2", "us-west-2", false, false, "us-east-2"); !got {
-			t.Error("RequiresReplace = false, want true - a real prior region actually changing must still replace, even though the new value equals the cloud region")
+		// change and updates in place.
+		if got := runModifier("us-east-2", "us-west-2", false, false, "us-east-2"); got {
+			t.Error("RequiresReplace = true, want false - a real prior region actually changing updates in place, never replaces")
 		}
 	})
 
@@ -920,11 +921,10 @@ func TestRegionSemanticEqualPlanModifier(t *testing.T) {
 	t.Run("existing resource, state region null, but top-level region is UNKNOWN at plan time - must replace, nothing reliable to compare against", func(t *testing.T) {
 		// Distinct from the other cases: the sibling region this modifier
 		// reads is itself Unknown (not yet resolved), not merely different.
-		// Suppressing here would be guessing at a value that isn't known
-		// yet - the safe default is to fall through to an ordinary replace,
-		// same as the framework's own RequiresReplace would without this
-		// modifier at all. buildRaw always sets a known top-level region, so
-		// this one case builds its plan fixture directly instead.
+		// The attribute updates in place regardless, so even an unresolved
+		// cloud region decides nothing here. buildRaw always sets a known
+		// top-level region, so this one case builds its plan fixture
+		// directly instead.
 		model := regionModifierTestModel{
 			ID:            types.StringValue("cld_regionmodtest"),
 			Region:        types.StringUnknown(),
@@ -951,8 +951,8 @@ func TestRegionSemanticEqualPlanModifier(t *testing.T) {
 		if !resp.PlanValue.Equal(planValue) {
 			t.Errorf("PlanValue changed to %v, want untouched", resp.PlanValue)
 		}
-		if !resp.RequiresReplace {
-			t.Error("RequiresReplace = false, want true - the top-level region is Unknown, nothing reliable to compare against")
+		if resp.RequiresReplace {
+			t.Error("RequiresReplace = true, want false - region updates in place even when the sibling region is unknown")
 		}
 	})
 }

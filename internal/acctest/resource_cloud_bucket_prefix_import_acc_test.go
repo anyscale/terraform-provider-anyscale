@@ -138,11 +138,13 @@ func TestAccCloudResource_ImportedGCSBucketPrefix_BareConfigPlansNoReplace(t *te
 	})
 }
 
-// TestAccCloudResource_ImportedGCSBucketPrefix_DifferentBucketPlansReplace is
+// TestAccCloudResource_ImportedGCSBucketPrefix_DifferentBucketPlansUpdate is
 // the positive control for the test above: naming a genuinely different
-// bucket against the same imported state must still plan a replacement, so
-// the no-replace result cannot come from a check that never fires.
-func TestAccCloudResource_ImportedGCSBucketPrefix_DifferentBucketPlansReplace(t *testing.T) {
+// bucket against the same imported state must still plan a change, so the
+// empty-plan result cannot come from a check that never fires. Since the
+// in-place contract (docs/decisions/cloud-resource-inplace-update/README.md)
+// the change is an UPDATE, not a REPLACE.
+func TestAccCloudResource_ImportedGCSBucketPrefix_DifferentBucketPlansUpdate(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	const cloudID = "cld_bucket_prefix_gcp"
@@ -164,7 +166,7 @@ func TestAccCloudResource_ImportedGCSBucketPrefix_DifferentBucketPlansReplace(t 
 				ExpectNonEmptyPlan: true,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PostApplyPostRefresh: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("anyscale_cloud.test", plancheck.ResourceActionReplace),
+						plancheck.ExpectResourceAction("anyscale_cloud.test", plancheck.ResourceActionUpdate),
 					},
 				},
 			},

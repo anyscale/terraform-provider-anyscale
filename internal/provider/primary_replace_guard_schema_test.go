@@ -24,6 +24,10 @@ var cloudResourceNonReplacingModifierTypes = map[string]bool{
 	// Subnet changes update in place; the modifier refuses a subnet_ids set
 	// change at plan time instead of ever forcing replacement.
 	"provider.awsSubnetIDsPlanModifier": true,
+	// object_storage.region updates in place
+	// (docs/decisions/cloud-resource-inplace-update/README.md); the
+	// modifier documentation carries the backend's region-null ambiguity.
+	"provider.regionSemanticEqualPlanModifier": true,
 }
 
 var cloudResourceGuardTypes = map[string]bool{
@@ -113,7 +117,11 @@ func TestCloudResourceSchema_EveryReplaceModifierIsPrimaryGuarded(t *testing.T) 
 		}
 	}
 	// Positive control: the walk must actually reach the wrapped modifiers.
-	if guarded < 30 {
-		t.Errorf("found %d guarded modifiers, want at least 30: the schema walk is not reaching them", guarded)
+	// The in-place contract (docs/decisions/cloud-resource-inplace-update/README.md)
+	// un-wrapped eleven attributes that previously carried guards; the identity
+	// and credential attributes still do, and the count keeps proving the walk
+	// reaches them.
+	if guarded < 15 {
+		t.Errorf("found %d guarded modifiers, want at least 15: the schema walk is not reaching them", guarded)
 	}
 }

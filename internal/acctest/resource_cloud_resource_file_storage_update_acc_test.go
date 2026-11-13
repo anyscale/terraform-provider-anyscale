@@ -221,8 +221,16 @@ resource "anyscale_cloud_resource" "test" {
 					if !regexp.MustCompile(`"persistent_volume_claim"\s*:\s*"` + regexp.QuoteMeta(pvc) + `"`).MatchString(body) {
 						return fmt.Errorf("PUT body missing persistent_volume_claim=%s: %s", pvc, body)
 					}
-					if !regexp.MustCompile(`"kubernetes_config"\s*:\s*\{[^}]*"anyscale_operator_iam_identity"`).MatchString(body) {
-						return fmt.Errorf("PUT body dropped kubernetes_config, which would wipe it server-side: %s", body)
+					// Since the in-place contract
+					// (docs/decisions/cloud-resource-inplace-update/README.md),
+					// a block the PUT OMITS is preserved by the backend, so a
+					// file_storage-only PUT must NOT carry kubernetes_config
+					// at all - sending it would be a second echo the backend
+					// must reconcile. The lossless-echo requirement applies
+					// only when a block IS sent; that side is covered by the
+					// in-place field tests (criterion 11).
+					if regexp.MustCompile(`"kubernetes_config"\s*:`).MatchString(body) {
+						return fmt.Errorf("PUT carried a kubernetes_config block on a file_storage-only change; an omitted block is preserved, so it must be omitted: %s", body)
 					}
 					if got := mock.storedPVC(resName); got != pvc {
 						return fmt.Errorf("mock stored persistent_volume_claim = %q, want %q", got, pvc)

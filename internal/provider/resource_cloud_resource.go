@@ -19,7 +19,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -294,10 +293,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 				Attributes: map[string]schema.Attribute{
 					"vpc_id": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "The VPC ID where Anyscale resources will be deployed.",
-						PlanModifiers: []planmodifier.String{
-							guardPrimaryString(stringplanmodifier.RequiresReplace()),
-						},
+						MarkdownDescription: "The VPC ID where Anyscale resources will be deployed. Updates in place only together with a subnet change (the subnets must live in the new VPC); changing it without one, or removing it, is rejected at plan time.",
 					},
 					"subnet_ids": schema.ListAttribute{
 						ElementType:         types.StringType,
@@ -316,9 +312,6 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						ElementType:         types.StringType,
 						Optional:            true,
 						MarkdownDescription: "List of security group IDs for Anyscale resources. Missing the required rules causes the cluster to fail silently rather than erroring at plan or apply time - Anyscale needs at minimum an inbound rule for port 443 and a self-referencing rule allowing all traffic.",
-						PlanModifiers: []planmodifier.List{
-							guardPrimaryList(listplanmodifier.RequiresReplace()),
-						},
 					},
 					"controlplane_iam_role_arn": schema.StringAttribute{
 						Optional:            true,
@@ -330,16 +323,10 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					"dataplane_iam_role_arn": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "IAM role ARN for Anyscale data plane (cluster nodes). See the [Anyscale AWS IAM documentation](https://docs.anyscale.com/iam/aws) for the trust policy and permissions this role needs.",
-						PlanModifiers: []planmodifier.String{
-							guardPrimaryString(stringplanmodifier.RequiresReplace()),
-						},
 					},
 					"cluster_instance_profile_id": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "IAM instance profile ARN attached to Ray cluster nodes. Defaults to the instance profile with the same name as `dataplane_iam_role_arn` when unset - set this explicitly only if your IAM tooling generates a profile name that differs from the role name.",
-						PlanModifiers: []planmodifier.String{
-							guardPrimaryString(stringplanmodifier.RequiresReplace()),
-						},
 					},
 					"external_id": schema.StringAttribute{
 						Optional:            true,
@@ -412,9 +399,6 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						ElementType:         types.StringType,
 						Optional:            true,
 						MarkdownDescription: "List of subnet names within the VPC for Anyscale resources. VM compute only: GKE networking comes from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time. More than one subnet is supported; Anyscale spreads instances across them.",
-						PlanModifiers: []planmodifier.List{
-							guardPrimaryList(listplanmodifier.RequiresReplace()),
-						},
 					},
 					"controlplane_service_account_email": schema.StringAttribute{
 						Optional:            true,
@@ -426,17 +410,11 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					"dataplane_service_account_email": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "Service account email for Ray cluster nodes. See the [Anyscale Google Cloud IAM documentation](https://docs.anyscale.com/iam/google-cloud) for the roles this service account needs.",
-						PlanModifiers: []planmodifier.String{
-							guardPrimaryString(stringplanmodifier.RequiresReplace()),
-						},
 					},
 					"firewall_policy_names": schema.ListAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
 						MarkdownDescription: "List of firewall policy names.",
-						PlanModifiers: []planmodifier.List{
-							guardPrimaryList(listplanmodifier.RequiresReplace()),
-						},
 					},
 					"memorystore_instance_name": schema.StringAttribute{
 						Optional:            true,
@@ -478,24 +456,15 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					"anyscale_operator_iam_identity": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "The IAM identity for the Anyscale operator. AWS EKS: the ARN of an IAM role whose trust policy allows `pods.eks.amazonaws.com`, wired to the operator through an `aws_eks_pod_identity_association` (see the [Anyscale EKS IAM documentation](https://docs.anyscale.com/iam/eks)). A node group's IAM role will NOT work (it trusts `ec2.amazonaws.com`), and the provider cannot see trust policies, so a wrong role fails at runtime, not at `terraform plan`. GCP GKE: service account email (see the [Anyscale GKE IAM documentation](https://docs.anyscale.com/iam/gke)). Azure AKS: the managed identity's principal ID, not its client ID (the client ID belongs only in the operator's own values.yaml).",
-						PlanModifiers: []planmodifier.String{
-							guardPrimaryString(stringplanmodifier.RequiresReplace()),
-						},
 					},
 					"zones": schema.ListAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
 						MarkdownDescription: "List of availability zones for the Kubernetes cluster.",
-						PlanModifiers: []planmodifier.List{
-							guardPrimaryList(listplanmodifier.RequiresReplace()),
-						},
 					},
 					"redis_endpoint": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "Endpoint of a Redis service reachable from the data plane (e.g. `redis.ray-system.svc.cluster.local:6379`). Used for Ray GCS fault tolerance. Conflicts with `aws_config.memorydb_cluster_endpoint` and `gcp_config.memorystore_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud.",
-						PlanModifiers: []planmodifier.String{
-							guardPrimaryString(stringplanmodifier.RequiresReplace()),
-						},
 						Validators: []validator.String{
 							stringvalidator.ConflictsWith(
 								path.MatchRoot("aws_config").AtName("memorydb_cluster_endpoint"),
@@ -512,32 +481,23 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 				Attributes: map[string]schema.Attribute{
 					"bucket_name": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "The bucket name (e.g., my-bucket for S3, gs://my-bucket for GCS). A bare name and its scheme-prefixed form (s3://, gs://) are treated as the same bucket for plan purposes, so importing a cloud whose bucket was written without the prefix does not force replacement.",
+						MarkdownDescription: "The bucket name (e.g., my-bucket for S3, gs://my-bucket for GCP). Updated in place. A bare name and its scheme-prefixed form (s3://, gs://) are treated as the same bucket for plan purposes, so a bucket written with either form imports without a diff.",
 						PlanModifiers: []planmodifier.String{
 							bucketNameSemanticEqualPlanModifier{},
-							guardPrimaryString(stringplanmodifier.RequiresReplace()),
 						},
 					},
 					"region": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "Bucket region, if different from the cloud resource's region. Setting it to the cloud resource's own region is treated as unset, so it does not force replacement; any other change forces replacement. A cloud resource from an older provider version with a null value reconciles with a one-time in-place update, never a replace.",
+						MarkdownDescription: "Bucket region, if different from the cloud resource's region. Updated in place. A value equal to the cloud resource's own region is treated as unset: the backend stores and reports it back as the cloud's own region, so it reads as null. A cloud resource from an older provider version with a null value reconciles with a one-time in-place update, never a replace.",
 						PlanModifiers: []planmodifier.String{
-							// regionSemanticEqualPlanModifier replaces the
-							// plain stringplanmodifier.RequiresReplace() other
-							// attributes in this block use - see its own doc
-							// comment (cloud_helpers.go) for why composing
-							// with a separate RequiresReplace() does not work
-							// here. Do not add stringplanmodifier.RequiresReplace()
-							// alongside it.
-							guardPrimaryString(regionSemanticEqualPlanModifier{}),
+							// See the doc comment on
+							// regionSemanticEqualPlanModifier (cloud_helpers.go).
+							regionSemanticEqualPlanModifier{},
 						},
 					},
 					"endpoint": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "Custom S3-compatible endpoint (for MinIO, etc.).",
-						PlanModifiers: []planmodifier.String{
-							guardPrimaryString(stringplanmodifier.RequiresReplace()),
-						},
+						MarkdownDescription: "Custom S3-compatible endpoint (for MinIO, etc.). Updated in place; removing it clears it on the backend.",
 					},
 				},
 			},
@@ -923,11 +883,26 @@ func (r *CloudResourceResource) Read(ctx context.Context, req resource.ReadReque
 
 	// Read-only subnet drift refresh - Read only, never the Create/Update
 	// readback (same C12 reasoning as anyscale_cloud). Only the subnet
-	// attribute the state already uses is touched.
+	// attribute the state already uses is touched. The in-place attributes
+	// refresh the same way, from the same rules (contract rule 4: a null -
+	// unmanaged - state attribute is never adopted from the live record).
 	refreshedAWS, refreshDiags := refreshSubnetDrift(ctx, state.AWSConfig, foundResource)
 	resp.Diagnostics.Append(refreshDiags...)
 	if !refreshDiags.HasError() {
 		state.AWSConfig = refreshedAWS
+	}
+	refreshed, refreshDiags := refreshInPlaceAttributes(ctx, inPlaceBlocks{
+		stateAWS:         state.AWSConfig,
+		stateGCP:         state.GCPConfig,
+		stateKubernetes:  state.KubernetesConfig,
+		stateObjectStore: state.ObjectStorage,
+	}, foundResource)
+	resp.Diagnostics.Append(refreshDiags...)
+	if !refreshDiags.HasError() {
+		state.AWSConfig = refreshed.stateAWS
+		state.GCPConfig = refreshed.stateGCP
+		state.KubernetesConfig = refreshed.stateKubernetes
+		state.ObjectStorage = refreshed.stateObjectStore
 	}
 	if resp.Diagnostics.HasError() {
 		return
@@ -957,10 +932,19 @@ func (r *CloudResourceResource) ModifyPlan(ctx context.Context, req resource.Mod
 		return
 	}
 
-	refuseFileStorageChangeOnManagedCloud(ctx, r.client, &resp.Diagnostics,
-		cloudID, state.CloudResourceID.ValueString(), plan.FileStorage, state.FileStorage)
-	refuseSubnetIDsToAZChangeOnManagedCloud(ctx, r.client, &resp.Diagnostics,
-		cloudID, state.CloudResourceID.ValueString(), plan.AWSConfig, state.AWSConfig)
+	blocks := inPlaceBlocks{
+		planAWS:           plan.AWSConfig,
+		stateAWS:          state.AWSConfig,
+		planGCP:           plan.GCPConfig,
+		stateGCP:          state.GCPConfig,
+		planKubernetes:    plan.KubernetesConfig,
+		stateKubernetes:   state.KubernetesConfig,
+		planObjectStorage: plan.ObjectStorage,
+		stateObjectStore:  state.ObjectStorage,
+	}
+	refuseUnsupportedInPlaceChanges(ctx, blocks, &resp.Diagnostics)
+	refuseInPlaceCloudChangeOnManagedCloud(ctx, r.client, &resp.Diagnostics,
+		cloudID, state.CloudResourceID.ValueString(), plan.FileStorage, state.FileStorage, blocks)
 }
 
 func (r *CloudResourceResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -978,10 +962,22 @@ func (r *CloudResourceResource) Update(ctx context.Context, req resource.UpdateR
 		return
 	}
 
-	// See docs/decisions/cloud-file-storage-lifecycle/README.md. The same PUT
-	// carries file_storage and the plan's explicit subnet pairs.
+	// See docs/decisions/cloud-file-storage-lifecycle/README.md and
+	// docs/decisions/cloud-resource-inplace-update/README.md. One PUT carries
+	// file_storage, the plan's explicit subnet pairs and every changed
+	// in-place block attribute.
+	blocks := inPlaceBlocks{
+		planAWS:           plan.AWSConfig,
+		stateAWS:          state.AWSConfig,
+		planGCP:           plan.GCPConfig,
+		stateGCP:          state.GCPConfig,
+		planKubernetes:    plan.KubernetesConfig,
+		stateKubernetes:   state.KubernetesConfig,
+		planObjectStorage: plan.ObjectStorage,
+		stateObjectStore:  state.ObjectStorage,
+	}
 	_, liveFileStorage := updateCloudResourceIfChanged(ctx, r.client, &resp.Diagnostics, cloudID, state.CloudResourceID.ValueString(),
-		plan.FileStorage, state.FileStorage, plan.AWSConfig, state.AWSConfig, plan.IsPrivate.ValueBool(),
+		plan.FileStorage, state.FileStorage, blocks, plan.IsPrivate.ValueBool(),
 		state.CloudProvider.ValueString(), state.ComputeStack.ValueString(), state.Region.ValueString())
 	if resp.Diagnostics.HasError() {
 		return
@@ -998,14 +994,35 @@ func (r *CloudResourceResource) Update(ctx context.Context, req resource.UpdateR
 	state.FileStorage = fileStorage
 	state.Timeouts = plan.Timeouts
 
-	// The one other in-place change is switching between subnet_ids and the equivalent
-	// subnet_ids_to_az; readCloudResource does not refresh aws_config, so record the planned form.
+	// readCloudResource does not refresh the config blocks, so record the
+	// planned forms: the subnet forms (a switch between subnet_ids and
+	// subnet_ids_to_az), then every other in-place attribute the plan
+	// changed. Without this, state keeps the pre-update values and Terraform
+	// rejects the apply as inconsistent.
 	awsConfig, d := carryAWSSubnetForms(state.AWSConfig, plan.AWSConfig)
 	resp.Diagnostics.Append(d...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 	state.AWSConfig = awsConfig
+	carried, cd := copyPlannedInPlaceValuesIntoState(ctx, inPlaceBlocks{
+		planAWS:           plan.AWSConfig,
+		stateAWS:          state.AWSConfig,
+		planGCP:           plan.GCPConfig,
+		stateGCP:          state.GCPConfig,
+		planKubernetes:    plan.KubernetesConfig,
+		stateKubernetes:   state.KubernetesConfig,
+		planObjectStorage: plan.ObjectStorage,
+		stateObjectStore:  state.ObjectStorage,
+	})
+	resp.Diagnostics.Append(cd...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	state.AWSConfig = carried.stateAWS
+	state.GCPConfig = carried.stateGCP
+	state.KubernetesConfig = carried.stateKubernetes
+	state.ObjectStorage = carried.stateObjectStore
 
 	if _, err := r.readCloudResource(ctx, cloudID, resourceName, &state, nil); err != nil {
 		AddAPIError(&resp.Diagnostics, "read cloud resource", err)

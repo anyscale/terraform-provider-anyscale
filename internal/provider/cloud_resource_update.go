@@ -32,29 +32,44 @@ func findCloudResourceByName(results []CloudDeploymentResult, name string) *Clou
 	return nil
 }
 
-// buildCloudResourceUpdateRequest assembles the body for PUT /api/v2/clouds/{cloud_id}/resources
-// per the design in docs/decisions/cloud-file-storage-lifecycle/README.md: round-trip the
-// live deployment's own scalars and its one owned provider-config block verbatim from a fresh
-// GET, derive networking_mode from isPrivateCloud rather than echoing the GET, and take
-// file_storage from the plan (nil clears it).
+// buildCloudResourceUpdateBody assembles the body object for
+// PUT /api/v2/clouds/{cloud_id}/resources, per the designs in
+// docs/decisions/cloud-file-storage-lifecycle/README.md and
+// docs/decisions/cloud-resource-inplace-update/README.md.
 //
-// live must come from a listCloudResources call made during this same Update - not a stale or
-// cross-deployment copy - because the GET is not a lossless representation of the
-// record: aws_config.anyscale_iam_role_id comes back blank whenever it isn't a valid ARN, and
-// echoing that blank verbatim would erase the stored credential.
+// The model is "live record + overlay": the one owned provider-config block
+// and, when it changed, object_storage are echoed from the deployment's OWN
+// raw JSON (liveRaw - the raw result object of the same listing that yielded
+// live) with only the changed keys overlaid. The echo must be raw, not typed:
+// the backend assigns every field of a SENT block unconditionally (absent,
+// null and empty all clear), so a field the typed structs drop would be
+// silently cleared - kubernetes_config.custom_image_registry and
+// object_storage.s3_addressing_style were lost that way. file_storage comes
+// from the plan (nil clears it), networking_mode derives from isPrivateCloud
+// rather than echoing the GET, and the top level carries only the frozen
+// key set (the backend's CloudDeployment model rejects unknown keys).
 //
-// wantProvider/wantComputeStack/wantRegion are the values Terraform already has on record (from
-// state, not plan - these three are RequiresReplace elsewhere in the schema, so plan and state
-// necessarily agree on them). A mismatch against live means live is not describing the
-// deployment the caller thinks it is, so this refuses rather than silently overwriting under a
-// possibly-wrong identity.
-func buildCloudResourceUpdateRequest(
+// live and liveRaw must come from a listCloudResources call made during this
+// same Update - not a stale or cross-deployment copy - because the GET is
+// not a lossless representation of the record: aws_config.anyscale_iam_role_id
+// comes back blank whenever it isn't a valid ARN, and echoing that blank
+// verbatim would erase the stored credential.
+//
+// wantProvider/wantComputeStack/wantRegion are the values Terraform already
+// has on record (from state, not plan - these three are RequiresReplace
+// elsewhere in the schema, so plan and state necessarily agree on them). A
+// mismatch against live means live is not describing the deployment the
+// caller thinks it is, so this refuses rather than silently overwriting
+// under a possibly-wrong identity.
+func buildCloudResourceUpdateBody(
 	live *CloudDeploymentResult,
+	liveRaw map[string]any,
 	planFileStorage *FileStorage,
 	subnets *subnetUpdate,
+	changes inPlaceChanges,
 	isPrivateCloud bool,
 	wantProvider, wantComputeStack, wantRegion string,
-) (*CloudResourceUpdateRequest, error) {
+) (map[string]any, error) {
 	if live.Provider != wantProvider || live.ComputeStack != wantComputeStack || live.Region != wantRegion {
 		return nil, fmt.Errorf(
 			"cloud resource %s: live provider/compute_stack/region (%s/%s/%s) disagree with Terraform state (%s/%s/%s); refusing to update under a possibly-wrong identity",
@@ -62,46 +77,135 @@ func buildCloudResourceUpdateRequest(
 		)
 	}
 
-	req := &CloudResourceUpdateRequest{
-		CloudResourceID: live.CloudResourceID,
-		Provider:        live.Provider,
-		ComputeStack:    live.ComputeStack,
-		Region:          live.Region,
-		FileStorage:     planFileStorage,
+	body := map[string]any{
+		"cloud_resource_id": live.CloudResourceID,
+		"provider":          live.Provider,
+		"compute_stack":     live.ComputeStack,
+		"region":            live.Region,
+		"networking_mode":   nil, // literal null on a public deployment (D2)
+		"file_storage":      planFileStorage,
 	}
-
 	if isPrivateCloud {
-		private := "PRIVATE"
-		req.NetworkingMode = &private
+		body["networking_mode"] = "PRIVATE"
 	}
 
-	switch live.ComputeStack {
-	case "K8S":
-		req.KubernetesConfig = live.KubernetesConfig
-	default: // "VM"
-		switch live.Provider {
-		case "AWS":
-			if live.AWSConfig != nil {
-				if live.AWSConfig.AnyscaleIAMRoleID == "" {
-					return nil, fmt.Errorf(
-						"cannot update cloud resource %s in place: the Anyscale API did not return this deployment's Anyscale IAM role, so echoing its AWS configuration back would erase it; use the Anyscale CLI to make this change instead",
-						live.CloudResourceID,
-					)
-				}
-				// Subnet changes replace ONLY the parallel subnet_ids/zones
-				// arrays, and always both together - subnet_ids without
-				// zones makes the backend derive zones by positional pairing
-				// and store the WRONG pairs (live testing on real AWS,
-				// 2026-11-09). The plan cannot reach here that way:
-				// subnet_ids set changes are refused at plan time.
-				req.AWSConfig = applySubnetsToLiveAWSConfig(live.AWSConfig, subnets)
-			}
-		case "GCP":
-			req.GCPConfig = live.GCPConfig
+	// AWS: subnet changes replace ONLY the parallel subnet_ids/zones arrays,
+	// always both together - subnet_ids without zones makes the backend
+	// derive zones by positional pairing and store the WRONG pairs (live
+	// testing on real AWS, 2026-11-09). The plan cannot reach here that way:
+	// subnet_ids set changes are refused at plan time.
+	awsChange := subnets != nil || len(changes["aws_config"]) > 0
+	if awsChange {
+		if live.AWSConfig == nil {
+			return nil, fmt.Errorf(
+				"cannot update cloud resource %s in place: the Anyscale API returned no aws_config for it, so there is no live configuration to overlay the change onto; use the Anyscale CLI to make this change instead",
+				live.CloudResourceID,
+			)
+		}
+		if live.AWSConfig.AnyscaleIAMRoleID == "" {
+			return nil, fmt.Errorf(
+				"cannot update cloud resource %s in place: the Anyscale API did not return this deployment's Anyscale IAM role, so echoing its AWS configuration back would erase it; use the Anyscale CLI to make this change instead",
+				live.CloudResourceID,
+			)
+		}
+		base, err := rawBlockForOverlay(liveRaw, "aws_config", live.CloudResourceID)
+		if err != nil {
+			return nil, err
+		}
+		if subnets != nil {
+			base["subnet_ids"] = subnets.ids
+			base["zones"] = subnets.zones
+		}
+		applyBlockOverlay(base, changes.block("aws_config"))
+		body["aws_config"] = base
+	}
+
+	if len(changes["gcp_config"]) > 0 {
+		if live.GCPConfig == nil {
+			return nil, fmt.Errorf(
+				"cannot update cloud resource %s in place: the Anyscale API returned no gcp_config for it, so there is no live configuration to overlay the change onto; use the Anyscale CLI to make this change instead",
+				live.CloudResourceID,
+			)
+		}
+		base, err := rawBlockForOverlay(liveRaw, "gcp_config", live.CloudResourceID)
+		if err != nil {
+			return nil, err
+		}
+		applyBlockOverlay(base, changes.block("gcp_config"))
+		body["gcp_config"] = base
+	}
+
+	if len(changes["kubernetes_config"]) > 0 {
+		if live.KubernetesConfig == nil {
+			return nil, fmt.Errorf(
+				"cannot update cloud resource %s in place: the Anyscale API returned no kubernetes_config for it, so there is no live configuration to overlay the change onto; use the Anyscale CLI to make this change instead",
+				live.CloudResourceID,
+			)
+		}
+		base, err := rawBlockForOverlay(liveRaw, "kubernetes_config", live.CloudResourceID)
+		if err != nil {
+			return nil, err
+		}
+		applyBlockOverlay(base, changes.block("kubernetes_config"))
+		body["kubernetes_config"] = base
+	}
+
+	// object_storage is sent only when it changed, overlaid on the live
+	// block (contract rule 1). A bare bucket-name change still carries the
+	// live region/endpoint/s3_addressing_style back unchanged.
+	if len(changes["object_storage"]) > 0 {
+		base, _ := rawBlockForOverlay(liveRaw, "object_storage", live.CloudResourceID)
+		if base == nil {
+			base = map[string]any{}
+		}
+		applyBlockOverlay(base, changes.block("object_storage"))
+		body["object_storage"] = base
+	}
+
+	return body, nil
+}
+
+// rawBlockForOverlay returns a shallow copy of the deployment's raw JSON
+// block by key, for overlaying changed keys onto. A missing BLOCK is an
+// error for the caller to report - except object_storage, where a live cloud
+// without one is legitimate and an empty map starts it (the override's nil
+// return distinguishes those cases).
+func rawBlockForOverlay(liveRaw map[string]any, block, cloudResourceID string) (map[string]any, error) {
+	v, ok := liveRaw[block]
+	if !ok || v == nil {
+		return nil, fmt.Errorf(
+			"cannot update cloud resource %s in place: the Anyscale API returned no %s block to overlay the change onto; use the Anyscale CLI to make this change instead",
+			cloudResourceID, block,
+		)
+	}
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf(
+			"cannot update cloud resource %s in place: the Anyscale API's %s block did not decode as a JSON object; use the Anyscale CLI to make this change instead",
+			cloudResourceID, block,
+		)
+	}
+	out := make(map[string]any, len(m)+2)
+	for k, val := range m {
+		out[k] = val
+	}
+	return out, nil
+}
+
+// applyBlockOverlay writes one block's planned changes into the echoed raw
+// block. A removal DELETES the key: the backend clears a field that a sent
+// block leaves out.
+func applyBlockOverlay(base map[string]any, overlay map[string]inPlaceChange) {
+	for key, ch := range overlay {
+		switch {
+		case !ch.send:
+			delete(base, key)
+		case ch.isStr:
+			base[key] = ch.str
+		default:
+			base[key] = ch.list
 		}
 	}
-
-	return req, nil
 }
 
 // isAnyscaleManaged reports whether the deployment was created by `anyscale cloud setup` rather
@@ -127,10 +231,6 @@ func isAnyscaleManaged(live *CloudDeploymentResult) bool {
 	}
 	return false
 }
-
-const anyscaleManagedFileStorageRefusal = "`file_storage` cannot be changed in place on a cloud created with `anyscale cloud setup`. " +
-	"The Anyscale API refuses every update to an Anyscale-managed cloud resource. Registered clouds " +
-	"(`anyscale cloud register`) and Kubernetes clouds can be updated in place."
 
 const anyscaleManagedCloudUpdateRefusal = "This change cannot be made in place on a cloud created with `anyscale cloud setup`. " +
 	"The Anyscale API refuses every update to an Anyscale-managed cloud resource. Registered clouds " +
@@ -190,21 +290,41 @@ func addCloudResourceUpdateError(diags *diag.Diagnostics, cloudResourceID string
 	AddAPIError(diags, "update cloud resource", err)
 }
 
-// refuseFileStorageChangeOnManagedCloud raises the Anyscale-managed refusal at plan time, so the
-// practitioner sees it before an apply starts writing. cloudResourceID may be empty or unknown on a
-// plan that has not resolved it yet, in which case there is nothing to look up and the apply-time
-// translation in addFileStorageUpdateError remains the backstop.
-func refuseFileStorageChangeOnManagedCloud(
+// refuseInPlaceCloudChangeOnManagedCloud raises the Anyscale-managed
+// refusal at plan time, so the practitioner sees it before an apply starts
+// writing. It covers every field that updates in place: file_storage, the
+// AWS subnet forms, and the eleven in-place block attributes. cloudResourceID
+// may be empty or unknown on a plan that has not resolved it yet, in which
+// case there is nothing to look up and the apply-time translation in
+// addCloudResourceUpdateError remains the backstop.
+func refuseInPlaceCloudChangeOnManagedCloud(
 	ctx context.Context,
 	client *Client,
 	diags *diag.Diagnostics,
 	cloudID, cloudResourceID string,
 	planFileStorage, stateFileStorage types.Object,
+	blocks inPlaceBlocks,
 ) {
 	if client == nil || cloudID == "" || cloudResourceID == "" {
 		return
 	}
-	if planFileStorage.IsUnknown() || planFileStorage.Equal(stateFileStorage) {
+	if planFileStorage.IsUnknown() && blocks.planAWS.IsUnknown() &&
+		blocks.planGCP.IsUnknown() && blocks.planKubernetes.IsUnknown() &&
+		blocks.planObjectStorage.IsUnknown() {
+		return
+	}
+	_, subnetsNeeded, d := plannedSubnetUpdate(ctx, blocks.planAWS, blocks.stateAWS)
+	diags.Append(d...)
+	if d.HasError() {
+		return
+	}
+	changes, cd := plannedInPlaceChanges(ctx, blocks)
+	diags.Append(cd...)
+	if cd.HasError() {
+		return
+	}
+	fileStorageChanged := !planFileStorage.IsUnknown() && !planFileStorage.Equal(stateFileStorage)
+	if !subnetsNeeded && !changes.any() && !fileStorageChanged {
 		return
 	}
 
@@ -215,60 +335,6 @@ func refuseFileStorageChangeOnManagedCloud(
 		return
 	}
 	if isAnyscaleManaged(findCloudResourceByID(results, cloudResourceID)) {
-		// Title is operation-neutral like the apply-time translation; the
-		// body stays file_storage-specific because this plan-time check only
-		// fires on a file_storage change.
-		diags.AddError("Cannot Update an Anyscale-Managed Cloud", anyscaleManagedFileStorageRefusal)
-	}
-}
-
-// refuseSubnetIDsToAZChangeOnManagedCloud raises the same plan-time refusal for an
-// aws_config.subnet_ids_to_az change: the backend refuses every update to an
-// Anyscale-managed cloud, and unlike file_storage the apply-time error for a subnet
-// PUT arrives as an opaque 400 - knowing before the apply starts writing is the point.
-// It fires only when the plan's map is known and differs from state; a null or unknown
-// plan map does not name a change to check. Fail-open refusal terms match
-// refuseFileStorageChangeOnManagedCloud above.
-func refuseSubnetIDsToAZChangeOnManagedCloud(
-	ctx context.Context,
-	client *Client,
-	diags *diag.Diagnostics,
-	cloudID, cloudResourceID string,
-	planAWSConfig, stateAWSConfig types.Object,
-) {
-	if client == nil || cloudID == "" || cloudResourceID == "" {
-		return
-	}
-	planSubnets, ok := objectMapAttr(planAWSConfig, "subnet_ids_to_az")
-	if !ok || planSubnets.IsUnknown() || planSubnets.IsNull() {
-		return
-	}
-	stateSubnets, _ := objectMapAttr(stateAWSConfig, "subnet_ids_to_az")
-	if planSubnets.Equal(stateSubnets) {
-		return
-	}
-
-	results, err := listCloudResources(ctx, client, cloudID)
-	if err != nil {
-		// Fail open: same terms as the file_storage check - a transient read failure
-		// must not block a plan that would otherwise succeed.
-		return
-	}
-	if isAnyscaleManaged(findCloudResourceByID(results, cloudResourceID)) {
 		diags.AddError("Cannot Update an Anyscale-Managed Cloud", anyscaleManagedCloudUpdateRefusal)
 	}
-}
-
-// objectMapAttr reads a string-map attribute out of a config block object,
-// reporting false when the block is absent or the field is not a map.
-func objectMapAttr(obj types.Object, name string) (types.Map, bool) {
-	if obj.IsNull() || obj.IsUnknown() {
-		return types.MapNull(types.StringType), false
-	}
-	v, ok := obj.Attributes()[name]
-	if !ok {
-		return types.MapNull(types.StringType), false
-	}
-	m, ok := v.(types.Map)
-	return m, ok
 }

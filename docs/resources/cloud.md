@@ -252,7 +252,7 @@ Optional:
 - `security_group_ids` (List of String) List of security group IDs for Anyscale resources. Missing the required rules causes the cluster to fail silently rather than erroring at plan or apply time - Anyscale needs at minimum an inbound rule for port 443 and a self-referencing rule allowing all traffic.
 - `subnet_ids` (List of String) List of subnet IDs, compared as a set: reordering alone is never a change; changing which subnets it contains is rejected at plan time because Anyscale derives the zones itself and can pair them with the wrong subnets - change subnets in place by rewriting them as `subnet_ids_to_az` (it wins when both are set). A subnet change made outside Terraform also surfaces as this error. VPC membership and capacity are not verified by the provider. VM compute only: rejected on a Kubernetes cloud, whose networking comes from `kubernetes_config.zones`.
 - `subnet_ids_to_az` (Map of String) Map of subnet ID to availability zone (e.g., {"subnet-123": "us-east-2a"}). Preferred over `subnet_ids` and used instead of it when both are set. The only subnet form that can change after creation: a change applies in place with each subnet paired to the zone named here, and apply reverts a subnet change made outside Terraform. VPC membership and capacity are not verified by the provider. Also the source for inferring `region` on AWS. VM compute only: rejected on a Kubernetes cloud, whose networking comes from `kubernetes_config.zones`.
-- `vpc_id` (String) The VPC ID where Anyscale resources will be deployed.
+- `vpc_id` (String) The VPC ID where Anyscale resources will be deployed. Updates in place only together with a subnet change (the subnets must live in the new VPC); changing it without one, or removing it, is rejected at plan time.
 
 
 <a id="nestedblock--azure_config"></a>
@@ -316,9 +316,9 @@ Optional:
 
 Optional:
 
-- `bucket_name` (String) The bucket name (e.g., my-bucket for S3, gs://my-bucket for GCS). A bare name and its scheme-prefixed form (s3://, gs://) are treated as the same bucket for plan purposes, so importing a cloud whose bucket was written without the prefix does not force replacement.
-- `endpoint` (String) Custom S3-compatible endpoint (for MinIO, etc.).
-- `region` (String) Bucket region, if different from the cloud's region. Setting it to the cloud's own region is treated as unset, so it does not force replacement; any other change forces replacement. A cloud from an older provider version with a null value reconciles with a one-time in-place update, never a replace.
+- `bucket_name` (String) The bucket name (e.g., my-bucket for S3, gs://my-bucket for GCP). Updated in place. A bare name and its scheme-prefixed form (s3://, gs://) are treated as the same bucket for plan purposes, so a bucket written with either form imports without a diff.
+- `endpoint` (String) Custom S3-compatible endpoint (for MinIO, etc.). Updated in place; removing it clears it on the backend.
+- `region` (String) Bucket region, if different from the cloud's region. Updated in place. A value equal to the cloud's own region is treated as unset: the backend stores and reports it back as the cloud's own region, so it reads as null. A cloud from an older provider version with a null value reconciles with a one-time in-place update, never a replace.
 
 
 <a id="nestedblock--timeouts"></a>
