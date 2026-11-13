@@ -882,13 +882,12 @@ func (r *CloudResourceResource) Read(ctx context.Context, req resource.ReadReque
 	}
 
 	// Read-only subnet drift refresh - Read only, never the Create/Update
-	// Read-only subnet drift refresh - Read only, never the Create/Update
 	// readback (the same reasoning as anyscale_cloud's config blocks:
 	// writing a config value on the apply readback makes Core reject the
-	// apply as inconsistent). Only the subnet
-	// attribute the state already uses is touched. The in-place attributes
-	// refresh the same way, from the same rule (a null - unmanaged - state
-	// attribute is never adopted from the live record).
+	// apply as inconsistent). Only the subnet attribute the state already
+	// uses is touched. The in-place attributes refresh the same way, from
+	// the same rule (a null - unmanaged - state attribute is never adopted
+	// from the live record).
 	refreshedAWS, refreshDiags := refreshSubnetDrift(ctx, state.AWSConfig, foundResource)
 	resp.Diagnostics.Append(refreshDiags...)
 	if !refreshDiags.HasError() {
