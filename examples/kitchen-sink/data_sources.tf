@@ -19,6 +19,11 @@ data "anyscale_cloud" "lookup_a" {
 data "anyscale_clouds" "aws_clouds" {
   cloud_provider = "AWS"
 
+  # Filters combine: cloud_provider narrows by provider, name_contains by
+  # name. Every cloud in this example starts with name_prefix, so this
+  # lists only the clouds it creates, not others in the organization.
+  name_contains = var.name_prefix
+
   depends_on = [anyscale_cloud.a, anyscale_cloud.b]
 }
 
