@@ -18,7 +18,7 @@ Kubernetes-based cloud instead of VM, see [aws-eks-basic](../aws-eks-basic/).
 - An S3 bucket for Anyscale object storage (`anyscale_s3_force_destroy = true` by default, so
   `terraform destroy` doesn't get blocked by a non-empty bucket in this example)
 - Two IAM roles: a control-plane role Anyscale's control plane assumes cross-account (trust policy
-  scoped to `anyscale_org_id` + `anyscale_external_id`), and a data-plane role attached to the Ray
+  scoped to your organization ID + `anyscale_external_id`), and a data-plane role attached to the Ray
   cluster nodes themselves
 - An `anyscale_cloud` resource (`compute_stack = "VM"`) wired to that VPC, security group, S3
   bucket, and both IAM roles
@@ -34,15 +34,11 @@ Kubernetes-based cloud instead of VM, see [aws-eks-basic](../aws-eks-basic/).
 - Anyscale credentials - either:
   - `export ANYSCALE_CLI_TOKEN="your-token"`, or
   - `~/.anyscale/credentials.json` (same format `anyscale login` produces)
-- Your Anyscale organization ID (`anyscale_org_id`, starts with `org_`) - either look it up
-  yourself, or add a lookup to this config instead of hardcoding it:
+- Your organization ID, for `anyscale_external_id` (below), which must start with it (console
+  Organization Settings). The trust policy's own org comes from your token automatically, and the
+  IAM module checks the prefix against it at plan time.
 
-  ```terraform
-  data "anyscale_organization" "current" {}
-  # then reference data.anyscale_organization.current.id as anyscale_org_id
-  ```
-
-`aws_region`, `customer_ingress_cidr_ranges`, `anyscale_external_id`, and `anyscale_org_id` all
+`aws_region`, `customer_ingress_cidr_ranges`, and `anyscale_external_id` all
 have no default and must be supplied - copy [`terraform.tfvars.example`](./terraform.tfvars.example)
 to `terraform.tfvars` (already gitignored) and edit it, or pass them with `-var`.
 `anyscale_external_id` is your own choice of string; it just has to match between the IAM trust
@@ -87,7 +83,6 @@ themselves, so the ongoing cost here is the VPC/NAT/S3 infrastructure itself, no
 |----------|-------------|---------|
 | `aws_region` | AWS region for all resources | *(required, no default)* |
 | `customer_ingress_cidr_ranges` | CIDR block allowed through the security group on 443 | *(required, no default)* |
-| `anyscale_org_id` | Your Anyscale organization ID (`org_...`) | *(required, no default)* |
 | `anyscale_external_id` | External ID for the IAM trust policy - your own choice of string | *(required, no default)* |
 | `cloud_name` | Name of the Anyscale cloud to create | `tf-aws-basic-test` |
 | `anyscale_cloud_id` | Existing Anyscale cloud ID, if re-running against one already created | `null` |
@@ -117,10 +112,6 @@ it intentionally floats to the cloud foundation module's latest release rather t
 a new module release could occasionally introduce a breaking argument change before this example
 catches up. Run `terraform init -upgrade` if you suspect a stale cached version, and open an issue
 if the module's current release has genuinely diverged from what this example expects.
-
-**`anyscale_org_id` validation error** - the value must start with `org_`. Use the
-`anyscale_organization` data source shown under Prerequisites above instead of guessing or
-copy-pasting a truncated value.
 
 **IAM trust policy errors on `terraform apply`** - double check `anyscale_external_id` matches
 between your Terraform state and what's already registered for this cloud in Anyscale, if you're

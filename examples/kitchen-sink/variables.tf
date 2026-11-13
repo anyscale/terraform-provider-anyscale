@@ -6,22 +6,9 @@
 # REQUIRED VARIABLES
 # ---------------------------------------------------------------------------------------------------------------------
 
-variable "anyscale_org_id" {
-  description = "Your Anyscale Organization ID (starts with \"org_\"). Feeds the IAM trust policy for the shared cross-account role. Find it at https://console.anyscale.com/ under Organization Settings."
-  type        = string
-  validation {
-    condition     = length(var.anyscale_org_id) > 4 && substr(var.anyscale_org_id, 0, 4) == "org_"
-    error_message = "The anyscale_org_id value must start with \"org_\"."
-  }
-}
-
 variable "anyscale_external_id" {
   description = "Base of the IAM trust policy external IDs: Cloud A uses it with \"-a\" appended, Cloud B with \"-b\". Must start with your organization ID, which the AWS IAM module enforces (e.g. \"org_abc123xyz-kitchen-sink\")."
   type        = string
-  validation {
-    condition     = startswith(var.anyscale_external_id, var.anyscale_org_id)
-    error_message = "anyscale_external_id must start with anyscale_org_id; the AWS IAM module rejects any other value."
-  }
 }
 
 variable "customer_ingress_cidr_ranges" {

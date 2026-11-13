@@ -21,20 +21,6 @@ variable "anyscale_external_id" {
   type        = string
 }
 
-variable "anyscale_org_id" {
-  description = "Anyscale Organization ID."
-  type        = string
-  validation {
-    condition = (
-      var.anyscale_org_id == null ? true : (
-        length(var.anyscale_org_id) > 4 &&
-        substr(var.anyscale_org_id, 0, 4) == "org_"
-      )
-    )
-    error_message = "The anyscale_org_id value must start with \"org_\"."
-  }
-}
-
 # ---------------------------------------------------------------------------------------------------------------------
 # OPTIONAL VARIABLES
 # ---------------------------------------------------------------------------------------------------------------------

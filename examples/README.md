@@ -334,8 +334,7 @@ All examples require:
 - **Terraform**: >= 1.9
 - **Cloud Provider Credentials**: Configured for Terraform (AWS, GCP, etc.)
 - **Anyscale Authentication**: Via `ANYSCALE_CLI_TOKEN` env var or credentials file
-- **Anyscale Organization ID**: Required for IAM trust policies (AWS/GCP examples)
-- **Anyscale External ID**: Required for IAM trust policies (AWS/GCP examples)
+- **AWS VM examples**: `anyscale_external_id` must start with your organization ID (not needed on GCP)
 
 ## Example Comparison
 
@@ -358,7 +357,6 @@ Most examples use these common variables:
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `cloud_name` | Name for the Anyscale Cloud | `"my-terraform-cloud"` |
-| `anyscale_org_id` | Your Anyscale org ID | `"org_abc123xyz"` |
 | `anyscale_external_id` | External ID for IAM; must start with your org ID | `"org_abc123xyz-ext"` |
 | `aws_region` / `gcp_region` / `azure_location` | Cloud provider region (the variable name differs by cloud - check that example's `variables.tf`) | `"us-east-2"` (AWS) or `"us-central1"` (GCP) |
 

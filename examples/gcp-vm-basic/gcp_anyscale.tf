@@ -10,13 +10,17 @@ locals {
   )
 }
 
+# The organization the token authenticates against; the module's trust
+# policy is scoped to it.
+data "anyscale_organization" "current" {}
+
 module "google_anyscale_v2" {
   source = "anyscale/anyscale-cloudfoundation-modules/google"
 
   labels = local.full_labels
 
   # Required: Anyscale Organization ID
-  anyscale_organization_id = var.anyscale_org_id
+  anyscale_organization_id = data.anyscale_organization.current.id
 
   # Optional Anyscale identifiers
   anyscale_deploy_env = var.anyscale_deploy_env

@@ -15,13 +15,17 @@ locals {
   )
 }
 
+# The organization the token authenticates against; the module's trust
+# policy is scoped to it.
+data "anyscale_organization" "current" {}
+
 module "aws_anyscale_v2" {
   source = "anyscale/anyscale-cloudfoundation-modules/aws"
   tags   = local.full_tags
 
   anyscale_deploy_env = var.anyscale_deploy_env
   anyscale_cloud_id   = anyscale_cloud.primary.id
-  anyscale_org_id     = var.anyscale_org_id
+  anyscale_org_id     = data.anyscale_organization.current.id
 
   # A fixed role name lets anyscale_cloud.credentials name the role before
   # the module creates it. See main.tf.

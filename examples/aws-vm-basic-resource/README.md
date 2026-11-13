@@ -62,15 +62,8 @@ configs above.
 - Anyscale credentials - either:
   - `export ANYSCALE_CLI_TOKEN="your-token"`, or
   - `~/.anyscale/credentials.json` (same format `anyscale login` produces)
-- Your Anyscale organization ID (`anyscale_org_id`, starts with `org_`) - either look it up
-  yourself, or add a lookup to this config instead of hardcoding it:
 
-  ```terraform
-  data "anyscale_organization" "current" {}
-  # then reference data.anyscale_organization.current.id as anyscale_org_id
-  ```
-
-`aws_region`, `customer_ingress_cidr_ranges`, and `anyscale_org_id` all
+`aws_region` and `customer_ingress_cidr_ranges` both
 have no default and must be supplied - copy [`terraform.tfvars.example`](./terraform.tfvars.example)
 to `terraform.tfvars` (already gitignored) and edit it, or pass them with `-var`.
 
@@ -107,7 +100,6 @@ themselves, so the ongoing cost is the VPC/NAT/S3 infrastructure itself, not com
 |----------|-------------|---------|
 | `aws_region` | AWS region for all resources | *(required, no default)* |
 | `customer_ingress_cidr_ranges` | CIDR block allowed through the security group on 443 | *(required, no default)* |
-| `anyscale_org_id` | Your Anyscale organization ID (`org_...`) | *(required, no default)* |
 | `cloud_name` | Name of both the Anyscale cloud and its attached cloud resource | `tf-aws-basic-test` |
 | `is_private_cloud` | Whether the cloud resource is private | `false` |
 | `auto_add_user` | Whether to automatically add users to the cloud | `false` (`aws-vm`'s equivalent default is `true` - a deliberate per-scenario difference, not a copy error) |
@@ -137,10 +129,6 @@ it intentionally floats to the cloud foundation module's latest release rather t
 a new module release could occasionally introduce a breaking argument change before this example
 catches up. Run `terraform init -upgrade` if you suspect a stale cached version, and open an issue
 if the module's current release has genuinely diverged from what this example expects.
-
-**`anyscale_org_id` validation error** - the value must start with `org_`. Use the
-`anyscale_organization` data source shown under Prerequisites above instead of guessing or
-copy-pasting a truncated value.
 
 **`terraform apply` fails on `anyscale_cloud_resource.primary` with a `409` ("A cloud deployment
 with the name ... already exists")** - this means a resource with that name is already attached to

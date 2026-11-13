@@ -55,16 +55,9 @@ for other cases like this.
 - Anyscale credentials - either:
   - `export ANYSCALE_CLI_TOKEN="your-token"`, or
   - `~/.anyscale/credentials.json` (same format `anyscale login` produces)
-- Your Anyscale organization ID (`anyscale_org_id`, starts with `org_`) - either look it up
-  yourself, or add a lookup to this config instead of hardcoding it:
 
-  ```terraform
-  data "anyscale_organization" "current" {}
-  # then reference data.anyscale_organization.current.id as anyscale_org_id
-  ```
-
-`gcp_region`, `gcp_zone`, `billing_account_id`, `root_folder_number`, `customer_ingress_cidr_ranges`,
-and `anyscale_org_id` all have no default and must be supplied - copy
+`gcp_region`, `gcp_zone`, `billing_account_id`, `root_folder_number`, and `customer_ingress_cidr_ranges`
+all have no default and must be supplied - copy
 [`terraform.tfvars.example`](./terraform.tfvars.example) to `terraform.tfvars` (already gitignored)
 and edit it, or pass them with `-var`. As with `gcp-vm-basic`, there's no `anyscale_external_id`
 here - GCP's workload identity federation setup doesn't need the cross-account IAM trust
@@ -118,7 +111,6 @@ by default under `make test-gcp-vm-full`).
 | `billing_account_id` | Billing account to associate with the new GCP project | *(required, no default)* |
 | `root_folder_number` | GCP folder the new project is created under | *(required, no default)* |
 | `customer_ingress_cidr_ranges` | CIDR block allowed through the firewall on 443 | *(required, no default)* |
-| `anyscale_org_id` | Your Anyscale organization ID (`org_...`) | *(required, no default)* |
 | `cloud_name` | Name shared by the created cloud and its attached cloud resource | `tf-gcp-vm-test` |
 | `is_private_cloud` | Whether this is a private cloud; feeds both `is_private_cloud` on the cloud and `is_private` on the resource | `false` |
 | `auto_add_user` | Whether to automatically add users | `true` |
@@ -150,10 +142,6 @@ so it intentionally floats to the cloud foundation module's latest release rathe
 and a new module release could occasionally introduce a breaking argument change before this
 example catches up. Run `terraform init -upgrade` if you suspect a stale cached version, and open
 an issue if the module's current release has genuinely diverged from what this example expects.
-
-**`anyscale_org_id` validation error** - the value must start with `org_`. Use the
-`anyscale_organization` data source shown under Prerequisites above instead of guessing or
-copy-pasting a truncated value.
 
 **Project creation fails with a permission or billing error** - double check the credentials
 Terraform is using have both project-creation permission on `root_folder_number` and the right to
