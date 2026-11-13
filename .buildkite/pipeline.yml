@@ -1,15 +1,7 @@
-# Buildkite pipeline for this repository.
-#
-# The end-to-end coverage described in docs/decisions/e2e-coverage is not wired
-# up yet: this pipeline runs no e2e. A build that runs zero jobs used to report
-# "passed" (blocked builds included), and that phantom green was once mistaken
-# for real-infra evidence at tag time. So until real steps land here, every
-# build fails on purpose, with an annotation saying why.
-#
-# When wiring real e2e steps (docs/decisions/e2e-coverage is the plan), replace
-# the placeholder step below and revisit the pipeline's automatic-build branch
-# filter, which is limited to main and tags so PRs don't accumulate a
-# permanently red check that trains readers to ignore red.
+# This pipeline runs no e2e yet and fails every build on purpose with a
+# "NOT RUN" annotation: a zero-job build must not report passed. Replace the
+# placeholder step when wiring docs/decisions/e2e-coverage, and revisit the
+# pipeline's main/tags-only automatic-build filter if PR builds are wanted.
 
 steps:
   - label: ":no_entry: e2e not wired on purpose"
