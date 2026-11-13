@@ -57,7 +57,7 @@ type CloudSummaryModel struct {
 	LineageTrackingEnabled types.Bool   `tfsdk:"lineage_tracking_enabled"`
 	AggregatedLogsEnabled  types.Bool   `tfsdk:"aggregated_logs_enabled"`
 
-	// via cloudSharedAttributes.
+	// Shared with anyscale_cloud via cloudSharedAttributes.
 	AvailabilityZones types.List   `tfsdk:"availability_zones"`
 	Version           types.String `tfsdk:"version"`
 	ExternalID        types.String `tfsdk:"external_id"`

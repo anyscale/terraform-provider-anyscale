@@ -100,13 +100,13 @@ type CloudDeploymentRequest struct {
 
 // CloudResourceUpdateRequest is the request body for PUT /api/v2/clouds/{cloud_id}/resources -
 // sent as a bare JSON list (a single object 422s with "value is not a valid list"). Purpose-built
-// rather than reusing CloudDeploymentRequest/CloudDeploymentResult: see
+// rather than reusing CloudDeploymentRequest/CloudDeploymentResult: see D2 in
 // docs/decisions/cloud-file-storage-lifecycle/README.md. CloudDeploymentRequest has no
 // cloud_resource_id, carries an unwanted Name field, and (load-bearing) types NetworkingMode as a
-// bare non-nullable string; this request needs that field to serialize as a literal JSON null
-// for a public deployment, which only a pointer can express.
+// bare non-nullable string; D2 needs that field to serialize as a literal JSON null for a public
+// deployment, which only a pointer can express.
 //
-// Every field must be populated per the documented enumerated field list: omitting a required one
+// Every field must be populated per the frozen D2 spec's enumerated list: omitting a required one
 // silently wipes it server-side, and including an unrequired one can just as easily wipe
 // something else, or 400 outright (a provider-config block belonging to a different compute
 // stack). See buildCloudResourceUpdateRequest (cloud_resource_update.go) for the only intended
