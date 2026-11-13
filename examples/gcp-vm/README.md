@@ -26,10 +26,11 @@ in place of Filestore and Memorystore), see [`aws-vm`](../aws-vm/).
 - Optionally, a Filestore instance for shared storage (`enable_filestore`) and/or a Memorystore
   instance for Ray GCS fault tolerance (`enable_memorystore`) - both default to `false`, so neither
   is created unless you turn it on
-- An empty `anyscale_cloud` resource (`anyscale_cloud.primary`): just `name`, `is_private_cloud`,
-  `auto_add_user`, and the cloud-level `aggregated_logs_enabled` toggle (hardcoded `true` in
-  this example; `lineage_tracking_enabled` is left off because it is gated per organization).
-  No `gcp_config`, `object_storage`, or `file_storage`
+- An empty `anyscale_cloud` resource (`anyscale_cloud.primary`): `name`, `is_private_cloud`,
+  `auto_add_user`, `cloud_provider = "GCP"`, `region`, and `credentials` (built from the module's
+  workload identity provider, project, and service account outputs), plus the cloud-level
+  `aggregated_logs_enabled` toggle (hardcoded `true` in this example; `lineage_tracking_enabled` is
+  left off because it is gated per organization). No `gcp_config`, `object_storage`, or `file_storage`
   block lives on the cloud itself - following the multi-resource pattern's rule that
   `compute_stack` and the provider config blocks belong on the attached resource, not the parent
   cloud
@@ -166,6 +167,15 @@ already exist.
 **`terraform apply` seems to hang** - Filestore instances in particular are slow to provision
 relative to the rest of this example's infrastructure. Check the instance's status in the GCP
 console before assuming `apply` is stuck.
+
+**`terraform destroy` fails deleting the storage bucket after you ran workloads** - the cloud's bucket holds
+runtime packages and aggregated logs, and the Google module does not delete a non-empty bucket. Empty the
+bucket first, then destroy again. The bucket name is `object_storage.bucket_name` in
+`terraform state show anyscale_cloud_resource.primary`:
+
+```bash
+gcloud storage rm --recursive "gs://<bucket-name>/**"
+```
 
 **A second `anyscale_cloud_resource`, or one re-applied after lost state, fails with a `409`** -
 the multi-resource cloud pattern this example uses has a few sharp edges worth knowing before you

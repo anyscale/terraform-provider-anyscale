@@ -4,7 +4,22 @@
 
 # Step 1: Create empty cloud shell
 resource "anyscale_cloud" "primary" {
+  # Destroy the cloud before the module. The credentials below order
+  # only the outputs they read, not the module's IAM bindings.
+  depends_on = [module.google_anyscale_v2]
+
   name = var.cloud_name
+
+  # Match the cloud resource below. Left unset, the empty cloud is
+  # recorded as AWS in us-east-1 with a placeholder role, and a GCP
+  # service fails to create its load balancer.
+  cloud_provider = "GCP"
+  region         = var.gcp_region
+  credentials = jsonencode({
+    provider_id           = module.google_anyscale_v2.iam_workload_identity_provider_name
+    project_id            = module.google_anyscale_v2.project_id
+    service_account_email = module.google_anyscale_v2.iam_anyscale_access_service_acct_email
+  })
 
   is_private_cloud = var.is_private_cloud
   auto_add_user    = var.auto_add_user
