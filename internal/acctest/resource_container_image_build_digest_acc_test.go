@@ -204,7 +204,7 @@ func newBuildDigestMockServer(t *testing.T, templateID, name, buildID1, digest1,
 // UseStateForUnknown (the registry resource's pattern, wrongly copied here), Core
 // would reject this exact scenario with "Provider produced inconsistent result
 // after apply" the moment the post-apply value diverged from the plan's promised
-// continuity - so a clean, error-free apply plus a real D1->D2 change is the whole
+// continuity - so a clean, error-free apply plus a real digest change is the whole
 // point of this test, not two separate concerns.
 func TestAccContainerImageBuildResource_DigestUpdatesOnRebuild_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -215,7 +215,7 @@ func TestAccContainerImageBuildResource_DigestUpdatesOnRebuild_MockServer(t *tes
 	const buildID2 = "bld_f5_digest_v2_mock"
 	// Deliberately distinct fake digests (not just cosmetically different strings -
 	// no shared substring beyond the sha256: prefix) so an accidental "always return
-	// D1" regression in the mock itself, or a UseStateForUnknown regression in the
+	// digest1" regression in the mock itself, or a UseStateForUnknown regression in the
 	// resource, cannot coincidentally satisfy a weaker equality check.
 	const digest1 = "sha256:f5build0d1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	const digest2 = "sha256:f5build0d2bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"

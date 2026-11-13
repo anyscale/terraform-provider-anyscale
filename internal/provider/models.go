@@ -100,13 +100,13 @@ type CloudDeploymentRequest struct {
 
 // CloudResourceUpdateRequest is the request body for PUT /api/v2/clouds/{cloud_id}/resources -
 // sent as a bare JSON list (a single object 422s with "value is not a valid list"). Purpose-built
-// rather than reusing CloudDeploymentRequest/CloudDeploymentResult: see D2 in
+// rather than reusing CloudDeploymentRequest/CloudDeploymentResult: see
 // docs/decisions/cloud-file-storage-lifecycle/README.md. CloudDeploymentRequest has no
 // cloud_resource_id, carries an unwanted Name field, and (load-bearing) types NetworkingMode as a
-// bare non-nullable string; D2 needs that field to serialize as a literal JSON null for a public
-// deployment, which only a pointer can express.
+// bare non-nullable string; this request needs that field to serialize as a literal JSON null
+// for a public deployment, which only a pointer can express.
 //
-// Every field must be populated per the frozen D2 spec's enumerated list: omitting a required one
+// Every field must be populated per the documented enumerated field list: omitting a required one
 // silently wipes it server-side, and including an unrequired one can just as easily wipe
 // something else, or 400 outright (a provider-config block belonging to a different compute
 // stack). See buildCloudResourceUpdateRequest (cloud_resource_update.go) for the only intended
@@ -244,7 +244,7 @@ type CloudDeploymentResult struct {
 // OperatorStatusDetails carries Kubernetes Anyscale Operator health details,
 // present once a K8s cloud_resource's operator has reported in. Previously
 // typed as *string on CloudDeploymentResult, which failed to decode as soon
-// as the API returned this object (C4/F2 investigation) - the API has always
+// as the API returned this object - the API has always
 // returned an object here, never a string.
 type OperatorStatusDetails struct {
 	OperatorVersion *string               `json:"operator_version"`
@@ -254,8 +254,7 @@ type OperatorStatusDetails struct {
 
 // OperatorCheckResult is a single named health check the operator reports,
 // e.g. connectivity or permissions checks. Not yet surfaced as its own
-// schema attribute (deferred per CLOUD-SYNC-DESIGN.md C4) - decoded here so
-// it doesn't need touching again when it is.
+// schema attribute - decoded here so it doesn't need touching again when it is.
 type OperatorCheckResult struct {
 	Name    *string `json:"name"`
 	Status  *string `json:"status"`

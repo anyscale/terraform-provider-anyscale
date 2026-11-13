@@ -11,7 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
-// This file is CC1's state-upgrade regression: physical_resources was
+// This file is the state-upgrade regression coverage for the rename: physical_resources was
 // renamed to required_resources, with a MANDATORY schema-version bump plus
 // UpgradeState, because prior state can already hold a physical_resources
 // block from a successful apply (the only shape that was ever accepted is
@@ -195,7 +195,7 @@ func TestComputeConfigStateUpgradeV0toV1(t *testing.T) {
 			}
 		}
 		if v, ok := reqAttrs["cpu_architecture"]; !ok {
-			t.Error("required_resources must include the new cpu_architecture field (CC4)")
+			t.Error("required_resources must include the new cpu_architecture field")
 		} else if !v.IsNull() {
 			t.Errorf("required_resources.cpu_architecture = %v, want null (nothing to migrate under v0)", v)
 		}
@@ -270,7 +270,7 @@ func TestComputeConfigStateUpgradeV0toV1(t *testing.T) {
 		}
 	})
 
-	t.Run("idle_termination_minutes and maximum_uptime_minutes are null (CC2: nothing to migrate)", func(t *testing.T) {
+	t.Run("idle_termination_minutes and maximum_uptime_minutes are null (nothing to migrate)", func(t *testing.T) {
 		headNode := buildV0NodeObject(t, "m5.large", types.ObjectNull(physicalResourcesAttrTypesV0()))
 		v0Model := minimalV0Model(t, headNode, types.ListNull(types.ObjectType{AttrTypes: workerNodeAttrTypesV0()}))
 		v1Model := upgradeV0Fixture(t, v0Model)

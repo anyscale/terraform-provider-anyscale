@@ -11,7 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// TestAccServiceResource_RealInfra_StopAndRestart closes the real-API (Gate 1) items of
+// TestAccServiceResource_RealInfra_StopAndRestart covers the real-API items of
 // docs/decisions/service-stopped against a real backend, on the static VM cloud:
 //
 //  1. creates a service;
@@ -97,7 +97,7 @@ resource "anyscale_service" "test" {
 			if err != nil {
 				return err
 			}
-			t.Logf("GATE1 %s: id=%s hostname_same=%t %s", label, resp.Result.ID,
+			t.Logf("probe %s: id=%s hostname_same=%t %s", label, resp.Result.ID,
 				resp.Result.Hostname == hostname, serviceSnapshotLine(&resp.Result))
 			return nil
 		}

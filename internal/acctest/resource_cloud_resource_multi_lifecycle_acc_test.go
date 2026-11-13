@@ -15,22 +15,15 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// This file is the permanent CI-gated regression harness for CR1 (design doc
-// CLOUD-RESOURCE-DESIGN.md, "MATRIX LOCKED" -> Option B, REVERSED to "A2" on
-// 2026-07-08 after a real E2E against multi-resource-cloud-basic surfaced a
-// second, independent backend defect -- see CLOUD-RESOURCE-REPORT.md S7):
-// two anyscale_cloud_resource blocks attached to one anyscale_cloud used to
-// be silently mergeable into a single backend resource, because Create()
-// computed a resource's name client-side and then unconditionally
+// This file is the permanent CI-gated regression harness for a past provider
+// defect: two anyscale_cloud_resource blocks attached to one anyscale_cloud
+// used to be silently mergeable into a single backend resource, because
+// Create() computed a resource's name client-side and then unconditionally
 // overwrote a second block's name with an already-existing default
-// resource's name whenever the cloud had exactly one (resource_cloud_resource.go,
-// pre-fix Create() ~L689-714 + findDefaultCloudResource ~L976-992). That part
-// of the diagnosis never changed across B and A2 -- both fixes remove the
-// adopt path. What changed is how a resource's name is chosen when a config
-// block omits it.
+// resource's name whenever the cloud had exactly one (the adopt path:
+// the pre-Required-name Create() plus findCloudResource's default lookup).
 //
-// CURRENT DESIGN (Required-name, DECISION 2026-07-08, superseding both
-// Option B and A2 -- see git history for those): name is Required:true
+// CURRENT DESIGN (Required-name): name is Required:true
 // plus a stringvalidator.LengthAtLeast(1), with no client-side default of
 // any kind in Create(). An omitted name is a Terraform Core configuration
 // error and an explicitly empty one fails the validator, both at plan
@@ -45,51 +38,34 @@ import (
 // replicate the backend counter -- race-prone): a second resource sharing
 // an existing one's region/compute_stack/provider needs an EXPLICIT
 // distinct name, or the backend's real unique index on (cloud_id, name)
-// 409s, loudly, every time. Release impact: BREAKING, unlike A2's own
-// PATCH-classified fix.
+// 409s, loudly, every time.
 //
 // The mock below is built to the TRACED real backend behavior for BOTH
-// branches: a duplicate explicit name always 409s (create-only, DB unique
+// properties: a duplicate explicit name always 409s (create-only, DB unique
 // index -- never an upsert), and an add_resource response echoes the
 // REQUEST's name verbatim -- including empty, when a caller sends empty --
 // never the DAO's internally generated one. That second property is a
-// deliberate regression tripwire: A2 means the provider should never again
-// send an empty name, but if it ever does, this mock now reproduces the
-// exact real "the name never comes back" failure instead of the
-// too-helpful auto-return an earlier version of this file used, so a
-// regression fails loudly here instead of surfacing only against real infra
-// again.
+// deliberate regression tripwire: the provider should never send an empty
+// name, but if it ever does, this mock reproduces the exact real "the name
+// never comes back" failure, so a regression fails loudly here instead of
+// surfacing only against real infra.
 //
-// TestAccCloudResourceMulti_DistinctExplicitNames still asserts CR1's
-// adopt-path fix directly (2 distinct backend resources from two explicitly
-// named blocks, clean re-plan). Block "a" now sets name explicitly
-// ("vm-aws-us-east-2", the same value A2's client-side computation used to
-// produce) since an omitted name is no longer valid HCL under Required --
-// a mechanical update only, every existing assertion is unchanged.
+// TestAccCloudResourceMulti_DistinctExplicitNames asserts the adopt-path
+// fix directly (2 distinct backend resources from two explicitly named
+// blocks, clean re-plan).
 //
-// TestAccCloudResourceMulti_BothOmitName_RequiredArgumentError replaces
-// TestAccCloudResourceMulti_BothOmitName_ReturnsConflict (A2: both blocks
-// computed an identical name client-side and 409'd at apply time on the
-// second add_resource call). Under Required-name, omitting name from either
+// TestAccCloudResourceMulti_BothOmitName_RequiredArgumentError: under
+// Required-name, omitting name from either
 // block is a Terraform Core configuration error caught at PLAN time --
 // there is no client-side default left to compute, so the scenario can no
-// longer reach the API at all. This is a strictly earlier, louder failure
-// than A2's apply-time 409, proven here by asserting mock.resourceCount()
+// longer reach the API at all, proven here by asserting mock.resourceCount()
 // stays at 0 (neither block's add_resource ever runs), not just that some
 // error occurred.
 //
-// TestAccCloudResourceMulti_EmptyName_PlanError is new (2026-07-08,
-// closing the empty-string gap): asserts the LengthAtLeast(1)
-// validator rejects name = "" at plan time, the same tier as the
-// required-argument check above and for the same reason -- an empty name
-// must never reach add_resource, full stop.
-//
-// TestAccCloudResourceMulti_DuplicateExplicitName_ReturnsConflict is
-// unaffected by Required-name -- both blocks already used identical
-// explicit names before this change, so neither the Required flip nor the
-// LengthAtLeast(1) validator changes its behavior. Still the one test in
-// this file that is fork-independent, verified green under every design
-// this file has ever tracked (Option B, A2, and now Required-name).
+// TestAccCloudResourceMulti_EmptyName_PlanError asserts the
+// LengthAtLeast(1) validator rejects name = "" at plan time, the same tier
+// as the required-argument check above and for the same reason -- an empty
+// name must never reach add_resource, full stop.
 
 // multiResourceMockEntry is one backend cloud_resource record tracked by the
 // mock across the lifetime of a single test.
@@ -135,7 +111,7 @@ func newMultiResourceMockServer(t *testing.T, cloudID string) (*httptest.Server,
 			_, _ = fmt.Fprintf(w, `{"result": %s}`, m.cloudJSON())
 		case http.MethodGet:
 			// anyscale_cloud's own by-name adopt check (a separate mechanism
-			// from cloud_resource's, unrelated to CR1) - report no existing
+			// from cloud_resource's) - report no existing
 			// cloud so Create always takes the fresh-create path.
 			_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"total": 0, "next_paging_token": null}}`)
 		default:
@@ -219,13 +195,12 @@ func newMultiResourceMockServer(t *testing.T, cloudID string) (*httptest.Server,
 		// ~L2460-2570): the HTTP response echoes the ORIGINAL request
 		// object, not the DAO's persisted row -- so a request that omitted
 		// name gets an empty name back even though a real one was generated
-		// and persisted internally. A2 means the provider never sends an
-		// empty name in normal operation, so this echo is a no-op today
-		// (requestName == name whenever a caller supplies one). It exists
-		// as a tripwire: if the provider ever regresses to sending empty
-		// names again, this mock now reproduces the exact real "the name
-		// never comes back" failure instead of the too-helpful auto-return
-		// an earlier version of this file used.
+		// and persisted internally. Required-name means the provider never
+		// sends an empty name in normal operation, so this echo is a no-op
+		// today (requestName == name whenever a caller supplies one). It
+		// exists as a tripwire: if the provider ever regresses to sending
+		// empty names again, this mock reproduces the exact real "the name
+		// never comes back" failure.
 		body, _ := json.Marshal(map[string]any{"result": m.renderEchoLocked(name, requestName)})
 		_, _ = w.Write(body)
 	})
@@ -321,7 +296,7 @@ func (m *multiResourceMockServer) cloudJSON() string {
 }
 
 // resourceCount returns the number of distinct backend resources currently
-// tracked - the most direct proxy for "did CR1's adopt-bug collapse two
+// tracked - the most direct proxy for "did the adopt bug collapse two
 // blocks into one."
 func (m *multiResourceMockServer) resourceCount() int {
 	m.mu.Lock()
@@ -423,16 +398,12 @@ resource "anyscale_cloud_resource" "b" {
 	})
 }
 
-// TestAccCloudResourceMulti_BothOmitName_RequiredArgumentError supersedes
-// this test's previous assertion under both Option B (2 resources via
-// backend auto-suffix) and A2 (identical client-side-computed names, 409 at
-// apply time -- see git history for both). Required-name (DECISION
-// 2026-07-08, superseding A2's client-side name computation
-// entirely) leaves name with no default of any kind, so omitting it on
-// either block is now a Terraform Core configuration error caught at PLAN
-// time, before the provider is ever invoked to diff or apply -- there is no
-// client-side computation left to produce a colliding name in the first
-// place. Both blocks omit name here specifically to prove the check is
+// TestAccCloudResourceMulti_BothOmitName_RequiredArgumentError:
+// Required-name leaves name with no default of any kind, so omitting it
+// on either block is now a Terraform Core configuration error caught at
+// PLAN time, before the provider is ever invoked to diff or apply -- there
+// is no client-side computation left to produce a colliding name in the
+// first place. Both blocks omit name here specifically to prove the check is
 // per-attribute and unconditional, not somehow satisfied by one block's
 // presence covering the other. Additional resources on the same
 // cloud/region/stack/provider still need an EXPLICIT distinct name (see
@@ -483,22 +454,21 @@ resource "anyscale_cloud_resource" "b" {
 	// Neither block's add_resource may ever run -- Terraform Core rejects
 	// the whole configuration before the provider is invoked for planning,
 	// let alone applying. This is the concrete proof that Required-name
-	// closes the omitted-name path strictly earlier than A2's apply-time
-	// 409 did.
+	// closes the omitted-name path before any add_resource call.
 	if got := mock.resourceCount(); got != 0 {
 		t.Errorf("expected 0 backend resources -- a required-argument config error must block both blocks before any add_resource call, mock has %d", got)
 	}
 }
 
 // TestAccCloudResourceMulti_EmptyName_PlanError asserts the second half of
-// the empty-name closure (2026-07-08): Required:true alone stops an
+// the empty-name closure: Required:true alone stops an
 // OMITTED name (see BothOmitName_RequiredArgumentError above) but does not
 // stop an explicitly EMPTY one -- name = "" is a valid "present" value under
 // plain Required. The schema's stringvalidator.LengthAtLeast(1)
 // (resource_cloud_resource.go)
 // closes that second door: an empty name must fail at plan time too, before
 // any add_resource call, so the provider can never again send the backend
-// an empty name -- the exact precondition of CR1's original real-backend
+// an empty name -- the exact precondition of the original real-backend
 // defect (add_cloud_resource echoes the request's name verbatim, so an
 // empty request name comes back empty even though the DAO generated a real
 // one internally, see file header above). A single block is sufficient --
@@ -544,11 +514,11 @@ resource "anyscale_cloud_resource" "a" {
 // that a duplicate EXPLICIT name on the same cloud must fail loudly at
 // apply time (mirroring the backend's real 409), never silently collapse.
 // Unlike the two tests above, this one
-// is fork-independent and passes both before and after CR1's fix: pre-fix,
-// the adopt path overwrites block "b"'s name to match block "a"'s -- which
-// happens to already equal "b"'s own explicit name here, so the add_resource
-// call still collides and still 409s. Post-fix, block "b" sends its own
-// explicit name unmodified and collides directly. Same observable outcome
+// is fork-independent and passes with or without the adopt-path fix: with
+// the adopt path present, it overwrites block "b"'s name to match block
+// "a"'s -- which happens to already equal "b"'s own explicit name here, so
+// the add_resource call still collides and still 409s. Without it, block
+// "b" sends its own explicit name unmodified and collides directly. Same observable outcome
 // either way, because a real duplicate name was never survivable on real
 // infra in the first place - only the mock's old (incorrect) upsert model
 // ever made it look like a self-heal.
@@ -617,7 +587,7 @@ func testAccCheckAttrsDiffer(addr1, attr1, addr2, attr2 string) resource.TestChe
 			return fmt.Errorf("expected both %s.%s (%q) and %s.%s (%q) to be set", addr1, attr1, v1, addr2, attr2, v2)
 		}
 		if v1 == v2 {
-			return fmt.Errorf("expected %s.%s and %s.%s to differ, both were %q - resources were merged (CR1 adopt-bug)", addr1, attr1, addr2, attr2, v1)
+			return fmt.Errorf("expected %s.%s and %s.%s to differ, both were %q - resources were merged (the adopt bug)", addr1, attr1, addr2, attr2, v1)
 		}
 		return nil
 	}

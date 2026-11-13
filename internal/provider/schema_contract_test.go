@@ -202,25 +202,25 @@ func TestServerInferredStringAttributesAreComputedWithUseStateForUnknown(t *test
 	}
 }
 
-// TestComputeConfigResourceContract pins the schema contract settled by F11
-// (the compute-config "Provider returned invalid result object after apply"
-// bug, surfaced once the pinned static cloud let the compute-config tests run):
+// TestComputeConfigResourceContract pins the schema contract that guards the
+// compute-config "Provider returned invalid result object after apply" bug:
 //
 //   - cloud_resource must be Optional and NOT Computed. The API does not echo
 //     this field back, so marking it Computed makes it unsatisfiable — Create
 //     cannot resolve it and the framework rejects the apply with an unknown
 //     value. Re-adding Computed here is exactly the regression this pins. This
-//     is the genuinely load-bearing assertion (it holds independent of F11's
+//     is the genuinely load-bearing assertion (it holds independent of any
 //     runtime fix).
 //   - head_node.resources and worker_nodes[].resources must be
 //     Optional+Computed+UseStateForUnknown. The API DOES echo these (auto-filled
 //     from instance_type), so Computed is correct; this documents that intent
 //     and keeps the framework's known-after-apply enforcement live.
 //
-// NOTE: this is a SCHEMA-contract guard — it does NOT catch F11's RUNTIME bug
-// (Create leaving the Computed resources maps unknown). That is covered by the
-// compute-config acceptance tests running against the pinned static cloud. The
-// value here is preventing a regression of the schema DIRECTION.
+// NOTE: this is a SCHEMA-contract guard — it guards the schema shape, and does
+// NOT catch the RUNTIME bug (Create leaving the Computed resources maps
+// unknown). That is covered by the compute-config acceptance tests running
+// against the pinned static cloud. The value here is preventing a regression
+// of the schema DIRECTION.
 func TestComputeConfigResourceContract(t *testing.T) {
 	s := schemaOf(t, &ComputeConfigResource{})
 
@@ -235,7 +235,7 @@ func TestComputeConfigResourceContract(t *testing.T) {
 	if cr.Computed {
 		t.Errorf("cloud_resource must NOT be Computed — the API does not echo it back, so Computed is unsatisfiable: " +
 			"Create leaves it unknown and the framework rejects the apply ('Provider returned invalid result object after apply'). " +
-			"This is F11's regression guard.")
+			"This is the regression guard.")
 	}
 
 	// head_node.resources and worker_nodes[].resources: Optional only. The
@@ -268,15 +268,15 @@ func TestComputeConfigResourceContract(t *testing.T) {
 	assertResourcesMap(t, "worker_nodes[]", workerNodes.NestedObject.Attributes)
 }
 
-// TestComputeConfigCC1RequiredResourcesRename pins CC1: physical_resources
-// was renamed to required_resources on both head_node and worker_nodes
-// because the Anyscale API rejects physical_resources outright on any
-// non-empty value (verified against the Platform backend - a non-empty
+// TestComputeConfigCC1RequiredResourcesRename pins the rename:
+// physical_resources was renamed to required_resources on both head_node and
+// worker_nodes because the Anyscale API rejects physical_resources outright on
+// any non-empty value (verified against the Platform backend - a non-empty
 // physical_resources dict raises a ValueError). The ABSENCE assertion is the
 // one that actually catches a regression: it is the only thing that would
 // fail if a future refactor accidentally reintroduced the old attribute name
 // (e.g. a bad merge, or copying a stale code snippet), which schema.Version
-// alone would not catch. cpu_architecture (CC4) ships as a plain string with
+// alone would not catch. cpu_architecture ships as a plain string with
 // no enum validator - tightening it later would itself be a breaking change,
 // per the ratified contract, so its absence is pinned here too.
 func TestComputeConfigCC1RequiredResourcesRename(t *testing.T) {
@@ -286,7 +286,7 @@ func TestComputeConfigCC1RequiredResourcesRename(t *testing.T) {
 		t.Helper()
 
 		if _, present := attrs["physical_resources"]; present {
-			t.Errorf("%s must NOT have a physical_resources attribute — the backend rejects it outright (CC1); "+
+			t.Errorf("%s must NOT have a physical_resources attribute — the backend rejects it outright; "+
 				"this is the regression guard for an accidental revert of the rename", label)
 		}
 
@@ -314,7 +314,7 @@ func TestComputeConfigCC1RequiredResourcesRename(t *testing.T) {
 		}
 		if len(cpuArch.Validators) > 0 {
 			t.Errorf("%s.required_resources.cpu_architecture must NOT have validators — it ships as a permissive "+
-				"plain string with no client-side enum by deliberate choice (CC4): the backend does not enforce one, "+
+				"plain string with no client-side enum by deliberate choice: the backend does not enforce one, "+
 				"and tightening a validator later, after users have set values, would itself be a breaking change", label)
 		}
 	}
@@ -331,18 +331,18 @@ func TestComputeConfigCC1RequiredResourcesRename(t *testing.T) {
 	}
 	assertRequiredResources(t, "worker_nodes[]", workerNodes.NestedObject.Attributes)
 
-	// CC1's state upgrader depends on the schema version actually being
+	// The state upgrader depends on the schema version actually being
 	// bumped - UpgradeState is never invoked for a version-0-to-version-0
 	// no-op, so a prior state with the old physical_resources attribute
 	// would fail to decode against the new schema with no migration path.
 	if s.Version != 1 {
-		t.Errorf("schema Version = %d, want 1 (CC1's mandatory state upgrader depends on the version bump "+
+		t.Errorf("schema Version = %d, want 1 (the mandatory state upgrader depends on the version bump "+
 			"actually happening — UpgradeState never runs if the version does not change)", s.Version)
 	}
 }
 
-// TestComputeConfigCC2IdleAndMaxUptimeSettable pins CC2: idle_termination_minutes
-// and maximum_uptime_minutes become settable on the resource (previously wired
+// TestComputeConfigCC2IdleAndMaxUptimeSettable pins: idle_termination_minutes
+// and maximum_uptime_minutes are settable on the resource (previously wired
 // into the internal request/response struct but exposed nowhere on the
 // resource model - only the data source could read them, and only read-only).
 //
@@ -408,8 +408,8 @@ func TestComputeConfigCC2IdleAndMaxUptimeSettable(t *testing.T) {
 	}
 }
 
-// TestComputeConfigCC3aNameRequiresReplace pins CC3a: name gets RequiresReplace.
-// This is deliberately the OPPOSITE call from the Cloud effort's C11 (there
+// TestComputeConfigCC3aNameRequiresReplace pins: name gets RequiresReplace.
+// This is deliberately the OPPOSITE call from the cloud resources (there
 // RequiresReplace was the trap, since it would destroy heavyweight real
 // infrastructure on a passive mismatch) - here the resource is a lightweight
 // versioned template, and a live-verified bug (renaming silently orphaned the
@@ -424,14 +424,14 @@ func TestComputeConfigCC3aNameRequiresReplace(t *testing.T) {
 		t.Fatalf("name is not a schema.StringAttribute (got %T)", s.Attributes["name"])
 	}
 	if !hasPlanModifierDescription(name.PlanModifiers, descRequiresReplace) {
-		t.Errorf("name must include stringplanmodifier.RequiresReplace() (CC3a) — without it, renaming a compute " +
+		t.Errorf("name must include stringplanmodifier.RequiresReplace() — without it, renaming a compute " +
 			"config silently creates an orphaned, unmanaged duplicate in the backend instead of erroring or " +
 			"replacing (live-verified bug that motivated this fix)")
 	}
 }
 
-// TestComputeConfigCC6DataSourceTopologyParity pins CC6: the data source
-// gains zones/head_node/worker_nodes, matching the resource's node topology.
+// TestComputeConfigCC6DataSourceTopologyParity pins: the data source
+// has zones/head_node/worker_nodes, matching the resource's node topology.
 // All three must be Computed-only (a data source has no Optional/Required
 // distinction) and, critically, NOT masked the way the resource's
 // maskNodeFromPrior masks Computed sub-attributes back to null — masking
@@ -464,13 +464,14 @@ func TestComputeConfigCC6DataSourceTopologyParity(t *testing.T) {
 	}
 
 	// The data source's node attributes must include required_resources
-	// (CC1's rename), not physical_resources - a regression here would mean
-	// the data-source schema drifted from CC1 independently of the resource.
+	// (renamed from physical_resources), not physical_resources - a
+	// regression here would mean the data-source schema drifted from the
+	// resource independently.
 	if _, present := headNode.Attributes["physical_resources"]; present {
-		t.Error("head_node must NOT have a physical_resources attribute on the data source either (CC1)")
+		t.Error("head_node must NOT have a physical_resources attribute on the data source either")
 	}
 	if _, ok := headNode.Attributes["required_resources"]; !ok {
-		t.Error("head_node is missing required_resources (CC1)")
+		t.Error("head_node is missing required_resources")
 	}
 
 	workerNodes, ok := s.Attributes["worker_nodes"].(dsschema.ListNestedAttribute)
@@ -481,25 +482,21 @@ func TestComputeConfigCC6DataSourceTopologyParity(t *testing.T) {
 		t.Errorf("worker_nodes must be Computed: true")
 	}
 	if _, ok := workerNodes.NestedObject.Attributes["required_resources"]; !ok {
-		t.Error("worker_nodes[] is missing required_resources (CC1)")
+		t.Error("worker_nodes[] is missing required_resources")
 	}
 }
 
-// assertFileStorageUpdatableInPlace pins D2's contract on either cloud
-// resource's file_storage block: no attribute in it may carry
-// RequiresReplace.
+// assertFileStorageUpdatableInPlace pins, on either cloud resource's
+// file_storage block, that no attribute in it may carry RequiresReplace.
 //
-// This inverts what these tests asserted before D2. The old contract came
-// from task 861aaf10, whose premise was that Update() never called the API
-// for file_storage, so an attribute without RequiresReplace silently
-// swallowed the edit. D2 gave file_storage a real Update path
-// (updateFileStorageIfChanged), which makes RequiresReplace the bug rather
-// than the fix: it plans destroy-and-recreate of a live cloud for a change
-// the API accepts in place. Reintroducing one is the regression now, so the
-// guard tests for its absence.
+// file_storage has a real Update path (updateFileStorageIfChanged), which
+// makes RequiresReplace the bug rather than the fix: it plans
+// destroy-and-recreate of a live cloud for a change the API accepts in
+// place. Reintroducing one is the regression, so the guard tests for its
+// absence.
 //
-// The pins that survive D2 unchanged are kept: mount_path must still have no
-// Default and must keep UseStateForUnknown (D1), and mount_targets must stay
+// The unchanged pins are kept alongside: mount_path must still have no
+// Default and must keep UseStateForUnknown, and mount_targets must stay
 // Optional+Computed with UseStateForUnknown.
 //
 // Both resources build this block independently, field-for-field identical,
@@ -521,8 +518,8 @@ func assertFileStorageUpdatableInPlace(t *testing.T, s schema.Schema) {
 				t.Fatalf("file_storage.%s is not a schema.StringAttribute (got %T)", name, fileStorageBlock.Attributes[name])
 			}
 			if indexOfPlanModifierDescription(attr.PlanModifiers, descRequiresReplace) != -1 {
-				t.Errorf("file_storage.%s must NOT include stringplanmodifier.RequiresReplace() - D2 made "+
-					"file_storage updatable in place, so this plans a destroy-and-recreate of a live cloud for a "+
+				t.Errorf("file_storage.%s must NOT include stringplanmodifier.RequiresReplace() - "+
+					"file_storage is updatable in place, so this plans a destroy-and-recreate of a live cloud for a "+
 					"change the Anyscale API accepts on the existing one", name)
 			}
 		})
@@ -534,7 +531,7 @@ func assertFileStorageUpdatableInPlace(t *testing.T, s schema.Schema) {
 			t.Fatalf("file_storage.mount_path is not a schema.StringAttribute (got %T)", fileStorageBlock.Attributes["mount_path"])
 		}
 		if mountPath.Default != nil {
-			t.Error("file_storage.mount_path must not have a Default - D1 stopped fabricating a value for it")
+			t.Error("file_storage.mount_path must not have a Default - no fabricated value for it")
 		}
 		if indexOfPlanModifierDescription(mountPath.PlanModifiers, fileStorageDerivedModifierDescription) == -1 {
 			t.Error("file_storage.mount_path must include fileStorageDerivedStringModifier - it carries state " +
@@ -583,7 +580,7 @@ func TestCloudFileStorageUpdatableInPlace(t *testing.T) {
 	assertFileStorageUpdatableInPlace(t, schemaOf(t, &CloudResource{}))
 }
 
-// TestKubernetesConfigInertFieldsAreDeprecated (C5's original deprecation
+// TestKubernetesConfigInertFieldsAreDeprecated (the original deprecation
 // pin for the 5 fields task #8 removed - see
 // TestFlattenKubernetesConfig_APIBackedFieldsPopulate for why) is deleted,
 // not rewritten: there is no longer a deprecation state to assert. See
@@ -714,11 +711,11 @@ func TestComputeConfigWorkerNodeNameIsServerInferred(t *testing.T) {
 	}
 }
 
-// TestContainerImageBuildStatusDescriptionsMatchAcceptedEnum pins F1's documentation half: all
-// three build_status/latest_build_status surfaces must advertise the exact six-value enum
-// evaluateBuildStatus actually accepts (see resource_container_image_build_test.go's
-// TestEvaluateBuildStatus_AllAcceptedStatuses for the code-side proof of that same enum). Before
-// F1, all three MarkdownDescriptions advertised only five values — pending_cancellation was
+// TestContainerImageBuildStatusDescriptionsMatchAcceptedEnum pins the documentation side of the
+// build-status contract: all three build_status/latest_build_status surfaces must advertise the
+// exact six-value enum evaluateBuildStatus actually accepts (see resource_container_image_build_test.go's
+// TestEvaluateBuildStatus_AllAcceptedStatuses for the code-side proof of that same enum). Previously,
+// all three MarkdownDescriptions advertised only five values — pending_cancellation was
 // missing entirely, not merely misspelled — and used the two-L "cancelled" spelling the backend
 // never actually sends.
 func TestContainerImageBuildStatusDescriptionsMatchAcceptedEnum(t *testing.T) {

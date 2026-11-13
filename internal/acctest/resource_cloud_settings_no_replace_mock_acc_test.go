@@ -143,7 +143,8 @@ func lineageDetailOf(status int) string {
 	return "The setting could not be changed."
 }
 
-// T2: an aggregated-logs failure has the same rollback shape as T1 - any
+// An aggregated-logs failure has the same rollback shape as the
+// lineage refusal above - any
 // settings write, not just lineage, rolls the create back.
 func TestAccCloudResource_AggregatedLogsRefusalAtCreateRollsBack_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -204,7 +205,7 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
-// T5: an adopt-by-name cloud is never deleted on a settings failure - this
+// An adopt-by-name cloud is never deleted on a settings failure - this
 // provider did not create it. The create (adoption) succeeds with a warning,
 // state records the configured value, and the next plan is an update.
 func TestAccCloudResource_AdoptedCloudSettingFailureNeverDeletes_MockServer(t *testing.T) {
@@ -254,10 +255,10 @@ func TestAccCloudResource_AdoptedCloudSettingFailureNeverDeletes_MockServer(t *t
 	})
 }
 
-// T5b: adopting a cloud whose auto_add_user differs from the configuration
-// PUTs the configured value and applies cleanly - on the pre-fix code the
-// read-back overwrote the plan value and the apply failed as an inconsistent
-// result, tainting the adopted cloud.
+// Adopting a cloud whose auto_add_user differs from the configuration
+// PUTs the configured value and applies cleanly. A read-back that
+// overwrote the plan value would fail the apply as an inconsistent result
+// and taint the adopted cloud - this test fails against that behavior.
 func TestAccCloudResource_AdoptedCloudAppliesConfiguredAutoAddUser_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	server, mock := newCloudSettingsGateServer(t)
@@ -299,7 +300,7 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
-// T6: an aggregated-logs value the backend drops during the resource add is
+// An aggregated-logs value the backend drops during the resource add is
 // re-attempted exactly once at read-back. A re-attempt that succeeds
 // converges; a re-attempt that fails downgrades to a warning and the create
 // still succeeds with the configured value recorded.
@@ -328,7 +329,7 @@ func TestAccCloudResource_ReadbackReappliesDroppedSetting_MockServer(t *testing.
 	}
 }
 
-// T6b: the same dropped setting whose re-attempt fails downgrades to a
+// The same dropped setting whose re-attempt fails downgrades to a
 // warning: apply succeeds, state records the configured value (and
 // over-reports it until the next refresh), next plan is an update.
 func TestAccCloudResource_ReadbackReattemptFailureWarnsInstead_MockServer(t *testing.T) {
@@ -484,12 +485,12 @@ resource "anyscale_cloud" "test" {
 `, lineage)
 }
 
-// T1: a lineage refusal on the all-in-one path rolls the whole create back
+// A lineage refusal on the all-in-one path rolls the whole create back
 // while the cloud is still empty: no add_resource, no readiness wait, one
 // DELETE, nothing in state (the next apply is an ordinary create), and the
-// error says so. On the pre-fix code this test fails: the settings step ran
-// after add_resource and the readiness wait, errored, and left the cloud
-// tainted for the next apply to replace.
+// error says so. If the settings step instead ran after add_resource and
+// the readiness wait, it would error and leave the cloud tainted for the
+// next apply to replace - this test fails against that behavior.
 func TestAccCloudResource_LineageRefusalAtCreateRollsBack_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	server, mock := newCloudSettingsGateServer(t)
@@ -525,7 +526,7 @@ func TestAccCloudResource_LineageRefusalAtCreateRollsBack_MockServer(t *testing.
 	})
 }
 
-// T3: the same refusal on an empty cloud has the same shape - the settings
+// The same refusal on an empty cloud has the same shape - the settings
 // all run before the empty-cloud early return.
 func TestAccCloudResource_EmptyCloudLineageRefusalRollsBack_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -565,11 +566,11 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
-// T4: if the rollback DELETE itself fails, the create downgrades to a
+// If the rollback DELETE itself fails, the create downgrades to a
 // warning and succeeds - the cloud exists, is not tainted, and the recorded
 // configured value surfaces the conflict as an update on the next plan (never
-// a replace). On the pre-fix code the create simply errored here, tainting
-// the cloud.
+// a replace). Erroring the create instead would taint the cloud - this
+// test fails against that behavior.
 func TestAccCloudResource_SettingRefusalDeleteFailsWarnsInstead_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	server, mock := newCloudSettingsGateServer(t)

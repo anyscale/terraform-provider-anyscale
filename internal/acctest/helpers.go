@@ -33,7 +33,7 @@ var ProtoV6ProviderFactories = map[string]func() (tfprotov6.ProviderServer, erro
 // interrupted. Always pass the specific cloud.ID your test already resolved (e.g. via
 // GetTestCloudID/GetAllVMClouds) rather than independently re-resolving one - the backend enforces
 // that a project's parent_cloud_id must match whatever cloud a cluster is provisioned on
-// (confirmed via a real 403, 2026-07-20 - see check_cloud_id_of_project_and_cluster_match in the
+// (the backend returns a real 403 - see check_cloud_id_of_project_and_cluster_match in the
 // backend reference), and a mismatch surfaces as an opaque UNHEALTHY, not a clear plan-time error.
 // Passing a cloud ID resolved separately from the one your compute_config/service actually targets
 // reproduces that exact failure.
@@ -284,7 +284,7 @@ func SkipIfNotAcceptanceTest(t *testing.T) {
 // test-primary / buildkite e2e lane against real infra.
 //
 // NOTE: this only unblocks CI; it does not fix the underlying items. The K8S
-// compute_stack "was K8S, but now VM" behavior (F2) remains a tracked bug to
+// compute_stack "was K8S, but now VM" behavior remains a tracked bug to
 // investigate on a real K8S cloud.
 func SkipIfNoRealInfra(t *testing.T) {
 	t.Helper()

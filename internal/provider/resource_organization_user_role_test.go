@@ -50,7 +50,8 @@ type mockOrgUserRoleServer struct {
 	// Last decoded + raw bodies per write endpoint. The raw copy matters for
 	// additional_roles specifically: a decoded []string cannot distinguish a
 	// field that arrived as [] from one that arrived as null or was omitted,
-	// and "sent an explicit empty array" is precisely what test 2 asserts.
+	// and "sent an explicit empty array" is precisely what one of the tests
+	// below asserts.
 	lastLegacyBody    *UpdateOrganizationCollaboratorRequest
 	lastLegacyRaw     string
 	lastRolesBody     *SetOrganizationRolesRequest

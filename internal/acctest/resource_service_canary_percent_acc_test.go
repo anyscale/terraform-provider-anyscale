@@ -33,13 +33,13 @@ func intPtr(v int) *int { return &v }
 // part of it.
 //
 // With a rollout in flight, an apply matching the rollout's goal version updates that rollout
-// (G1-1) and any other apply gets the backend's 409. With no rollout, re-sending the primary's
-// own config starts a new version (G1-7); the mock counts those so a test can bound them.
+// and any other apply gets the backend's 409. With no rollout, re-sending the primary's
+// own config starts a new version; the mock counts those so a test can bound them.
 //
 // Two corners are stricter than the backend. The backend decides whether connection_ids count
 // from the new apply alone, so a canary held with ids matches a later apply without them; the
 // mock 409s it. The provider cannot send that sequence: a connection_ids change is a deploy-field
-// change, which rolls the canary back first (decision 7). And a canary held out of band rejects
+// change, which rolls the canary back first. And a canary held out of band rejects
 // every apply here, where the backend would accept one with the same config.
 type outcomeVersions struct {
 	primaryHash string
@@ -356,7 +356,7 @@ func (m *outcomeMock) eventLog() []string {
 }
 
 // completingFrom is the 202 answering an apply that drops canary_percent from a hold at current:
-// the rollout turns automatic and targets 100% (G1-3).
+// the rollout turns automatic and targets 100%.
 func completingFrom(current int) outcomeSnapshot {
 	s := heldAt(100, intPtr(current))
 	s.Manual = false

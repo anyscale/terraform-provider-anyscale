@@ -17,7 +17,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// Real-API (Gate 1) checks for docs/decisions/service-inputs-parity. Tokens are never logged:
+// Real-API checks for docs/decisions/service-inputs-parity. Tokens are never logged:
 // only their presence and an 8-character SHA-256 prefix, to tell two tokens apart.
 
 const parityBaseImage = "anyscale/ray:2.56.1-slim-py312-cu129"
@@ -119,20 +119,20 @@ func waitParityRunning(t *testing.T, serviceID string) parityGET {
 	return parityGET{}
 }
 
-// TestAccServiceResource_RealInfra_InputsParity closes the service-level Gate 1 items of
+// TestAccServiceResource_RealInfra_InputsParity covers the service-level items of
 // docs/decisions/service-inputs-parity on one service on the static VM cloud, with three cluster
 // starts (create, one rollout, one rolled-back rollout):
 //
 //  1. Create with auth on, image_uri, gRPC names and env_vars: image_uri resolves to the base
 //     image's build, GET has a token and no `config` key, and the next plan is empty.
-//  2. Auth off, new name (one rollout): the token is cleared (G1-1).
+//  2. Auth off, new name (one rollout): the token is cleared.
 //  3. Auth on with a broken import_path: the rollout is rolled back, and the new token survives
-//     the rollback because auth is service-level (G1-1, G1-2).
-//  4. The rolled-back name again: the translated 409, no rollout (G1-2); the versions list is
-//     logged (G1-3).
-//  5. Out-of-band PUT probes: the current primary's name with a changed config (G1-2.3), IN_PLACE
-//     with a new name and auth flipped (G1-8), and the same new name and config sent twice so the
-//     second lands mid-rollout (G1-2.4). Destroy then terminates that rollout without waiting.
+//     the rollback because auth is service-level.
+//  4. The rolled-back name again: the translated 409, no rollout; the versions list is
+//     logged.
+//  5. Out-of-band PUT probes: the current primary's name with a changed config, IN_PLACE
+//     with a new name and auth flipped, and the same new name and config sent twice so the
+//     second lands mid-rollout. Destroy then terminates that rollout without waiting.
 //
 // Run (one real service, about 80 min):
 //
@@ -196,7 +196,7 @@ resource "anyscale_service" "test" {
 	logGET := func(label string, check func(parityGET) error) resource.TestCheckFunc {
 		return func(*terraform.State) error {
 			g := getParityGET(t, serviceID)
-			t.Logf("GATE1 %s: %s", label, g)
+			t.Logf("%s: %s", label, g)
 			return check(g)
 		}
 	}
@@ -251,7 +251,7 @@ resource "anyscale_service" "test" {
 			{
 				PreConfig: func() {
 					g := getParityGET(t, serviceID)
-					t.Logf("GATE1 3 after rollback: %s (token differs from create's: %t)", g,
+					t.Logf("3 after rollback: %s (token differs from create's: %t)", g,
 						g.TokenFingerprint != "" && g.TokenFingerprint != firstToken)
 					logServiceVersions(t, serviceID)
 				},
@@ -271,18 +271,18 @@ resource "anyscale_service" "test" {
 	})
 }
 
-// logServiceVersions logs GET /services-v2/{id}/versions (G1-3): does it list rolled-back
+// logServiceVersions logs GET /services-v2/{id}/versions: does it list rolled-back
 // versions?
 func logServiceVersions(t *testing.T, serviceID string) {
 	client, err := GetTestClient()
 	if err != nil {
-		t.Logf("GATE1 G1-3 skipped: %v", err)
+		t.Logf("versions list skipped: %v", err)
 		return
 	}
 	raw, err := provider.DoRequestRaw(context.Background(), client, "GET",
 		fmt.Sprintf("/api/v2/services-v2/%s/versions?count=50", serviceID), nil, 200)
 	if err != nil {
-		t.Logf("GATE1 G1-3 versions list failed: %v", err)
+		t.Logf("versions list failed: %v", err)
 		return
 	}
 	var body struct {
@@ -293,11 +293,11 @@ func logServiceVersions(t *testing.T, serviceID string) {
 		} `json:"results"`
 	}
 	if err := json.Unmarshal(raw, &body); err != nil {
-		t.Logf("GATE1 G1-3 decode failed: %v", err)
+		t.Logf("decode versions list failed: %v", err)
 		return
 	}
 	for _, v := range body.Results {
-		t.Logf("GATE1 G1-3 version %s %s %s", v.ID, v.Version, v.CurrentState)
+		t.Logf("version %s %s %s", v.ID, v.Version, v.CurrentState)
 	}
 }
 
@@ -306,7 +306,7 @@ func logServiceVersions(t *testing.T, serviceID string) {
 func probeServiceVersionRulesOutOfBand(t *testing.T, serviceID, name, projectID, buildID, computeConfigID string) {
 	t.Helper()
 	before := getParityGET(t, serviceID)
-	t.Logf("GATE1 5 probes start: %s", before)
+	t.Logf("probes start: %s", before)
 	body := func(strategy, version string, auth bool, envMarker string) map[string]any {
 		app := map[string]any{
 			"import_path": "main:app",
@@ -329,27 +329,27 @@ func probeServiceVersionRulesOutOfBand(t *testing.T, serviceID, name, projectID,
 		}
 	}
 
-	// G1-2.3: the current primary's name with a changed config.
+	// The current primary's name with a changed config.
 	status, detail := putServiceOutOfBand(t, body("ROLLOUT", before.PrimaryName, true, "a"))
-	t.Logf("GATE1 G1-2.3 current primary name %q, changed config: status=%d detail=%s", before.PrimaryName, status, detail)
+	t.Logf("current primary name %q, changed config: status=%d detail=%s", before.PrimaryName, status, detail)
 
-	// G1-8: IN_PLACE with a changed ray_serve_config, a new name and auth flipped off.
+	// IN_PLACE with a changed ray_serve_config, a new name and auth flipped off.
 	status, detail = putServiceOutOfBand(t, body("IN_PLACE", "tfacc-inplace", false, "b"))
-	t.Logf("GATE1 G1-8 IN_PLACE new name + auth=false: status=%d detail=%s", status, detail)
+	t.Logf("IN_PLACE new name + auth=false: status=%d detail=%s", status, detail)
 	if status == 202 {
 		after := waitParityRunning(t, serviceID)
-		t.Logf("GATE1 G1-8 after in-place: %s (primary name unchanged=%t, token unchanged=%t)",
+		t.Logf("after in-place: %s (primary name unchanged=%t, token unchanged=%t)",
 			after, after.PrimaryName == before.PrimaryName, after.TokenFingerprint == before.TokenFingerprint)
 	}
 
-	// G1-2.4: a new rollout, then the same name and config re-sent while it is in flight.
+	// A new rollout, then the same name and config re-sent while it is in flight.
 	status, detail = putServiceOutOfBand(t, body("ROLLOUT", "tfacc-v6", true, ""))
-	t.Logf("GATE1 G1-2.4 first PUT tfacc-v6: status=%d detail=%s", status, detail)
+	t.Logf("first PUT tfacc-v6: status=%d detail=%s", status, detail)
 	status, detail = putServiceOutOfBand(t, body("ROLLOUT", "tfacc-v6", true, ""))
-	t.Logf("GATE1 G1-2.4 re-sent mid-rollout: status=%d detail=%s; %s", status, detail, getParityGET(t, serviceID))
+	t.Logf("re-sent mid-rollout: status=%d detail=%s; %s", status, detail, getParityGET(t, serviceID))
 }
 
-// TestAccServiceResource_RealInfra_ImageURIRegistry closes G1-4 and G1-7 without a service:
+// TestAccServiceResource_RealInfra_ImageURIRegistry, without a service:
 // get_or_create on a registry URI twice, then with a registry secret, a GET of the resolved build,
 // and the anyscale/image alias of an anonymous and of a named environment.
 //
@@ -417,22 +417,22 @@ func TestAccServiceResource_RealInfra_ImageURIRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first get_or_create: %v", err)
 	}
-	t.Logf("GATE1 G1-4 first: id=%s status=%s docker_image_name=%s", first.ID, first.Status, first.DockerImageName)
+	t.Logf("first get_or_create: id=%s status=%s docker_image_name=%s", first.ID, first.Status, first.DockerImageName)
 	second, err := resolve(map[string]any{"image_uri": uri})
 	if err != nil {
 		t.Fatalf("second get_or_create: %v", err)
 	}
-	t.Logf("GATE1 G1-4 second: same_id=%t", second.ID == first.ID)
+	t.Logf("second get_or_create: same_id=%t", second.ID == first.ID)
 	withSecret, err := resolve(map[string]any{"image_uri": uri, "registry_login_secret": probeSecret})
 	if err != nil {
-		t.Logf("GATE1 G1-4 with registry_login_secret: error %v", err)
+		t.Logf("with registry_login_secret: error %v", err)
 	} else {
-		t.Logf("GATE1 G1-4 with registry_login_secret: id=%s new_id=%t", withSecret.ID, withSecret.ID != first.ID)
+		t.Logf("with registry_login_secret: id=%s new_id=%t", withSecret.ID, withSecret.ID != first.ID)
 	}
 
 	anon := getBuild(first.ID)
 	if _, err := resolve(map[string]any{"image_uri": alias(anon)}); err != nil {
-		t.Logf("GATE1 G1-7 anonymous environment %s, alias %s: %v", anonymousEnv, alias(anon), err)
+		t.Logf("anonymous environment %s, alias %s: %v", anonymousEnv, alias(anon), err)
 	}
 
 	// A named environment, as anyscale_container_image_registry or `anyscale image register`
@@ -446,6 +446,6 @@ func TestAccServiceResource_RealInfra_ImageURIRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get_or_create on the named alias %s: %v", alias(namedBuild), err)
 	}
-	t.Logf("GATE1 G1-7 named build %s: GET rebuilds alias %s, which resolves to the same build: %t",
+	t.Logf("named build %s: GET rebuilds alias %s, which resolves to the same build: %t",
 		named.ID, alias(namedBuild), viaAlias.ID == named.ID)
 }

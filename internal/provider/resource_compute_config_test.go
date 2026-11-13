@@ -495,8 +495,8 @@ func TestWorkerNameDefaulting(t *testing.T) {
 }
 
 // TestRequiredResourcesConversion tests conversion of required_resources for
-// custom instance types (CC1: renamed from physical_resources to match the
-// API field name; CC4: cpu_architecture added).
+// custom instance types (renamed from physical_resources to match the
+// API field name; cpu_architecture added).
 func TestRequiredResourcesConversion(t *testing.T) {
 	ctx := context.Background()
 
@@ -549,15 +549,15 @@ func TestRequiredResourcesConversion(t *testing.T) {
 		t.Fatalf("nodeConfigToAPI() error = %v", err)
 	}
 
-	// Verify required_resources was converted under its real API key - CC1's
-	// whole point is that "physical_resources" is rejected by the backend, so
-	// pinning the API key name here is the regression guard for the rename.
+	// Verify required_resources was converted under its real API key - the
+	// backend rejects "physical_resources" outright, so pinning the API key
+	// name here is the regression guard for the rename.
 	reqRes, ok := got["required_resources"]
 	if !ok {
 		t.Fatal("nodeConfigToAPI() missing required_resources")
 	}
 	if _, ok := got["physical_resources"]; ok {
-		t.Error("nodeConfigToAPI() must NOT send physical_resources - the backend rejects it (CC1)")
+		t.Error("nodeConfigToAPI() must NOT send physical_resources - the backend rejects it")
 	}
 
 	reqResMap, ok := reqRes.(map[string]interface{})
@@ -568,7 +568,7 @@ func TestRequiredResourcesConversion(t *testing.T) {
 	if reqResMap["cpu"] != int64(16) {
 		t.Errorf("required_resources.cpu = %v, want 16", reqResMap["cpu"])
 	}
-	// F2: the real API only accepts an integer byte count - "64Gi" must be
+	// The real API only accepts an integer byte count - "64Gi" must be
 	// parsed to bytes before it reaches the request, not passed through as
 	// the literal unit string (which the backend 422s on).
 	const wantMemoryBytes = int64(64) << 30
@@ -799,7 +799,7 @@ func TestCommonNodeFieldsToAPI_HeadWorkerParity(t *testing.T) {
 	if adv, ok := headResult["advanced_configurations_json"].(map[string]interface{}); !ok || adv["disk_size"] != float64(100) {
 		t.Errorf("advanced_configurations_json = %v, want disk_size=100", headResult["advanced_configurations_json"])
 	}
-	// F1: cloud_deployment has no top-level field on the real API's node
+	// cloud_deployment has no top-level field on the real API's node
 	// model - it must be nested inside flags, alongside the user's own flags,
 	// or the backend 422s on it.
 	if _, wrongLocation := headResult["cloud_deployment"]; wrongLocation {

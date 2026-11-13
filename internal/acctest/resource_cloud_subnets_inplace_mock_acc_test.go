@@ -27,8 +27,8 @@ import (
 //     wire shape (subnet_ids and zones always paired, file_storage carried
 //     in the same PUT) and that list-form subnet_ids without zones is never
 //     sent.
-//   - Mirrors backend behaviors confirmed by live testing on real AWS
-//     (2026-11-09): 422 extra_forbidden on GET-only fields, 400 "subnet IDs
+//   - Mirrors backend behaviors confirmed by live testing on real AWS:
+//     422 extra_forbidden on GET-only fields, 400 "subnet IDs
 //     do not match zones" for a count mismatch (captured verbatim), positional
 //     zone-derivation mis-pairing when zones are omitted, zone-sorted
 //     regrouping on the stored arrays, and the active-cluster 400 (traced
@@ -321,7 +321,7 @@ func (s *subnetsInPlaceServer) handleResourcesPut(w http.ResponseWriter, r *http
 		return
 	}
 
-	// Live-proven (gate1.log, first probe run): every GET-only field is
+	// Live-proven: every GET-only field is
 	// rejected with this exact 422 body. The typed request already omits
 	// them; this catches the regression of echoing a GET verbatim.
 	for _, forbidden := range []string{"created_at", "is_default", "operator_status", "operator_status_details", "connector_status", "connector_status_details"} {
@@ -400,7 +400,7 @@ func (s *subnetsInPlaceServer) handleResourcesPut(w http.ResponseWriter, r *http
 				return
 			}
 			if len(idsAny) != len(zonesAny) {
-				// Captured verbatim from a real API run (2026-11-09).
+				// Captured verbatim from a real API run.
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadRequest)
 				_, _ = fmt.Fprintf(w, `{"error":{"detail":"Failed to update resource %s in cloud %s: convert cloud resource: subnet IDs do not match zones"}}`, s.resourceID, s.cloudID)
@@ -566,7 +566,7 @@ func sortedMapKeys(m map[string]string) []string {
 	return keys
 }
 
-// ─── U1: map-form change updates in place ───────────────────────────────────
+// ─── map-form change updates in place ───────────────────────────────────
 
 // TestAccCloudResource_SubnetsToAZChangeUpdatesInPlace proves the headline
 // behavior: changing subnet_ids_to_az plans an Update - never a Replace - and
@@ -621,7 +621,7 @@ func TestAccCloudResource_SubnetsToAZChangeUpdatesInPlace(t *testing.T) {
 	}
 }
 
-// ─── U2: list-form reorder is a no-op ───────────────────────────────────────
+// ─── list-form reorder is a no-op ───────────────────────────────────────
 
 // TestAccCloudResource_SubnetIDsReorderIsEmptyPlan: reordering the same set of
 // subnets through the list form produces NO plan action and no PUT. Element
@@ -656,7 +656,7 @@ func TestAccCloudResource_SubnetIDsReorderIsEmptyPlan(t *testing.T) {
 	}
 }
 
-// ─── U3: list-form set change is refused at plan time ──────────────────────
+// ─── list-form set change is refused at plan time ──────────────────────
 
 // TestAccCloudResource_SubnetIDsSetChangeRefusedAtPlanTime: changing the
 // subnet SET through the list form never reaches the API - it errors at plan
@@ -716,7 +716,7 @@ func TestAccCloudResource_SubnetIDsListFormDriftRefusedWithGuidance(t *testing.T
 	})
 }
 
-// ─── U4: list -> map switch heals mis-paired zones ─────────────────────────
+// ─── list -> map switch heals mis-paired zones ─────────────────────────
 
 // TestAccCloudResource_SubnetIDsToAZSwitchHealsMisPairing: a list-form cloud
 // whose stored zones are paired with the wrong subnets (the live outcome of
@@ -767,7 +767,7 @@ func TestAccCloudResource_SubnetIDsToAZSwitchHealsMisPairing(t *testing.T) {
 	}
 }
 
-// ─── U5: map-form out-of-band drift reverts on apply ───────────────────────
+// ─── map-form out-of-band drift reverts on apply ───────────────────────
 
 // TestAccCloudResource_SubnetsToAZDriftShowsUpdateAndReverts: with subnets
 // changed out of band (the CLI route this customer used), refresh surfaces the
@@ -813,7 +813,7 @@ func TestAccCloudResource_SubnetsToAZDriftShowsUpdateAndReverts(t *testing.T) {
 	}
 }
 
-// ─── U6: PUT refusals error cleanly, never taint ───────────────────────────
+// ─── PUT refusals error cleanly, never taint ───────────────────────────
 
 // A count-mismatch 400 (captured verbatim from a real API run) surfaces as an Update
 // error; the cloud is not tainted, and the next apply with the error cleared
@@ -902,7 +902,7 @@ func TestAccCloudResource_SubnetUpdateActiveClusterErrorsNotTaints(t *testing.T)
 	})
 }
 
-// ─── U8: subnet and file_storage changes share one PUT ─────────────────────
+// ─── subnet and file_storage changes share one PUT ─────────────────────
 
 // TestAccCloudResource_SubnetAndFileStorageUpdateTogether: when both the
 // subnets and file_storage change, Update issues exactly ONE resources PUT
@@ -1053,7 +1053,7 @@ func TestAccCloudResourceResource_SubnetIDsSetChangeRefusedAtPlanTime(t *testing
 	}
 }
 
-// ─── D2: Anyscale-managed cloud refuses a subnet map change at plan time ────
+// ─── Anyscale-managed cloud refuses a subnet map change at plan time ────
 
 // TestAccCloudResource_SubnetsToAZChangeManagedCloudRefusal: on a cloud created
 // with `anyscale cloud setup` (aws_config.cloudformation_id in the live

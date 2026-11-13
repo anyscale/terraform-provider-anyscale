@@ -45,7 +45,7 @@ type CloudDataSourceModel struct {
 	LineageTrackingEnabled types.Bool   `tfsdk:"lineage_tracking_enabled"`
 	AggregatedLogsEnabled  types.Bool   `tfsdk:"aggregated_logs_enabled"`
 
-	// C2: parity with the plural anyscale_clouds data source's per-item
+	// Parity with the plural anyscale_clouds data source's per-item
 	// fields. lineage_tracking_enabled/aggregated_logs_enabled above were
 	// the odd ones out here until this provider's naming-unification rename -
 	// this singular data source (and the anyscale_cloud resource) previously
@@ -58,7 +58,7 @@ type CloudDataSourceModel struct {
 	IsDefault      types.Bool   `tfsdk:"is_default"`
 	IsPrivateCloud types.Bool   `tfsdk:"is_private_cloud"`
 
-	// DS-CLOUD-4/DS-CLOUD-5: parity fields added to both anyscale_cloud and
+	// Parity fields added to both anyscale_cloud and
 	// anyscale_clouds via cloudSharedAttributes (is_k8s is schema-only shared,
 	// not part of that map - see the Schema function).
 	IsK8s             types.Bool   `tfsdk:"is_k8s"`
@@ -131,7 +131,7 @@ func (d *CloudDataSource) Schema(ctx context.Context, req datasource.SchemaReque
 		Computed:            true,
 		MarkdownDescription: "Whether aggregated log ingestion is enabled for this cloud. Previously named `enable_log_ingestion`; see CHANGELOG.md and [Naming differences](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources).",
 	}
-	// DS-CLOUD-4: parity with the plural's is_k8s. Schema-only shared text (not
+	// Parity with the plural's is_k8s. Schema-only shared text (not
 	// hoisted into cloudSharedAttributes, since the plural's own copy is
 	// defined directly on its item attributes too, not through that map).
 	attributes["is_k8s"] = schema.BoolAttribute{
@@ -261,8 +261,7 @@ func (d *CloudDataSource) readCloudIntoModel(ctx context.Context, cloudID string
 }
 
 // findCloudByName looks for a cloud with the given name across every page of
-// GET /api/v2/clouds. On duplicate names, picks the most recently created match
-// (X-2).
+// GET /api/v2/clouds. On duplicate names, picks the most recently created match.
 func (d *CloudDataSource) findCloudByName(ctx context.Context, name string) (string, error) {
 	results, err := listAllClouds(ctx, d.client, nil)
 	if err != nil {
