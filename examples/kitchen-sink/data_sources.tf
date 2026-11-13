@@ -19,9 +19,9 @@ data "anyscale_cloud" "lookup_a" {
 data "anyscale_clouds" "aws_clouds" {
   cloud_provider = "AWS"
 
-  # Only this scenario's clouds, matched by its name_prefix: a bare
-  # cloud_provider filter would also count concurrent runs' clouds and
-  # break the scenario's empty-plan check.
+  # Filters combine: cloud_provider narrows by provider, name_contains by
+  # name. Every cloud in this example starts with name_prefix, so this
+  # lists only the clouds it creates, not others in the organization.
   name_contains = var.name_prefix
 
   depends_on = [anyscale_cloud.a, anyscale_cloud.b]
