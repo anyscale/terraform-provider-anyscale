@@ -334,8 +334,7 @@ All examples require:
 - **Terraform**: >= 1.9
 - **Cloud Provider Credentials**: Configured for Terraform (AWS, GCP, etc.)
 - **Anyscale Authentication**: Via `ANYSCALE_CLI_TOKEN` env var or credentials file
-- **Anyscale Organization ID**: Required for IAM trust policies (AWS/GCP examples)
-- **Anyscale External ID**: Required for IAM trust policies (AWS/GCP examples)
+- **AWS VM examples**: `anyscale_external_id` must start with your organization ID (not needed on GCP)
 
 ## Example Comparison
 

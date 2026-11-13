@@ -36,8 +36,6 @@ billing account and folder you supply. For a Kubernetes-based cloud instead of V
 - Anyscale credentials - either:
   - `export ANYSCALE_CLI_TOKEN="your-token"`, or
   - `~/.anyscale/credentials.json` (same format `anyscale login` produces)
-- Nothing to look up for the organization ID: the example reads it from your token through the
-  `anyscale_organization` data source.
 
 `gcp_region`, `gcp_zone`, `billing_account_id`, `root_folder_number`, and `customer_ingress_cidr_ranges`
 all have no default and must be supplied - copy

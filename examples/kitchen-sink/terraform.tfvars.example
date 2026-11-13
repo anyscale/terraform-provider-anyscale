@@ -10,11 +10,9 @@
 # REQUIRED -- shared identity / naming
 # ---------------------------------------------------------------------------------------------------------------------
 
-# Your Anyscale Organization ID (starts with "org_"). Find it at
-# https://console.anyscale.com/ under Organization Settings.
-
-# IAM trust policy external ID. It MUST start with your Organization ID (the AWS IAM module
-# rejects anything else at plan time). This example derives two distinct values from it
+# IAM trust policy external ID. It MUST start with your Organization ID (find it at
+# https://console.anyscale.com/ under Organization Settings); the AWS IAM module rejects
+# anything else at plan time. This example derives two distinct values from it
 # internally (one per Anyscale cloud), so you only need to set it once here.
 anyscale_external_id = "org_abc123xyz-kitchen-sink"
 

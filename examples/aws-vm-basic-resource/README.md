@@ -62,8 +62,9 @@ configs above.
 - Anyscale credentials - either:
   - `export ANYSCALE_CLI_TOKEN="your-token"`, or
   - `~/.anyscale/credentials.json` (same format `anyscale login` produces)
-- Nothing to look up for the organization ID: the example reads it from your token through the
-  `anyscale_organization` data source.
+- Your organization ID, for `anyscale_external_id` (below), which must start with it (console
+  Organization Settings). The trust policy's own org comes from your token automatically, and the
+  IAM module checks the prefix against it at plan time.
 
 `aws_region` and `customer_ingress_cidr_ranges` both
 have no default and must be supplied - copy [`terraform.tfvars.example`](./terraform.tfvars.example)
