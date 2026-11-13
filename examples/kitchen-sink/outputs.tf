@@ -72,7 +72,7 @@ output "ds_cloud_a_provider" {
 
 output "ds_aws_cloud_count" {
   value       = length(data.anyscale_clouds.aws_clouds.clouds)
-  description = "Total AWS clouds visible to this token, including the two just created."
+  description = "AWS clouds whose name matches name_prefix, including the two just created."
 }
 
 output "ds_compute_config_id" {
