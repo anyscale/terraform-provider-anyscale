@@ -49,7 +49,10 @@ resource "anyscale_cloud_resource" "primary" {
 
     # Memorystore for Ray GCS fault tolerance (only if enabled)
     memorystore_instance_name = var.enable_memorystore ? module.google_anyscale_v2.memorystore_id : null
-    memorystore_endpoint      = var.enable_memorystore ? module.google_anyscale_v2.memorystore_endpoint : null
+    # The backend expects "host:port"; the module exports them separately.
+    memorystore_endpoint = var.enable_memorystore ? (
+      "${module.google_anyscale_v2.memorystore_host}:${module.google_anyscale_v2.memorystore_port}"
+    ) : null
   }
 
   # Object Storage (GCS)
@@ -64,7 +67,7 @@ resource "anyscale_cloud_resource" "primary" {
       file_storage_id = module.google_anyscale_v2.filestore_name
       mount_path      = "/mnt/shared"
       mount_targets = [{
-        address = module.google_anyscale_v2.filestore_ip_address
+        address = module.google_anyscale_v2.filestore_ip_addresses[0]
         zone    = var.gcp_zone
       }]
     }
