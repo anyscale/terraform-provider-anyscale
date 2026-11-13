@@ -34,16 +34,9 @@ it first.
   `~/.anyscale/credentials.json`, either of which the provider picks up with no configuration. See
   the [Anyscale API keys documentation](https://docs.anyscale.com/auth/api-keys) for how to
   generate one.
-- Your Anyscale organization ID (starts with `org_`). If you don't have it handy, look it up with a
-  zero-argument data source instead of hunting for it:
-
-  ```terraform
-  data "anyscale_organization" "current" {}
-
-  output "my_org_id" {
-    value = data.anyscale_organization.current.id
-  }
-  ```
+- Your Anyscale organization ID (starts with `org_`), which `anyscale_external_id` in Step 2 must
+  start with. Find it in the console under Organization Settings, or output
+  `data.anyscale_organization.current.id` (declared in Step 2).
 
 ## Step 1: Configure the providers
 
@@ -78,10 +71,13 @@ publishes a [Terraform module](https://github.com/anyscale/terraform-aws-anyscal
 that creates exactly what a VM cloud needs:
 
 ```terraform
+# The organization your token authenticates against.
+data "anyscale_organization" "current" {}
+
 module "aws_anyscale_v2" {
   source = "anyscale/anyscale-cloudfoundation-modules/aws"
 
-  anyscale_org_id      = var.anyscale_org_id
+  anyscale_org_id      = data.anyscale_organization.current.id
   anyscale_external_id = var.anyscale_external_id
 
   anyscale_vpc_cidr_block     = "172.24.0.0/16"
