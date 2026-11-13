@@ -19,9 +19,8 @@ data "anyscale_cloud" "lookup_a" {
 data "anyscale_clouds" "aws_clouds" {
   cloud_provider = "AWS"
 
-  # Scope to this scenario's clouds: every resource this example creates is
-  # named "${var.name_prefix}-...", so a bare cloud_provider filter would
-  # also count clouds created by any concurrent run in the same org and
+  # Only this scenario's clouds, matched by its name_prefix: a bare
+  # cloud_provider filter would also count concurrent runs' clouds and
   # break the scenario's empty-plan check.
   name_contains = var.name_prefix
 
