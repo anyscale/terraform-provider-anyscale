@@ -34,9 +34,10 @@ names.
   cluster nodes themselves
 - An empty `anyscale_cloud.primary` shell - `name` (`var.cloud_name`), `is_private_cloud`,
   `auto_add_user`, `cloud_provider`, `region`, and `credentials` (the control-plane role's ARN, built
-  from a fixed role name so the cloud can name it before the module creates it), plus `lineage_tracking_enabled` and `aggregated_logs_enabled` hardcoded to
-  `true` (fixed in this example, not exposed as variables). It deliberately has no `aws_config`,
-  `object_storage`, or `file_storage` block of its own - that's what makes it "empty," and it's why
+  from a fixed role name so the cloud can name it before the module creates it), plus
+  `aggregated_logs_enabled` hardcoded to `true` (fixed in this example, not exposed as variables;
+  `lineage_tracking_enabled` is left off because it is gated per organization). It deliberately has no
+  `aws_config`, `object_storage`, or `file_storage` block of its own - that's what makes it "empty," and it's why
   the `is_empty_cloud` output below reads `true`
 - A separate `anyscale_cloud_resource.primary`, attached via `cloud_id = anyscale_cloud.primary.id`
   and sharing the same `name` value (`var.cloud_name` again - safe, since a resource's `name` only

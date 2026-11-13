@@ -18,9 +18,9 @@ resource "anyscale_cloud" "primary" {
   is_private_cloud = var.is_private_cloud
   auto_add_user    = var.auto_add_user
 
-  # Cloud-level settings (optional)
-  lineage_tracking_enabled = true
-  aggregated_logs_enabled  = true
+  # Cloud-level settings (optional). lineage_tracking_enabled is also
+  # available but is gated per organization, so this example leaves it off.
+  aggregated_logs_enabled = true
 
   # No aws_config, object_storage, or file_storage blocks
   # This creates an "empty" cloud - resources attached via anyscale_cloud_resource
