@@ -14,10 +14,11 @@ import (
 // is a separate anyscale_cloud_resource that owns them. The mock's resources listing therefore
 // has a default resource WITH aws_config and object_storage, exactly what a bare-ID import
 // recovers. ImportStateVerify against the block-less state, with no block ignored, passes only
-// if ":empty" leaves the blocks null. (docs/decisions/cloud-import-empty-pattern, criterion 2.)
+// if ":empty" leaves the blocks null. (docs/decisions/cloud-import-empty-pattern:
+// the empty form's import recovers no config blocks.)
 //
 // The bare-ID form is guarded by TestAccCloudResource_Lifecycle_AWS_MockServer, whose import step
-// must recover both blocks to pass ImportStateVerify (criterion 3).
+// must recover both blocks to pass ImportStateVerify.
 func TestAccCloudResource_ImportEmptyPatternRecoversNoBlocks_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 

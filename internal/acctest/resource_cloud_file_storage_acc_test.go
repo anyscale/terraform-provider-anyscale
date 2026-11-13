@@ -522,7 +522,7 @@ resource "anyscale_cloud" "test" {
 					}
 					attrs := states[0].Attributes
 					if got := attrs["file_storage.persistent_volume_claim"]; got != "ray-shared-pvc-imported" {
-						return fmt.Errorf("criterion 6a FAILED: import did not recover file_storage.persistent_volume_claim, got %q: %+v",
+						return fmt.Errorf("import did not recover file_storage.persistent_volume_claim, got %q: %+v",
 							got, attrs)
 					}
 					return nil

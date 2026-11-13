@@ -167,7 +167,7 @@ func pmRolesCheck(roles map[string][2][]string) statecheck.StateCheck {
 	return statecheck.ExpectKnownValue(pmAddr, tfjsonpath.New("roles"), knownvalue.MapExact(entries))
 }
 
-// Criterion 1: exactly one scope, and every roles entry names a principal
+// exactly one scope, and every roles entry names a principal
 // with no empty set; changing the scope replaces the policy.
 func TestAccIAMRoleBindingResource_PlanTimeValidation(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -233,7 +233,7 @@ func TestAccIAMRoleBindingResource_ScopeChangeReplaces(t *testing.T) {
 	})
 }
 
-// Criterion 2: create sends one PUT with the full policy, sets state from
+// create sends one PUT with the full policy, sets state from
 // generate, and plans empty afterwards.
 func TestAccIAMRoleBindingResource_CreateOnePut(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -281,7 +281,7 @@ func TestAccIAMRoleBindingResource_CreateOnePut(t *testing.T) {
 	})
 }
 
-// Criterion 3: create on a scope that already holds grants the policy does not
+// create on a scope that already holds grants the policy does not
 // name dry-runs at plan time and revokes them on apply. The warning text is
 // asserted in TestAccIAMRoleBindingResource_CreateTakeoverWarningCLI.
 func TestAccIAMRoleBindingResource_CreateTakeover(t *testing.T) {
@@ -314,7 +314,7 @@ func TestAccIAMRoleBindingResource_CreateTakeover(t *testing.T) {
 	})
 }
 
-// Criterion 4: dry-run refusals fail the plan with the server's text plus what
+// dry-run refusals fail the plan with the server's text plus what
 // to do about it.
 func TestAccIAMRoleBindingResource_DryRunRefusals(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -385,7 +385,7 @@ func TestAccIAMRoleBindingResource_ByIDLookupsRetryPropagation(t *testing.T) {
 	})
 }
 
-// Criterion 5: with the scope unknown at plan, no dry run is made. The warning
+// with the scope unknown at plan, no dry run is made. The warning
 // is asserted in TestAccIAMRoleBindingResource_UnknownScopeWarningCLI.
 func TestAccIAMRoleBindingResource_UnknownScopeSkipsDryRun(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -425,7 +425,7 @@ resource "anyscale_iam_role_binding" "test" {
 	})
 }
 
-// Criterion 6: adding and removing principals updates in place, and the PUT
+// adding and removing principals updates in place, and the PUT
 // carries the whole new policy.
 func TestAccIAMRoleBindingResource_UpdateInPlace(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -462,7 +462,7 @@ func TestAccIAMRoleBindingResource_UpdateInPlace(t *testing.T) {
 	})
 }
 
-// Criterion 7: a binding added outside Terraform plans its removal; one revoked
+// a binding added outside Terraform plans its removal; one revoked
 // outside Terraform plans its return.
 func TestAccIAMRoleBindingResource_Drift(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -511,7 +511,7 @@ func (m *policyMockServer) bindingsOn(scopeType, scopeID string) []policyMockBin
 	return out
 }
 
-// Criterion 8: a cold import by project/<id> recovers the bindings, and a
+// a cold import by project/<id> recovers the bindings, and a
 // config naming them plans no change.
 func TestAccIAMRoleBindingResource_ImportNoOp(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -576,7 +576,7 @@ func TestAccIAMRoleBindingResource_ImportMalformedID(t *testing.T) {
 	resource.Test(t, resource.TestCase{ProtoV6ProviderFactories: ProtoV6ProviderFactories, Steps: steps})
 }
 
-// Criterion 9: destroy keeps the caller's own bindings and revokes the rest.
+// destroy keeps the caller's own bindings and revokes the rest.
 func TestAccIAMRoleBindingResource_DestroyKeepsOwnBindings(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
@@ -606,7 +606,7 @@ func pmFrozenRoles(m *policyMockServer, n int) []string {
 	return entries
 }
 
-// Criterion 9: each frozen refusal adds the named binding and retries; ten are
+// each frozen refusal adds the named binding and retries; ten are
 // kept, and the rest of the policy is revoked.
 func TestAccIAMRoleBindingResource_DestroyKeepsFrozenBindings(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -625,7 +625,7 @@ func TestAccIAMRoleBindingResource_DestroyKeepsFrozenBindings(t *testing.T) {
 	})
 }
 
-// Criterion 9: the eleventh frozen refusal is an error, and nothing is
+// the eleventh frozen refusal is an error, and nothing is
 // revoked.
 func TestAccIAMRoleBindingResource_DestroyFrozenRetryBound(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -656,7 +656,7 @@ func TestAccIAMRoleBindingResource_DestroyFrozenRetryBound(t *testing.T) {
 	})
 }
 
-// Criterion 10: a destroy the API refuses as an organization lockout fails at
+// a destroy the API refuses as an organization lockout fails at
 // plan time, before anything is applied.
 func TestAccIAMRoleBindingResource_DestroyPlanLockout(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -686,7 +686,7 @@ func TestAccIAMRoleBindingResource_DestroyPlanLockout(t *testing.T) {
 	})
 }
 
-// Criterion 11: a 403 on generate with the scope also 403 removes the policy
+// a 403 on generate with the scope also 403 removes the policy
 // from state; with the scope still readable it is an error and state stays.
 func TestAccIAMRoleBindingResource_ReadForbidden(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -774,7 +774,7 @@ func TestAccIAMRoleBindingResource_UnconvertedOrg(t *testing.T) {
 	})
 }
 
-// Criterion 13: the data source reads the same shape, and a 403 is an error
+// the data source reads the same shape, and a 403 is an error
 // whether the scope is gone or access was lost.
 func TestAccIAMRoleBindingDataSource_Reads(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)

@@ -53,7 +53,7 @@ func pmRunOK(t *testing.T, run func(args ...string) ([]tfApplyJSONLine, string, 
 	return lines
 }
 
-// Criterion 3: the create plan names each grant the first apply revokes.
+// the create plan names each grant the first apply revokes.
 func TestAccIAMRoleBindingResource_CreateTakeoverWarningCLI(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
@@ -186,7 +186,7 @@ func TestAccIAMRoleBindingResource_UpdateRevokesOriginlessGrantWarningCLI(t *tes
 	}
 }
 
-// Criterion 5: with the scope unknown at plan, the plan warns once and makes
+// with the scope unknown at plan, the plan warns once and makes
 // no dry run.
 func TestAccIAMRoleBindingResource_UnknownScopeWarningCLI(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -213,7 +213,7 @@ resource "anyscale_iam_role_binding" "test" {
 	}
 }
 
-// Criterion 9: destroy's plan lists what it revokes, and destroy warns naming
+// destroy's plan lists what it revokes, and destroy warns naming
 // every binding it kept: the caller's own and each frozen one.
 func TestAccIAMRoleBindingResource_DestroyWarningsCLI(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -239,7 +239,7 @@ func TestAccIAMRoleBindingResource_DestroyWarningsCLI(t *testing.T) {
 	}
 }
 
-// Criterion 11: a policy whose project is gone is removed from state with the
+// a policy whose project is gone is removed from state with the
 // treated-as-deleted warning.
 func TestAccIAMRoleBindingResource_ScopeGoneWarningCLI(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)

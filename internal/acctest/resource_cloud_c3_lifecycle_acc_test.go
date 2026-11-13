@@ -275,8 +275,8 @@ resource "anyscale_cloud" "test" {
 }
 
 // TestAccCloudResource_K8S_NoRegion_ClearError is an acceptance-level proof
-// for C13: a K8S-only all-in-one cloud (no aws_config, so no subnet-based
-// region inference, and no longer treated as empty since C12) with no
+// that a K8S-only all-in-one cloud (no aws_config, so no subnet-based
+// region inference, and no longer treated as empty) with no
 // explicit region must fail with a clear provider-level error instead of
 // silently sending region="" through to a real add_resource call. Runs
 // through the real Create() framework path (not just a direct-function

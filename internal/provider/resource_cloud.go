@@ -1268,10 +1268,13 @@ func (r *CloudResource) Read(ctx context.Context, req resource.ReadRequest, resp
 
 	// Read-only subnet drift refresh: deliberately Read, never the
 	// Create/Update readback (the config blocks are not refreshed there -
-	// the C12 inconsistent-apply rule). Only the subnet attribute the state
+	// Read-only subnet drift refresh: deliberately Read, never the
+	// Create/Update readback (the config blocks are not refreshed there -
+	// refreshing one there makes Core reject the apply as inconsistent).
+	// Only the subnet attribute the state
 	// already uses is touched; the other form is never materialized. The
-	// in-place attributes refresh the same way (contract rule 4: a null -
-	// unmanaged - state attribute is never adopted from the live record).
+	// in-place attributes refresh the same way (a null - unmanaged - state
+	// attribute is never adopted from the live record).
 	refreshedAWS, refreshDiags := refreshSubnetDrift(ctx, state.AWSConfig, defaultResource)
 	resp.Diagnostics.Append(refreshDiags...)
 	if !refreshDiags.HasError() {

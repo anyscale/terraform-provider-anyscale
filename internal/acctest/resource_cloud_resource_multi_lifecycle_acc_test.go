@@ -412,7 +412,7 @@ resource "anyscale_cloud_resource" "b" {
 					testAccCheckAttrsDiffer("anyscale_cloud_resource.a", "cloud_resource_id", "anyscale_cloud_resource.b", "cloud_resource_id"),
 					func(*terraform.State) error {
 						if got := mock.resourceCount(); got != 2 {
-							return fmt.Errorf("expected 2 distinct backend resources after apply (acceptance criterion 1), mock has %d - the two blocks were collapsed into one (CR1 adopt-bug)", got)
+							return fmt.Errorf("expected 2 distinct backend resources after apply, mock has %d - the two blocks were collapsed into one (the adopt bug two cloud_resource blocks on one cloud must never hit)", got)
 						}
 						return nil
 					},
