@@ -1,6 +1,6 @@
 # Cloud resource fields that update in place
 
-Status: contract, pre-implementation (2026-11-12). Builds on #481 (AWS subnets in place, v0.40.0) and
+Status: implemented in #503 (contract written 2026-11-12). Builds on #481 (AWS subnets in place, v0.40.0) and
 #494 (plan-time managed-cloud refusal, v0.42.0).
 
 ## Problem
@@ -123,9 +123,21 @@ fault tolerance" workflow, and managed clouds allow it; worth doing, not in this
 
 ## Compatibility
 
-Behavior-changing, additive in effect. Not state-breaking, not config-breaking. Plans that showed
-replace (or a plan-time error on a primary resource) now show update in place. Changelog:
-`release-note:enhancement` for each resource, noting the import consequence above. Minor bump.
+Behavior-changing, and breaking for a few configurations; not state-breaking. Under the
+changelog's definition (`.changelog/README.md`: forces a config change, a plan diff or a
+replacement) and the #481 precedent:
+
+- `changed`: the attributes above update in place instead of replacing. Drift made outside
+  Terraform now shows in the plan. Importing a cloud whose configuration omits a recovered value
+  now plans an in-place clear instead of a replacement.
+- `breaking-change`: some configurations used to plan a replacement and now fail at plan time:
+  - a `vpc_id` change without a subnet change;
+  - removing `vpc_id`, GCP `subnet_names`, the K8S operator identity, or a whole
+    `kubernetes_config` or `object_storage` block;
+  - any in-place change on an Anyscale-managed cloud.
+- `fixed`: `custom_image_registry` is no longer wiped when `file_storage` changes on a K8S cloud.
+
+0.x minor bump.
 
 ## Verification gates
 

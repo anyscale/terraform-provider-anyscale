@@ -1,9 +1,19 @@
 ```
-release-note:bug
-resource/anyscale_cloud: Destroying or updating a Kubernetes cloud no longer clears kubernetes_config.custom_image_registry. Any in-place update sent the block through a typed copy that dropped the field, and the backend clears a field an update omits - custom_image_registry has been wiped by every in-place K8S update since v0.27.1.
+release-note:changed
+resource/anyscale_cloud: `aws_config.vpc_id`, `security_group_ids`, `dataplane_iam_role_arn` and `cluster_instance_profile_id`, `gcp_config.subnet_names`, `firewall_policy_names` and `dataplane_service_account_email`, `kubernetes_config.zones`, `anyscale_operator_iam_identity` and `redis_endpoint`, and `object_storage` now update in place instead of replacing the cloud, and the plan shows changes made to them outside Terraform (the same applies to `anyscale_cloud_resource`).
 ```
 
 ```
-release-note:enhancement
-resource/anyscale_cloud and resource/anyscale_cloud_resource: Eleven config-block attributes now update in place through the same PUT that carried file_storage and subnets - AWS vpc_id/security_group_ids/dataplane_iam_role_arn/cluster_instance_profile_id, GCP subnet_names/firewall_policy_names/dataplane_service_account_email, K8S zones/anyscale_operator_iam_identity/redis_endpoint, and the object_storage fields; plans that previously showed a replace (or a plan-time error on a primary resource) now apply in place, an out-of-band `anyscale cloud update` change surfaces as drift the next apply reverts, and importing a cloud whose recovered value the config omits now plans an in-place clear instead of a replacement. Removing vpc_id, subnet_names, the Kubernetes operator identity, or a whole kubernetes_config/object_storage block fails the plan, as does changing vpc_id without its subnets and any in-place change on an `anyscale cloud setup`-managed cloud.
+release-note:changed
+resource/anyscale_cloud: importing a cloud whose configuration omits one of those values now plans clearing it in place instead of replacing the cloud; set the value in the configuration to keep it (the same applies to `anyscale_cloud_resource`).
+```
+
+```
+release-note:breaking-change
+resource/anyscale_cloud: changing `aws_config.vpc_id` without changing the subnets, removing `vpc_id`, `gcp_config.subnet_names`, `kubernetes_config.anyscale_operator_iam_identity` or a whole `kubernetes_config` or `object_storage` block, or changing any of those values on a cloud created with `anyscale cloud setup` is now an error at plan time instead of replacing the cloud. Change the VPC together with its subnets, or keep the value in the configuration (the same applies to `anyscale_cloud_resource`).
+```
+
+```
+release-note:fixed
+resource/anyscale_cloud: changing `file_storage` on a Kubernetes cloud no longer clears the cloud's custom image registry setting (the same applies to `anyscale_cloud_resource`).
 ```
