@@ -320,8 +320,8 @@ resource "anyscale_cloud" "test" {
 				},
 				Check: resource.TestCheckResourceAttr(resourceName, "object_storage.region", "us-east-2"),
 			},
-			// Criterion 12 (contract 23d6bb9): the convergence must HOLD -
-			// apply settles region, the next Read refreshes against the
+			// The convergence must HOLD: apply settles
+			// region, the next Read refreshes against the
 			// effective live region (the deployment's own region, since the
 			// backend reports an equal bucket region back as null), and the
 			// plan stays empty. Twice, so a refresh that nulls region on

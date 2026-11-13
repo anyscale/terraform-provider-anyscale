@@ -241,8 +241,10 @@ func refreshStateStringPtr(attrs map[string]attr.Value, name string, state types
 
 // refreshInPlaceAttributes refreshes the in-place attributes of the four
 // blocks from the live deployment, in Read ONLY - never in the Create/Update
-// readback, where the config blocks are deliberately not refreshed (the C12
-// inconsistent-apply rule). Only state blocks that are non-null are touched.
+// readback, where the config blocks are deliberately not refreshed: writing
+// a refreshed config-block value into the state an apply just recorded makes
+// Terraform reject the apply with "provider produced inconsistent result
+// after apply". Only state blocks that are non-null are touched.
 func refreshInPlaceAttributes(ctx context.Context, b inPlaceBlocks, live *CloudDeploymentResult) (inPlaceBlocks, diag.Diagnostics) {
 	var d diag.Diagnostics
 	out := b
@@ -340,8 +342,8 @@ func refreshInPlaceAttributes(ctx context.Context, b inPlaceBlocks, live *CloudD
 
 // copyPlannedInPlaceValuesIntoState carries the planned in-place values into
 // the state objects after a successful PUT. The anyscale_cloud_resource
-// Update's readback deliberately leaves the config blocks untouched (the C12
-// rule), so without this, state keeps the pre-update values and Terraform
+// Update's readback deliberately leaves the config blocks untouched, so
+// without this, state keeps the pre-update values and Terraform
 // rejects the apply as inconsistent. The anyscale_cloud Update does not need
 // this: it records the PLAN object itself, which already carries the new
 // values.
