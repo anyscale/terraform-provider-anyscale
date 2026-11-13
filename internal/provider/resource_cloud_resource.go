@@ -488,7 +488,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					},
 					"region": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "Bucket region, if different from the cloud resource's region. Updated in place. A value equal to the cloud resource's own region is treated as unset: the backend stores and reports it back as the cloud's own region, so it reads as null. A cloud resource from an older provider version with a null value reconciles with a one-time in-place update, never a replace.",
+						MarkdownDescription: "Bucket region, if different from the cloud resource's region. Updated in place. A value equal to the cloud resource's own region is equivalent to leaving it unset: the backend cannot store the two apart, and both read back as null. A cloud resource from an older provider version with a null value reconciles with a one-time in-place update, never a replace.",
 						PlanModifiers: []planmodifier.String{
 							// See the doc comment on
 							// regionSemanticEqualPlanModifier (cloud_helpers.go).

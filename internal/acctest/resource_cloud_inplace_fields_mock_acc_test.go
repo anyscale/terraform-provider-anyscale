@@ -401,3 +401,31 @@ func TestAccCloudResource_VPCChangeWithoutSubnetsRefused_MockServer(t *testing.T
 		t.Errorf("resources PUTs after a plan-time refusal = %d, want 0", got)
 	}
 }
+
+// ─── I7: vpc_id removal is refused at plan time ────────────────────────────
+
+// TestAccCloudResource_InPlaceVPCRemovalRefused completes criterion 7's
+// removal refusals on the AWS side: removing vpc_id (a VM stack needs one)
+// must fail the plan, and no PUT may be issued.
+func TestAccCloudResource_InPlaceVPCRemovalRefused_MockServer(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	server, mock := newSubnetsInPlaceServer(t)
+	base := inPlaceCloudConfig(server.URL, "sg-realct1", "", "")
+	noVPC := strings.Replace(base,
+		"    vpc_id                      = \"vpc-realct123\"\n", "", 1)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: base},
+			{
+				Config:             noVPC,
+				ExpectError:        regexp.MustCompile(`(?s)Cannot Remove vpc_id`),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+		},
+	})
+	if got := mock.putCount(); got != 0 {
+		t.Errorf("resources PUTs after the refusal = %d, want 0", got)
+	}
+}

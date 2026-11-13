@@ -318,7 +318,7 @@ Optional:
 
 - `bucket_name` (String) The bucket name (e.g., my-bucket for S3, gs://my-bucket for GCP). Updated in place. A bare name and its scheme-prefixed form (s3://, gs://) are treated as the same bucket for plan purposes, so a bucket written with either form imports without a diff.
 - `endpoint` (String) Custom S3-compatible endpoint (for MinIO, etc.). Updated in place; removing it clears it on the backend.
-- `region` (String) Bucket region, if different from the cloud's region. Updated in place. A value equal to the cloud's own region is treated as unset: the backend stores and reports it back as the cloud's own region, so it reads as null. A cloud from an older provider version with a null value reconciles with a one-time in-place update, never a replace.
+- `region` (String) Bucket region, if different from the cloud's region. Updated in place. A value equal to the cloud's own region is equivalent to leaving it unset: the backend cannot store the two apart, and both read back as null. A cloud from an older provider version with a null value reconciles with a one-time in-place update, never a replace.
 
 
 <a id="nestedblock--timeouts"></a>

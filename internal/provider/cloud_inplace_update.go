@@ -110,6 +110,7 @@ func plannedInPlaceChanges(ctx context.Context, b inPlaceBlocks) (inPlaceChanges
 			listChange(ctx, attrs, pm.FirewallPolicyNames, sm.FirewallPolicyNames, "firewall_policy_names", &d)
 		}
 	}
+
 	if walkable(b.planKubernetes, b.stateKubernetes) {
 		var pm, sm KubernetesConfigModel
 		d.Append(b.planKubernetes.As(ctx, &pm, basetypes.ObjectAsOptions{})...)
@@ -503,6 +504,26 @@ func refuseUnsupportedInPlaceChanges(ctx context.Context, b inPlaceBlocks, diags
 					)
 				}
 			}
+		}
+	}
+
+	if walkable(b.planGCP, b.stateGCP) {
+		var pm, sm GCPConfigModel
+		var d diag.Diagnostics
+		d.Append(b.planGCP.As(ctx, &pm, basetypes.ObjectAsOptions{})...)
+		d.Append(b.stateGCP.As(ctx, &sm, basetypes.ObjectAsOptions{})...)
+		if d.HasError() {
+			diags.Append(d...)
+		} else if pm.SubnetNames.IsNull() && !sm.SubnetNames.IsNull() {
+			// The backend KEEPS the old subnets when a sent block carries an
+			// empty subnet list (the same exception class as vpc_id), so a
+			// plan 'subnet_names -> null' would silently change nothing and
+			// never converge.
+			diags.AddError(
+				"Cannot Remove subnet_names",
+				"gcp_config.subnet_names cannot be removed: a GCP VM cloud resource needs its subnets, and the Anyscale API keeps the old subnet list when it is sent empty, so the removal would never take effect. "+
+					"To move the resource to other subnets, change the list in config.",
+			)
 		}
 	}
 

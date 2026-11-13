@@ -89,7 +89,8 @@ fault tolerance" workflow, and managed clouds allow it; worth doing, not in this
 3. **Removal clears.** Config value → null on an in-place attribute plans `~ update`, and the PUT
    leaves the field out, which clears it on the backend. Exceptions, refused at plan time:
    removing `kubernetes_config.anyscale_operator_iam_identity` (required on K8S) and removing
-   `vpc_id` on a VM stack.
+   `vpc_id` on a VM stack, and removing GCP `subnet_names` (the backend keeps the old value on an
+   empty list, so the plan would show a clear that never happens).
    **Whole-block removal.** `aws_config`, `gcp_config` and `azure_config` still carry an identity
    attribute, so removing the block keeps planning replace (or the primary guard error).
    `kubernetes_config` and `object_storage` have none after this change: removing either block is a
@@ -138,6 +139,28 @@ replace (or a plan-time error on a primary resource) now show update in place. C
   server, plus `object_storage.region` (its semantic-equal plan modifier must still suppress a
   default-region diff with `RequiresReplace` removed).
 
+## Gate 1 results
+
+**AWS, 2026-11-12. Passed.** A throwaway all-in-one cloud in us-east-2, plus a secondary deployment
+created with `anyscale_cloud_resource`. Both were destroyed after the run.
+
+- One PUT, built as the live record plus an overlay, changed three fields at once:
+  `security_group_ids` (reordered, with one added), `cluster_instance_profile_id` (null to a value),
+  and `object_storage.bucket_name`. Result: 200 in 1.9s.
+- GET returned all three changes, with the list in the order sent. VPC, subnets, zones, both role
+  ARNs and `external_id` were unchanged.
+- On the non-primary deployment, a `security_group_ids` change returned 200 and persisted. Its
+  other fields were intact, and the primary deployment was byte-identical before and after.
+- The PUT body is a JSON list of deployment objects. A bare object returns 422.
+
+**GCP: blocked.** GCP `add_resource` returns a bare 500 in the test org, on a clean create
+sequence. That is a backend fault, still under investigation, so no GCP cloud could be registered
+to test against. The GCP removal-clears check is not yet confirmed on the real API. It rests on
+the backend code read cited in rule 1.
+
+**K8S `zones`: code read only.** It is stored and returned in the order sent
+(`cloud_deployment_model.go:41-49, 293-301`) and is never derived. Not run on EKS or GKE.
+
 ## Acceptance criteria
 
 The mock backend must model the real semantics: cleared-if-empty inside a sent block, omitted block
@@ -152,7 +175,8 @@ preserved, AWS subnets zone-sorted, memorydb ARN/endpoint absent from GET.
 5. Managed cloud, change to any in-place attribute → plan-time error, no PUT.
 6. Identity attributes still plan replace (non-primary) or the guard error (primary).
 7. Plan-time error for each of: `vpc_id` changed without subnets, `vpc_id` removed,
-   `anyscale_operator_iam_identity` removed, the `kubernetes_config` or `object_storage` block removed.
+   `anyscale_operator_iam_identity` removed, GCP `subnet_names` removed, the `kubernetes_config` or
+   `object_storage` block removed.
 8. 409 on update → error, state unchanged, not tainted.
 9. Same list set reordered out of band → empty plan.
 10. A cloud with memorydb set: an in-place change to another field succeeds (the echoed record has
@@ -160,6 +184,10 @@ preserved, AWS subnets zone-sorted, memorydb ARN/endpoint absent from GET.
 11. Unmodeled live fields survive an update: with `custom_image_registry` (K8S) or
     `s3_addressing_style` set on the mock's live record, any in-place change (and a K8S
     `file_storage` change) sends them back unchanged.
+12. `object_storage.region` set in config equal to the resource's own region: GET elides it (null,
+    `cloud_deployment_model.go` toExternalCloudDeployment), so Read must treat a null live region as
+    the deployment region, not as a clear. After apply, a refresh and plan is empty, and stays
+    empty on the next refresh. Otherwise it is a perpetual in-place diff.
 
 Test names must match `^TestAcc[A-Za-z]+Resource` (e.g. `TestAccCloudResource_InPlace...`).
 
