@@ -321,12 +321,11 @@ const (
 // rule already rejects.
 //
 // Undetermined = a 403 (this GET requires the same update-tier, org-admin
-// permission as the write path, and the token running Terraform is usually a
-// cloud collaborator or owner rather than an org admin - see the identical
-// observation about the caller-exclusion case in the member-search
-// endpoint) or any other unexpected
-// status. Every Undetermined result carries a non-nil error; every Present or
-// Absent result carries a nil one, so a caller can dispatch on the status
+// permission as the write path, and the token running Terraform is usually
+// a cloud collaborator or owner rather than an org admin - the
+// member-search endpoint has the same restriction) or any other unexpected
+// status. Every Undetermined result carries a non-nil error; every Present
+// or Absent result carries a nil one, so a caller can dispatch on the status
 // alone. See docs/decisions/rbac-surface-consolidation for the full
 // rationale.
 func cloudAccessGroupPolicyBinding(ctx context.Context, client *Client, cloudID string) (cloudAccessGroupPolicyStatus, error) {

@@ -483,7 +483,7 @@ func TestServiceDataSourceRead_ByNameNotFound(t *testing.T) {
 	}
 }
 
-// TestServiceDataSourceRead_ByNameAmbiguousErrors asserts the ratified AC: more than one exact
+// TestServiceDataSourceRead_ByNameAmbiguousErrors asserts the rule: more than one exact
 // name match across different projects must ERROR, not silently PickMostRecentMatch. Service
 // names are unique only within a project, so two projects each holding a "frontend" service is a
 // normal, expected state - silently picking the newest would let an unrelated team's later
