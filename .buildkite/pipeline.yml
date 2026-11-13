@@ -1,0 +1,14 @@
+# This pipeline runs no e2e yet and fails every build on purpose with a
+# "NOT RUN" annotation: a zero-job build must not report passed. Replace the
+# placeholder step when wiring docs/decisions/e2e-coverage, and revisit the
+# pipeline's main/tags-only automatic-build filter if PR builds are wanted.
+
+steps:
+  - label: ":no_entry: e2e not wired on purpose"
+    key: e2e-not-wired
+    command: |
+      msg="NOT RUN: no e2e is wired to this pipeline yet (docs/decisions/e2e-coverage). A green build here has never been e2e evidence. This step fails on purpose so the build cannot report passed without running anything."
+      echo "This pipeline does not run any e2e yet." >&2
+      echo "See docs/decisions/e2e-coverage for the planned coverage matrix." >&2
+      buildkite-agent annotate --style error --context e2e-not-wired "$msg"
+      exit 1

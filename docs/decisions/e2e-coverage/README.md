@@ -2,6 +2,8 @@
 
 **Status: draft 2026-11-02. Target matrix and test specs; the gap column is filled from the
 inventory of existing tests.** Input for running real-infrastructure tests in Buildkite.
+Until real steps land, the Buildkite pipeline (`.buildkite/pipeline.yml`) deliberately fails
+every build with a "NOT RUN" annotation instead of letting a zero-job build report passed.
 
 ## Platforms
 
