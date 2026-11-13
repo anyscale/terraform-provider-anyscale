@@ -228,7 +228,8 @@ resource "anyscale_cloud_resource" "test" {
 					// at all - sending it would be a second echo the backend
 					// must reconcile. The lossless-echo requirement applies
 					// only when a block IS sent; that side is covered by the
-					// in-place field tests (criterion 11).
+					// in-place field tests (the K8S zones and
+					// object_storage echo tests).
 					if regexp.MustCompile(`"kubernetes_config"\s*:`).MatchString(body) {
 						return fmt.Errorf("PUT carried a kubernetes_config block on a file_storage-only change; an omitted block is preserved, so it must be omitted: %s", body)
 					}

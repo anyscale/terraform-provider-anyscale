@@ -114,11 +114,9 @@ func TestAccCloudResourcePrimaryReplace_PlanError(t *testing.T) {
 				},
 			},
 			{
-				// A vpc_id change without its subnets fails the plan under the
-				// in-place contract
-				// (docs/decisions/cloud-resource-inplace-update/README.md,
-				// criterion 7) - subnets belong to one VPC, so such a config
-				// cannot be right.
+				// A vpc_id change without its subnets fails the plan
+				// (docs/decisions/cloud-resource-inplace-update/README.md) -
+				// subnets belong to one VPC, so such a config cannot be right.
 				Config:      primaryReplaceConfig(server.URL, "us-east-2", "vpc-a2", "vpc-b"),
 				ExpectError: regexp.MustCompile(`(?s)vpc_id Changed Without Its Subnets`),
 			},

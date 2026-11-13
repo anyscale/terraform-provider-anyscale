@@ -293,7 +293,7 @@ func addCloudResourceUpdateError(diags *diag.Diagnostics, cloudResourceID string
 // refuseInPlaceCloudChangeOnManagedCloud raises the Anyscale-managed
 // refusal at plan time, so the practitioner sees it before an apply starts
 // writing. It covers every field that updates in place: file_storage, the
-// AWS subnet forms, and the eleven in-place block attributes. cloudResourceID
+// AWS subnet forms, and the in-place block attributes. cloudResourceID
 // may be empty or unknown on a plan that has not resolved it yet, in which
 // case there is nothing to look up and the apply-time translation in
 // addCloudResourceUpdateError remains the backstop.
