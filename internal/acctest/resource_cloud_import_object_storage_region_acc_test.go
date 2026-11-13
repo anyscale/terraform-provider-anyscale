@@ -287,7 +287,7 @@ resource "anyscale_cloud" "test" {
 	// Step 2: config now ADDS region, set equal to the cloud's own region -
 	// state is STILL null going into this plan (nothing between steps
 	// refreshes object_storage from the API - it is deliberately not
-	// Read-refreshed, C12). This is the self-heal moment: no re-import, just
+	// Read-refreshed). This is the self-heal moment: no re-import, just
 	// the next plan.
 	configWithRegion := fmt.Sprintf(baseConfig, `
     region      = "us-east-2"`)

@@ -9,7 +9,7 @@ import (
 )
 
 // anyscale_cloud_iam_mapping (data source) - read-only, keyed the same way
-// as the resource. The C12 "provider produced inconsistent result after
+// as the resource. The "provider produced inconsistent result after
 // apply" constraint that stops anyscale_cloud_resource's config blocks from
 // refreshing does not apply here: every attribute is Computed and a data
 // source contributes nothing to a resource plan, so a real GET on every

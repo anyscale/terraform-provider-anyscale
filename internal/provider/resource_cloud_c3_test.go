@@ -39,12 +39,11 @@ func newImportStateResponse(t *testing.T, r resource.ResourceWithImportState) *r
 	}
 }
 
-// This file covers C3-v2's hard acceptance gates. C3-v2 supersedes the
-// original C3 Phase 1 design after C12 exposed a plan-consistency flaw:
-// config blocks (aws_config/gcp_config/kubernetes_config/object_storage/
+// This file covers the hard acceptance gates for reading cloud state.
+// Config blocks (aws_config/gcp_config/kubernetes_config/object_storage/
 // file_storage) are NOT Computed, so populating one during Create/Read that
 // the user's .tf never set produces a hard "provider produced inconsistent
-// result after apply" error - not a harmless enhancement. Under C3-v2:
+// result after apply" error - not a harmless enhancement. Under that policy:
 //   - readCloudState/readCloudResource NEVER touch config blocks, in any
 //     state (null or populated). They still backfill the Computed fields
 //     (is_empty_cloud, cloud_resource_id).
@@ -158,7 +157,7 @@ func TestReadCloudState_NeverInjectsIntoNullConfigBlock(t *testing.T) {
 	}
 
 	if !state.AWSConfig.IsNull() {
-		t.Errorf("AWSConfig = %v, want null - a config block the user's .tf never set must never be injected by Read (this is the exact C12/C3-v2 regression)", state.AWSConfig)
+		t.Errorf("AWSConfig = %v, want null - a config block the user's .tf never set must never be injected by Read", state.AWSConfig)
 	}
 }
 
@@ -661,7 +660,7 @@ func TestCloudResourceImportState_RecoversRequiredBlockEndToEnd(t *testing.T) {
 // checkFileStorageDrift is diagnostics-only (see its doc comment) - these
 // tests assert both the warning content and, separately, that state.FileStorage
 // itself is never touched, since that second property is exactly what keeps
-// this feature clear of the C3-v2/C12 plan-consistency trap the rest of this
+// this feature clear of the plan-consistency trap the rest of this
 // file guards.
 
 // buildFileStorageState is a small builder for a fully-populated file_storage

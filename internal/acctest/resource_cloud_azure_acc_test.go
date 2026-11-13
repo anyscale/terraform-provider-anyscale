@@ -37,7 +37,7 @@ func TestAccCloudResource_Lifecycle_AzureK8S_MockServer(t *testing.T) {
 	// real Azure Storage account uses - the mutation-proof below breaks
 	// stripBucketPrefix to strip it, which only this import-time flatten path
 	// can ever catch (a plain create+check assertion reads the plan's own
-	// echoed value, not a flattened one - see the C12/C3-v2 comments in
+	// echoed value, not a flattened one - see the comments in
 	// cloud_config_flatten.go for why config blocks are never re-derived
 	// outside of ImportState).
 	resourcesJSON := fmt.Sprintf(`[{

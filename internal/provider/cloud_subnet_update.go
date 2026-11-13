@@ -103,7 +103,8 @@ func plannedSubnetUpdate(ctx context.Context, planAWS, stateAWS types.Object) (u
 // A null aws_config (empty cloud, non-AWS stack) or a live deployment with
 // no aws_config returns the block untouched. This runs ONLY from Read -
 // never from the Create/Update readback (the config blocks are not Read-
-// refreshed there; populating one there is the C12 inconsistent-apply bug).
+// refreshed there; populating one there makes Core reject the apply as
+// inconsistent).
 func refreshSubnetDrift(ctx context.Context, awsConfig types.Object, live *CloudDeploymentResult) (types.Object, diag.Diagnostics) {
 	var d diag.Diagnostics
 	if awsConfig.IsNull() || awsConfig.IsUnknown() || live == nil || live.AWSConfig == nil {

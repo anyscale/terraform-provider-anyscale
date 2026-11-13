@@ -351,8 +351,7 @@ func TestComputeConfigCC1RequiredResourcesRename(t *testing.T) {
 // with Default(120) to mirror the backend's create default, but that would
 // silently force an EXISTING config's real value (e.g. imported, or set
 // before this attribute existed) back to 120 on the next apply whenever the
-// user's config omits it - the same silent-overwrite class CC12 fixes for
-// flags. Both fields instead use UseStateForUnknown plus populating from the
+// user's config omits it - a silent overwrite, not a default. Both fields instead use UseStateForUnknown plus populating from the
 // API response in Create/Update (mirroring Read), which reflects whatever
 // the backend actually set once and then holds steady - see
 // TestAccComputeConfigResource_Lifecycle_MockServer's empty-plan-after-refresh step

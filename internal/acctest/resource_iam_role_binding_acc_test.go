@@ -177,17 +177,17 @@ resource "anyscale_iam_role_binding" "test" {
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		ErrorCheck:               orgModeErrorCheck(t),
-		// Criterion 17: destroy revokes everything but the caller's own binding.
+		// destroy revokes everything but the caller's own binding.
 		CheckDestroy: generateEquals(pmFact(ownerRole, "user", callerID)),
 		Steps: []resource.TestStep{
 			{
-				// Criterion 14; resource.Test also fails on a non-empty
+				// resource.Test also fails on a non-empty
 				// re-plan after apply.
 				Config: cfg,
 				Check:  generateEquals(want...),
 			},
 			{
-				// Criterion 15: a binding added outside Terraform plans its
+				// a binding added outside Terraform plans its
 				// removal.
 				PreConfig: func() {
 					extra := map[string]any{"roles": []any{
@@ -211,7 +211,7 @@ resource "anyscale_iam_role_binding" "test" {
 				Check: generateEquals(want...),
 			},
 			{
-				// Criterion 16. ImportStateVerify compares the import with
+				// ImportStateVerify compares the import with
 				// the state the apply left, and resource.Test re-plans.
 				Config:            cfg,
 				ResourceName:      pmAddr,

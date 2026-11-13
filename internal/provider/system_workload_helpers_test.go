@@ -139,7 +139,7 @@ func TestWaitForSystemClusterStateWithTiming_TerminatedThenRunningIsQuiet(t *tes
 	}
 }
 
-// TestWaitForSystemClusterStateWithTiming_SettlesAtRunning is AC12: a cluster that reports
+// TestWaitForSystemClusterStateWithTiming_SettlesAtRunning: a cluster that reports
 // transitional states for a couple of polls before reaching Running must be waited out, not
 // just checked once - the >=3-request assertion is what actually proves the loop polls
 // repeatedly rather than trusting a single describe call.
