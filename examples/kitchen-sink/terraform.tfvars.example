@@ -12,7 +12,6 @@
 
 # Your Anyscale Organization ID (starts with "org_"). Find it at
 # https://console.anyscale.com/ under Organization Settings.
-anyscale_org_id = "org_abc123xyz"
 
 # IAM trust policy external ID. It MUST start with your Organization ID (the AWS IAM module
 # rejects anything else at plan time). This example derives two distinct values from it

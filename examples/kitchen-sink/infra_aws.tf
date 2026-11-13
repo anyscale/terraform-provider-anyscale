@@ -128,7 +128,7 @@ module "anyscale_iam_roles_a" {
   create_cluster_node_instance_profile = true
   create_iam_s3_policy                 = true
 
-  anyscale_org_id        = var.anyscale_org_id
+  anyscale_org_id        = data.anyscale_organization.current.id
   anyscale_external_id   = "${var.anyscale_external_id}-a"
   anyscale_s3_bucket_arn = module.anyscale_s3.s3_bucket_arn
 
@@ -149,7 +149,7 @@ module "anyscale_iam_roles_b" {
   # roles_a's S3 policy is attached to these roles below rather than creating a second one.
   create_iam_s3_policy = false
 
-  anyscale_org_id        = var.anyscale_org_id
+  anyscale_org_id        = data.anyscale_organization.current.id
   anyscale_external_id   = "${var.anyscale_external_id}-b"
   anyscale_s3_bucket_arn = module.anyscale_s3.s3_bucket_arn
 
