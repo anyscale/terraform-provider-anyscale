@@ -87,7 +87,7 @@ func (d *ProjectDataSource) Schema(ctx context.Context, req datasource.SchemaReq
 	}
 	attributes["collaborators"] = schema.ListNestedAttribute{
 		Computed:            true,
-		DeprecationMessage:  legacyRBACReadDeprecation,
+		DeprecationMessage:  legacyCollaboratorsDeprecation,
 		MarkdownDescription: legacyRBACAttributeNote + "List of collaborators with access to this project.",
 		NestedObject: schema.NestedAttributeObject{
 			Attributes: map[string]schema.Attribute{
@@ -180,11 +180,19 @@ func (d *ProjectDataSource) Read(ctx context.Context, req datasource.ReadRequest
 	// A failed fetch is an error, not an empty list: `collaborators = []`
 	// would read as "this project has no collaborators". Anyone who can read
 	// the project may list its collaborators, so there is no expected denial
-	// to tolerate here.
+	// to tolerate - except the one refusal the API makes on its own: in an
+	// organization converted to role bindings it answers the legacy
+	// collaborator read with a 409. There, collaborators is not available;
+	// null says that, and the rest of the data source still resolves.
 	collaborators, err := d.getCollaborators(ctx, projectID)
 	if err != nil {
-		AddAPIError(&resp.Diagnostics, "read project collaborators", err)
-		return
+		if isOrgConvertedConflict(err) {
+			// A nil slice marshals to a null list: unavailable, not empty.
+			collaborators = nil
+		} else {
+			AddAPIError(&resp.Diagnostics, "read project collaborators", err)
+			return
+		}
 	}
 
 	// Populate config

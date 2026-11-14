@@ -11,16 +11,20 @@ import (
 // legacy permission system (cloud and project collaborators, organization
 // roles) or role bindings. Conversion moves it from the first to the second,
 // one way. The API enforces the boundary with a 409 on every write to the
-// store the organization is not on. Both refusals are classified by the
-// stable part of their detail.
+// store the organization is not on, and since the backend's
+// refuse_legacy_permission_reads it also answers the legacy collaborator
+// reads with the same 409 in a converted organization (backend/server/api/
+// base/resources/converted_organizations.py:119-142). Both refusals are
+// classified by the stable part of their detail.
 
-// orgConvertedSubstring is the detail substring of the 409 every legacy
-// permission write answers in a converted organization. The full detail is
+// orgConvertedSubstring is the detail substring of every 409 the legacy
+// permission system answers in a converted organization: the writes, and the
+// project and cloud collaborator reads. The full detail is
 // "This organization uses role bindings. Manage access in Users & IAM or with
-// the role bindings API." (backend/server/api/base/resources/
-// converted_organizations.py:59-84 at product 3b1f86a). It covers the cloud
-// and project collaborator writes, the organization role writes and
-// PUT /clouds/{id}/auto_add_user.
+// the role bindings API. / See who has access in Users & IAM or with the role
+// bindings API." (converted_organizations.py:59-84 and :119-142). It covers
+// the cloud and project collaborator writes and reads, the organization role
+// writes and PUT /clouds/{id}/auto_add_user.
 const orgConvertedSubstring = "This organization uses role bindings"
 
 // orgNotConvertedSubstring is the detail substring of the 409 every role
@@ -39,8 +43,9 @@ func isStatusWithSubstring(err error, statusCode int, substring string) bool {
 	return isHTTPStatus(err, statusCode) && strings.Contains(extractAPIErrorDetail(err), substring)
 }
 
-// isOrgConvertedConflict reports a legacy permission write refused because the
-// organization has converted to role bindings.
+// isOrgConvertedConflict reports a legacy permission call refused because the
+// organization has converted to role bindings: a legacy write, or one of the
+// legacy collaborator reads.
 func isOrgConvertedConflict(err error) bool {
 	return isStatusWithSubstring(err, http.StatusConflict, orgConvertedSubstring)
 }

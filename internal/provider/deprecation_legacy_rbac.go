@@ -32,6 +32,12 @@ const (
 	// have no replacement. Reads are not blocked on Azure, so there is no Azure clause.
 	legacyRBACReadDeprecation = "Deprecated for organizations converted to role bindings, where it is a snapshot from " +
 		"before conversion and has no replacement yet. Unconverted organizations keep using it."
+
+	// legacyCollaboratorsDeprecation is for data.anyscale_project's collaborators, the one
+	// legacy read the API now refuses outright in a converted organization (null there,
+	// so the data source itself still works).
+	legacyCollaboratorsDeprecation = "Deprecated for organizations converted to role bindings, where it is null; " +
+		"Anyscale no longer reports legacy collaborators there. Unconverted organizations keep using it."
 )
 
 // legacyRBACResourceCallout is the top-of-page callout for a deprecated resource.
