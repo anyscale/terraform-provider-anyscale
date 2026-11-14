@@ -186,6 +186,20 @@ func addRoleBindingAdminGroupGrantDeleteError(diags *diag.Diagnostics, err error
 	diags.AddError("Organization Admin Group Is Managed by Anyscale", detail)
 }
 
+// addRoleBindingAdminGroupDestroyRemovalError reports a binding destroy the
+// API refused: destroy's authoritative roles omit the organization admin
+// group's binding, so the apply would revoke it. Nothing is revoked, and
+// the way to stop managing the scope is terraform state rm, not editing
+// roles - the destroy itself was asked for.
+func addRoleBindingAdminGroupDestroyRemovalError(diags *diag.Diagnostics, err error, outcome string) {
+	detail := extractAPIErrorDetail(err) +
+		" Anyscale keeps the organization admin group's role bindings, so a destroy cannot revoke them. Nothing was revoked. To stop managing this scope, run `terraform state rm` on its address."
+	if outcome != "" {
+		detail += " " + outcome
+	}
+	diags.AddError("Organization Admin Group Is Managed by Anyscale", detail)
+}
+
 // addRoleBindingAdminGroupPolicyRemovalError reports a policy apply the API
 // refused: the authoritative roles list omits one of the organization admin
 // group's bindings, so the apply would revoke it. The remedy is the opposite

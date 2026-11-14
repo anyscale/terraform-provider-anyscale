@@ -1,6 +1,6 @@
 ```release-note:fixed
-resource/anyscale_iam_role_grant: Writes the API refuses because they name the organization admin group, or would remove one of its bindings, now report "Organization Admin Group Is Managed by Anyscale" with the per-path remedy, in place of the removed owner-lockout diagnostic that could never match.
+resource/anyscale_iam_role_grant: Writes refused for naming the organization admin group, or for trying to remove one of its bindings, now report "Organization Admin Group Is Managed by Anyscale" with the path-appropriate remedy, in place of the removed owner-lockout diagnostic.
 ```
 ```release-note:fixed
-resource/anyscale_iam_role_binding: A policy apply that would revoke an organization admin group binding because `roles` omits it now reports "Organization Admin Group Is Managed by Anyscale" and says to name the binding in `roles` to keep it, in place of the removed owner-lockout diagnostic.
+resource/anyscale_iam_role_binding: A policy apply or destroy that would remove an organization admin group binding now reports "Organization Admin Group Is Managed by Anyscale" with the path-appropriate remedy, in place of the removed owner-lockout diagnostic.
 ```

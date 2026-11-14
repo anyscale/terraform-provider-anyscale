@@ -348,7 +348,14 @@ func addPolicyWriteError(ctx context.Context, client *Client, diags *diag.Diagno
 		diags.AddError("Cannot Manage IAM on Scope",
 			withOutcome(detail+" The scope does not exist, or this identity does not manage IAM on it.", outcome))
 	case isRoleBindingAdminGroupRemovalRefusal(err):
-		addRoleBindingAdminGroupPolicyRemovalError(diags, err, outcome)
+		// A destroy's policy omits the admin group's binding because
+		// nothing is kept; an ordinary apply omits it because roles left
+		// it out. The remedies differ: edit roles, or stop managing.
+		if strings.Contains(op, "for destroy") {
+			addRoleBindingAdminGroupDestroyRemovalError(diags, err, outcome)
+		} else {
+			addRoleBindingAdminGroupPolicyRemovalError(diags, err, outcome)
+		}
 	case isRoleBindingAdminGroupExtraRoleRefusal(err):
 		addRoleBindingAdminGroupExtraRoleError(diags, err, "policy", outcome)
 	case isOrgNotConvertedConflict(err):
