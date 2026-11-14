@@ -1,0 +1,3 @@
+```release-note:fixed
+resource/anyscale_iam_role_binding: corrected the example and docs to name the project or cloud creator's Admin binding (`Organization owner`; older scopes may still show `Project owner` or `Cloud owner`) rather than a fixed `Project owner`, whose keep-entry failed at plan with "You cannot assign a role to yourself directly"
+```

@@ -4,21 +4,21 @@ page_title: "anyscale_iam_role_binding Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
   ~> Beta. Role bindings are enabled per organization by Anyscale while customers migrate; contact support@anyscale.com mailto:support@anyscale.com to enable them. Beta resources may change incompatibly; every breaking change is listed in the changelog. See the RBAC guide ../guides/rbac.md#role-bindings-beta.
-  Manages every direct role binding on one organization, cloud or project. Authoritative: an apply revokes any direct binding on the scope that roles does not name, including ones Anyscale grants itself, such as a project or cloud creator's owner binding. Never combine it with anyscale_iam_role_grant or anyscale role-binding policy apply on the same scope. Destroy, import and the first-apply behavior are in the RBAC guide ../guides/rbac.md#managing-every-grant-on-a-scope-anyscale_iam_role_binding. Requires an organization converted to role bindings ../guides/rbac.md#organization-access-mode.
+  Manages every direct role binding on one organization, cloud or project. Authoritative: an apply revokes any direct binding on the scope that roles does not name, including ones Anyscale grants itself, such as a project or cloud creator's Admin binding. Never combine it with anyscale_iam_role_grant or anyscale role-binding policy apply on the same scope. Destroy, import and the first-apply behavior are in the RBAC guide ../guides/rbac.md#managing-every-grant-on-a-scope-anyscale_iam_role_binding. Requires an organization converted to role bindings ../guides/rbac.md#organization-access-mode.
 ---
 
 # anyscale_iam_role_binding (Resource)
 
 ~> **Beta.** Role bindings are enabled per organization by Anyscale while customers migrate; contact [support@anyscale.com](mailto:support@anyscale.com) to enable them. Beta resources may change incompatibly; every breaking change is listed in the changelog. See the [RBAC guide](../guides/rbac.md#role-bindings-beta).
 
-Manages every direct role binding on one organization, cloud or project. Authoritative: an apply revokes any direct binding on the scope that `roles` does not name, including ones Anyscale grants itself, such as a project or cloud creator's owner binding. Never combine it with `anyscale_iam_role_grant` or `anyscale role-binding policy apply` on the same scope. Destroy, import and the first-apply behavior are in the [RBAC guide](../guides/rbac.md#managing-every-grant-on-a-scope-anyscale_iam_role_binding). Requires an organization [converted to role bindings](../guides/rbac.md#organization-access-mode).
+Manages every direct role binding on one organization, cloud or project. Authoritative: an apply revokes any direct binding on the scope that `roles` does not name, including ones Anyscale grants itself, such as a project or cloud creator's Admin binding. Never combine it with `anyscale_iam_role_grant` or `anyscale role-binding policy apply` on the same scope. Destroy, import and the first-apply behavior are in the [RBAC guide](../guides/rbac.md#managing-every-grant-on-a-scope-anyscale_iam_role_binding). Requires an organization [converted to role bindings](../guides/rbac.md#organization-access-mode).
 
 ## Example Usage
 
 ```terraform
 # Beta; Anyscale enables it per organization (contact
 # support@anyscale.com). AUTHORITATIVE: every direct role binding on
-# the scope that roles does not name is revoked, including the owner
+# the scope that roles does not name is revoked, including the Admin
 # binding Anyscale grants whoever created the project. Do not also
 # manage this scope with anyscale_iam_role_grant.
 variable "cloud_name" {
@@ -27,8 +27,11 @@ variable "cloud_name" {
 }
 
 # Exact, case-sensitive role names; they can differ per environment.
-data "anyscale_iam_role" "project_owner" {
-  name = "Project owner"
+# Newer projects grant their creator the Admin role, named
+# "Organization owner" here. Name the role the creator actually
+# holds; see the RBAC guide before assuming which one that is.
+data "anyscale_iam_role" "admin" {
+  name = "Organization owner"
 }
 
 data "anyscale_iam_role" "project_reader" {
@@ -39,8 +42,8 @@ data "anyscale_cloud" "this" {
   name = var.cloud_name
 }
 
-# The identity Terraform runs as, which becomes the project's owner
-# when it creates the project below.
+# The identity Terraform runs as, which holds the Admin role directly
+# on the project it creates below.
 data "anyscale_user" "me" {}
 
 resource "anyscale_project" "team" {
@@ -57,11 +60,13 @@ resource "anyscale_iam_role_binding" "project" {
   project_id = anyscale_project.team.id
 
   roles = {
-    # Keep the owner binding this identity received by creating the
-    # project. The API refuses to revoke it. Do not copy this entry
-    # onto a project created by someone else: an identity cannot
-    # grant itself a role, so the apply fails with a 403.
-    (data.anyscale_iam_role.project_owner.id) = {
+    # Keep the binding this identity received by creating the
+    # project, under the role it actually holds (Admin today;
+    # Project owner on projects created earlier). The API refuses
+    # to revoke it. Do not copy this entry onto a project created
+    # by someone else: an identity cannot grant itself a role, so
+    # the apply fails with a 403.
+    (data.anyscale_iam_role.admin.id) = {
       user_ids = [data.anyscale_user.me.id]
     }
     (data.anyscale_iam_role.project_reader.id) = {

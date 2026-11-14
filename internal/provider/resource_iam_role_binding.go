@@ -132,7 +132,7 @@ func (r *IAMRoleBindingResource) Schema(ctx context.Context, req resource.Schema
 	resp.Schema = schema.Schema{
 		MarkdownDescription: roleBindingsBetaBanner +
 			"Manages every direct role binding on one organization, cloud or project. Authoritative: an apply revokes any direct binding on the scope that `roles` does not name, " +
-			"including ones Anyscale grants itself, such as a project or cloud creator's owner binding. " +
+			"including ones Anyscale grants itself, such as a project or cloud creator's Admin binding. " +
 			"Never combine it with `anyscale_iam_role_grant` or `anyscale role-binding policy apply` on the same scope. " +
 			"Destroy, import and the first-apply behavior are in the [RBAC guide](../guides/rbac.md#managing-every-grant-on-a-scope-anyscale_iam_role_binding). " +
 			"Requires an organization [converted to role bindings](../guides/rbac.md#organization-access-mode).",
