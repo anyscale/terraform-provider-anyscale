@@ -347,8 +347,19 @@ func addPolicyWriteError(ctx context.Context, client *Client, diags *diag.Diagno
 	case isStatusWithSubstring(err, http.StatusForbidden, policyManageIAMSubstring):
 		diags.AddError("Cannot Manage IAM on Scope",
 			withOutcome(detail+" The scope does not exist, or this identity does not manage IAM on it.", outcome))
-	case isStatusWithSubstring(err, http.StatusConflict, roleBindingLockoutSubstring):
-		addRoleBindingLockoutError(diags, err, outcome)
+	case isRoleBindingAdminGroupRemovalRefusal(err):
+		// A destroy's policy omits the admin group's binding because
+		// nothing is kept; an ordinary apply omits it because roles left
+		// it out. The remedies differ: edit roles, or stop managing. The
+		// op match is pinned by the destroy-path mock test - renaming the
+		// op label flips the remedy back and fails that test.
+		if strings.Contains(op, "for destroy") {
+			addRoleBindingAdminGroupDestroyRemovalError(diags, err, outcome)
+		} else {
+			addRoleBindingAdminGroupPolicyRemovalError(diags, err, outcome)
+		}
+	case isRoleBindingAdminGroupExtraRoleRefusal(err):
+		addRoleBindingAdminGroupExtraRoleError(diags, err, "policy", outcome)
 	case isOrgNotConvertedConflict(err):
 		addOrgNotConvertedError(diags, err, outcome)
 	case isRoleBindingsDisabled(err):

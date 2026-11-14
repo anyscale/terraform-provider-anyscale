@@ -656,9 +656,41 @@ func TestAccIAMRoleBindingResource_DestroyFrozenRetryBound(t *testing.T) {
 	})
 }
 
-// a destroy the API refuses as an organization lockout fails at
-// plan time, before anything is applied.
-func TestAccIAMRoleBindingResource_DestroyPlanLockout(t *testing.T) {
+// an ordinary apply that would revoke an organization admin group binding
+// because roles omits it refuses with the edit-roles remedy: the binding
+// keeps working if named in roles, so say that rather than a state rm.
+func TestAccIAMRoleBindingResource_ApplyAdminGroupRemovalKeptInRoles(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newPolicyMock(t)
+	two := pmConfig(m, "project_id", pmProject,
+		pmRole(pmOwner, []string{policyMockCaller}, nil),
+		pmRole(pmWriter, nil, []string{pmGroupB}))
+	one := pmConfig(m, "project_id", pmProject,
+		pmRole(pmOwner, []string{policyMockCaller}, nil))
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: two},
+			{
+				PreConfig: func() { m.setAdminGroup(true) },
+				Config:    one,
+				ExpectError: regexp.MustCompile(`(?s)Organization Admin Group Is Managed by Anyscale.*cannot\s+be\s+removed.*` +
+					`name\s+the\s+binding\s+in\s+roles\s+to\s+keep\s+it`),
+			},
+			{
+				// Drop the refusal so the step-1 policy applies cleanly for
+				// teardown; step 2's refused apply left it unchanged.
+				PreConfig: func() { m.setAdminGroup(false) },
+				Config:    one,
+			},
+		},
+	})
+}
+
+// a destroy the API refuses because it would revoke an organization admin
+// group binding fails at plan time, before anything is applied, with the
+// destroy remedy: nothing is revoked, and the way out is terraform state rm.
+func TestAccIAMRoleBindingResource_DestroyPlanAdminGroupRefused(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	cfg := pmConfig(m, "organization_id", pmOrg, pmRole(pmOwner, nil, []string{pmGroupB}))
@@ -667,17 +699,18 @@ func TestAccIAMRoleBindingResource_DestroyPlanLockout(t *testing.T) {
 		Steps: []resource.TestStep{
 			{Config: cfg},
 			{
-				PreConfig: func() { m.setLockout(true); m.takeRequests() },
+				PreConfig: func() { m.setAdminGroup(true); m.takeRequests() },
 				Config:    m.providerBlock(),
 				// The error must come from the plan's dry run: no real apply.
-				ExpectError: regexp.MustCompile(`(?s)Change Would Leave Organization Without an Owner.*without\s+an\s+Organization\s+owner`),
+				ExpectError: regexp.MustCompile(`(?s)Organization Admin Group Is Managed by Anyscale.*cannot\s+be\s+removed.*` +
+					`keeps\s+the\s+organization\s+admin\s+group's\s+role\s+bindings.*Nothing\s+was\s+revoked.*terraform\s+state\s+rm`),
 			},
 			{
 				PreConfig: func() {
 					if real, _ := pmApplyBodies(t, m.takeRequests()); len(real) != 0 {
 						t.Errorf("the refused destroy applied %v", real)
 					}
-					m.setLockout(false)
+					m.setAdminGroup(false)
 				},
 				Config: m.providerBlock(),
 				Check:  pmExpectFacts(m, "organization", pmOrg),

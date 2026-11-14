@@ -1,0 +1,6 @@
+```release-note:fixed
+resource/anyscale_iam_role_grant: Writes refused for naming the organization admin group, or for trying to remove one of its bindings, now report "Organization Admin Group Is Managed by Anyscale" with the path-appropriate remedy, in place of the removed owner-lockout diagnostic.
+```
+```release-note:fixed
+resource/anyscale_iam_role_binding: A policy apply or destroy that would remove an organization admin group binding now reports "Organization Admin Group Is Managed by Anyscale" with the path-appropriate remedy, in place of the removed owner-lockout diagnostic.
+```

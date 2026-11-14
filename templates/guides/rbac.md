@@ -213,8 +213,8 @@ front of an Azure control plane is not detected.
 | "Organization Not Converted to Role Bindings" | Unconverted | Convert the organization in Users & IAM, or manage organization roles with `anyscale_organization_user_role`. |
 | "Organization Uses Role Bindings" | Converted | Stop managing that access with this resource; use `anyscale_iam_role_grant` on a user group or a user. |
 
-In a converted organization, destroying `anyscale_organization_user_role` warns "Organization Uses Role
-Bindings" and removes it from state; nothing is reverted, and the existing role is left in place.
+In a converted organization, destroying `anyscale_organization_user_role` warns "Organization Role Left In
+Place" and removes it from state; nothing is reverted, and the existing role is left in place.
 
 Terraform **cannot detect** a conversion. After it, a refresh of `anyscale_organization_user_role` still
 returns the record from before conversion, so `plan` shows no changes while the access that matters now
@@ -390,8 +390,10 @@ access to a scope; use `anyscale_iam_role_grant` when several owners share it.
 Directory-synced (SCIM) groups can be bound; unlike membership, nothing here fights the identity
 provider.
 
-~> **Do not revoke your own way in.** Anyscale refuses a change that leaves the organization without an
-Organization owner, and refuses revoking the provider's own direct binding. It does **not** stop a
+~> **Do not revoke your own way in.** Anyscale refuses adding a role to the organization admin
+group and refuses revoking any of its bindings - so an authoritative `anyscale_iam_role_binding`
+apply or destroy that would revoke one fails. It also refuses revoking the provider's own direct
+binding. It does **not** stop a
 configuration from removing a *group* binding that gives the Terraform identity its permission to manage
 access. If the identity depends on a group binding you destroy, later applies fail until someone restores
 it in the console. Keep the grant that the Terraform identity relies on out of any configuration you might
@@ -408,10 +410,10 @@ Whether the roles you bind are enforced depends on Anyscale's rollout of them.
 | Message | Meaning |
 |---|---|
 | "Role bindings are not enabled" | The feature flag is off for your organization; contact support@anyscale.com. During a refresh, state is kept unchanged. |
-| "Role Binding Already Exists" | The principal already holds that role on that scope. Import the binding instead. |
+| "Role Grant Already Exists" | The principal already holds that role on that scope; the message names the existing binding's import ID. |
 | "Organization Not Converted to Role Bindings" | The organization is not converted. See [Organization access mode](#organization-access-mode). |
 | "Role Is Archived" | The role cannot be newly assigned; pick another role. |
-| "Change Would Leave Organization Without an Owner" | Keep at least one Organization owner binding. |
+| "Organization Admin Group Is Managed by Anyscale" | The platform owns the organization admin group's bindings; the error says which change to make. |
 | "Cannot Grant a Role to the Provider's Own Identity" | Bind a user group the identity belongs to, or apply with a different identity. |
 | "Cannot Revoke the Provider's Own Role Binding" | Revoke it in the console or with a different identity, or run `terraform state rm`. |
 | Binding disappears from state | It was revoked outside Terraform, or its group was deleted; the next plan recreates it. |
