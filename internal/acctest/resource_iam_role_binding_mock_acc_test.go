@@ -656,9 +656,9 @@ func TestAccIAMRoleBindingResource_DestroyFrozenRetryBound(t *testing.T) {
 	})
 }
 
-// a destroy the API refuses as an organization lockout fails at
-// plan time, before anything is applied.
-func TestAccIAMRoleBindingResource_DestroyPlanLockout(t *testing.T) {
+// a destroy the API refuses because it would revoke an organization admin
+// group binding fails at plan time, before anything is applied.
+func TestAccIAMRoleBindingResource_DestroyPlanAdminGroupRefused(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
 	cfg := pmConfig(m, "organization_id", pmOrg, pmRole(pmOwner, nil, []string{pmGroupB}))
@@ -667,17 +667,18 @@ func TestAccIAMRoleBindingResource_DestroyPlanLockout(t *testing.T) {
 		Steps: []resource.TestStep{
 			{Config: cfg},
 			{
-				PreConfig: func() { m.setLockout(true); m.takeRequests() },
+				PreConfig: func() { m.setAdminGroup(true); m.takeRequests() },
 				Config:    m.providerBlock(),
 				// The error must come from the plan's dry run: no real apply.
-				ExpectError: regexp.MustCompile(`(?s)Change Would Leave Organization Without an Owner.*without\s+an\s+Organization\s+owner`),
+				ExpectError: regexp.MustCompile(`(?s)Organization Admin Group Is Managed by Anyscale.*` +
+					`cannot\s+be\s+removed.*remove\s+the\s+group\s+\(or\s+this\s+binding\)`),
 			},
 			{
 				PreConfig: func() {
 					if real, _ := pmApplyBodies(t, m.takeRequests()); len(real) != 0 {
 						t.Errorf("the refused destroy applied %v", real)
 					}
-					m.setLockout(false)
+					m.setAdminGroup(false)
 				},
 				Config: m.providerBlock(),
 				Check:  pmExpectFacts(m, "organization", pmOrg),

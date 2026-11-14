@@ -26,9 +26,14 @@ const (
 	testNotConvertedDetail = "Switch this organization to role bindings to change role bindings."
 	testDuplicateDetail    = "The principal already holds this role on this resource."
 	testArchivedDetail     = "This role is archived and cannot be newly assigned."
-	testLockoutDetail      = "This change would leave the organization without an Organization owner."
-	testConcurrentDetail   = "A role binding was revoked concurrently. Retry the request."
-	testAutoAddUserDetail  = "Users cannot be removed from clouds which have auto add users enabled."
+	// The two 409 details about the organization admin group, verbatim:
+	// its bindings cannot be removed, and it only holds platform-assigned
+	// roles (product 5c6ce328ab8: converted_organizations.py:501 and
+	// role_bindings_service.py:~1782).
+	testAdminGroupRemovalDetail = "The organization admin group's role bindings cannot be removed."
+	testAdminGroupRolesDetail   = "The organization admin group holds only the roles the platform binds it to."
+	testConcurrentDetail        = "A role binding was revoked concurrently. Retry the request."
+	testAutoAddUserDetail       = "Users cannot be removed from clouds which have auto add users enabled."
 )
 
 func TestOrgAccessModeClassifiers(t *testing.T) {
@@ -41,9 +46,7 @@ func TestOrgAccessModeClassifiers(t *testing.T) {
 		"archived_role": func(err error) bool {
 			return isStatusWithSubstring(err, http.StatusConflict, roleBindingArchivedRoleSubstring)
 		},
-		"lockout": func(err error) bool {
-			return isStatusWithSubstring(err, http.StatusConflict, roleBindingLockoutSubstring)
-		},
+		"admin_group": isRoleBindingAdminGroupRefusal,
 	}
 	cases := []struct {
 		name   string
@@ -55,7 +58,8 @@ func TestOrgAccessModeClassifiers(t *testing.T) {
 		{"not converted", http.StatusConflict, testNotConvertedDetail, "not_converted"},
 		{"duplicate", http.StatusConflict, testDuplicateDetail, "duplicate"},
 		{"archived role", http.StatusConflict, testArchivedDetail, "archived_role"},
-		{"lockout", http.StatusConflict, testLockoutDetail, "lockout"},
+		{"admin group removal", http.StatusConflict, testAdminGroupRemovalDetail, "admin_group"},
+		{"admin group platform roles", http.StatusConflict, testAdminGroupRolesDetail, "admin_group"},
 		{"concurrent revoke", http.StatusConflict, testConcurrentDetail, ""},
 		{"auto add user", http.StatusConflict, testAutoAddUserDetail, ""},
 		// The status must match as well as the text.

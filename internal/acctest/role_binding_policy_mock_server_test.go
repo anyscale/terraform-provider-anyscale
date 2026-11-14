@@ -18,8 +18,8 @@ import (
 //
 // Statuses and detail texts are the ones measured on a converted premerge org
 // (2026-11-04), verbatim, including the roles[i].principals[j] prefix and a dry
-// run's added entries carrying no id. Two are traced, not observed, because no
-// test org can produce them: the frozen-binding 409 and the lockout 409.
+// run's added entries carrying no id. Three are traced, not observed, because no
+// test org can produce them: the frozen-binding 409 and the admin-group 409s.
 //
 // Semantics, as the backend's apply_policy implements them: bindings compare by
 // fact (principal, role, scope), order-blind; a held fact keeps its id; a new
@@ -41,8 +41,9 @@ type policyMockServer struct {
 	noIAM       map[string]bool
 	flagOff     bool
 	unconverted bool
-	// lockout makes any apply that revokes a binding answer the lockout 409.
-	lockout bool
+	// adminGroup makes any apply that revokes a binding answer the admin
+	// group 409, as revoking one of that group's bindings would.
+	adminGroup bool
 	// generateStatus, when non-zero, is the status every generate answers
 	// with: a read-back failing after a successful apply.
 	generateStatus int
@@ -110,7 +111,7 @@ func (m *policyMockServer) setNoIAM(scopeType, id string, on bool) {
 }
 func (m *policyMockServer) setFlagOff(on bool)     { m.with(func() { m.flagOff = on }) }
 func (m *policyMockServer) setUnconverted(on bool) { m.with(func() { m.unconverted = on }) }
-func (m *policyMockServer) setLockout(on bool)     { m.with(func() { m.lockout = on }) }
+func (m *policyMockServer) setAdminGroup(on bool)  { m.with(func() { m.adminGroup = on }) }
 func (m *policyMockServer) setGetDenials(n int)    { m.with(func() { m.getDenials = n }) }
 func (m *policyMockServer) setGenerateStatus(status int) {
 	m.with(func() { m.generateStatus = status })
@@ -426,8 +427,8 @@ func (m *policyMockServer) serveApply(w http.ResponseWriter, scopeType, scopeID 
 			return
 		}
 	}
-	if m.lockout && len(revoked) > 0 {
-		m.fail(w, http.StatusConflict, roleBindingMockLockoutDetail)
+	if m.adminGroup && len(revoked) > 0 {
+		m.fail(w, http.StatusConflict, roleBindingMockAdminGroupRemovalDetail)
 		return
 	}
 

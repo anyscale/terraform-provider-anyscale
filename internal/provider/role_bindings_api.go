@@ -111,9 +111,9 @@ func addRoleBindingsDisabledError(diags *diag.Diagnostics, outcome string) {
 
 // Outcomes for addRoleBindingsDisabledError.
 const (
-	roleBindingsDisabledReadOutcome   = "The binding was kept in Terraform state unchanged."
-	roleBindingLockoutDeleteOutcome   = "Grant the role to another principal before revoking this one. The binding was not revoked and stays in Terraform state."
-	roleBindingsDisabledDeleteOutcome = "The binding was not revoked and stays in Terraform state; to stop managing it, run `terraform state rm` on its address."
+	roleBindingsDisabledReadOutcome    = "The binding was kept in Terraform state unchanged."
+	roleBindingAdminGroupDeleteOutcome = "The binding was not revoked and stays in Terraform state."
+	roleBindingsDisabledDeleteOutcome  = "The binding was not revoked and stays in Terraform state; to stop managing it, run `terraform state rm` on its address."
 )
 
 // roleBindingDuplicateSubstring is the detail substring of create's 409 when
@@ -130,13 +130,15 @@ const roleBindingDuplicateSubstring = "already holds this role"
 // newly assigned." (role_bindings_service.py:1166-1170 at product 3b1f86a).
 const roleBindingArchivedRoleSubstring = "is archived and cannot be newly assigned"
 
-// roleBindingLockoutSubstring is the detail substring of the 409 a binding
-// write answers when it would leave the organization with no Organization
-// owner of its own. The full detail is "This change would leave the
-// organization without an Organization owner."
-// (backend/server/api/base/resources/converted_organizations.py:314 at
-// product 3b1f86a).
-const roleBindingLockoutSubstring = "without an Organization owner"
+// roleBindingAdminGroupSubstring is the prefix both 409 details about the
+// organization admin group start with, so both classify with one prefix:
+// "The organization admin group's role bindings cannot be removed."
+// (backend/server/api/base/resources/converted_organizations.py:501 at
+// product 5c6ce328ab8) and "The organization admin group holds only the
+// roles the platform binds it to." (backend/server/api/product/services/
+// role_bindings_service.py:~1782 at product 5c6ce328ab8). Anyscale manages
+// that group's bindings; a grant or binding naming it is refused.
+const roleBindingAdminGroupSubstring = "The organization admin group"
 
 // roleBindingSelfGrantSubstring is the detail substring of create's 403 when
 // the caller names itself as the user principal. The full detail is "You
@@ -151,15 +153,22 @@ const roleBindingSelfGrantSubstring = "cannot assign a role to yourself directly
 // product 3b1f86a).
 const roleBindingSelfRevokeSubstring = "cannot revoke your own role binding"
 
-// addRoleBindingLockoutError reports a write the API refused because it would
-// leave the organization without an Organization owner. outcome, when set,
-// says what that means for the operation.
-func addRoleBindingLockoutError(diags *diag.Diagnostics, err error, outcome string) {
-	detail := extractAPIErrorDetail(err) + " To proceed, keep at least one Organization owner binding."
+// addRoleBindingAdminGroupError reports a write the API refused because it
+// names the organization admin group, whose role bindings the platform owns.
+// outcome, when set, says what that means for the operation.
+func addRoleBindingAdminGroupError(diags *diag.Diagnostics, err error, outcome string) {
+	detail := extractAPIErrorDetail(err) +
+		" Anyscale manages the organization admin group's role bindings, not Terraform: remove the group (or this binding) from the grant and role-binding configuration."
 	if outcome != "" {
 		detail += " " + outcome
 	}
-	diags.AddError("Change Would Leave Organization Without an Owner", detail)
+	diags.AddError("Organization Admin Group Is Managed by Anyscale", detail)
+}
+
+// isRoleBindingAdminGroupRefusal reports whether err is one of the two 409s
+// the API answers for a write that names the organization admin group.
+func isRoleBindingAdminGroupRefusal(err error) bool {
+	return isStatusWithSubstring(err, http.StatusConflict, roleBindingAdminGroupSubstring)
 }
 
 func roleBindingPath(roleBindingID string) string {
