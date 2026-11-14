@@ -1,0 +1,3 @@
+```release-note:fixed
+data-source/anyscale_project: read succeeds again in an organization converted to role bindings, with `collaborators` null there instead of the whole data source failing on the legacy collaborator read's 409
+```

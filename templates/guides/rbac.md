@@ -272,7 +272,8 @@ None is available on an Azure control plane (see [Organization access mode](#org
 | `anyscale_organization_user_role` | Writes fail with "Organization Uses Role Bindings" | `anyscale_iam_role_grant` |
 | `anyscale_cloud.auto_add_user` | Setting it fails | An `anyscale_iam_role_grant` on the cloud for the All users group |
 | `auto_add_user` on the `anyscale_cloud` and `anyscale_clouds` data sources | No longer applies | Same |
-| `collaborators` on the `anyscale_project` data source; `permission_level`, `base_role` and `additional_roles` on the `anyscale_iam_organization_user(s)` data sources; `organization_permission_level` on the `anyscale_user` data source | A snapshot from before conversion | No replacement yet |
+| `collaborators` on the `anyscale_project` data source | Null | No replacement yet |
+| `permission_level`, `base_role` and `additional_roles` on the `anyscale_iam_organization_user(s)` data sources; `organization_permission_level` on the `anyscale_user` data source | A snapshot from before conversion | No replacement yet |
 
 Terraform warns when a configuration uses one: setting a deprecated resource or attribute, or
 referencing a deprecated read-only attribute, for example in an output. For a referenced read-only
