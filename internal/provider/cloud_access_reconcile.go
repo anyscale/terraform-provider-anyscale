@@ -280,6 +280,14 @@ type cloudAccessReconcileResult struct {
 	// too: the reconcile stops there, with nothing written, and leaves the
 	// diagnostic to the caller (an apply errors, a destroy warns).
 	OrgConverted error
+
+	// OrgConvertedRead is the same refusal answered to the member-list READ,
+	// which a converted organization also refuses. It is kept distinct from
+	// OrgConverted because the guidance differs: a refused write points at
+	// the replacement surface, while a refused read means this resource can
+	// no longer be reconciled at all - an apply errors on it, and a destroy
+	// warns and removes the resource from state.
+	OrgConvertedRead error
 }
 
 // unmanagedGrantsList converts the result into the Computed attribute's value.
@@ -404,6 +412,10 @@ func reconcileCloudAccess(
 	if err != nil {
 		if cloudRolesFeatureDisabled(err) {
 			diags.AddError(cloudRolesDisabledSummary, cloudRolesDisabledDetail+"\n\nNo changes were made.")
+			return result, diags
+		}
+		if isOrgConvertedConflict(err) {
+			result.OrgConvertedRead = err
 			return result, diags
 		}
 		diags.AddError(
@@ -579,7 +591,11 @@ func reconcileCloudAccess(
 	} else {
 		for _, m := range toRevoke {
 			if err := revokeCloudAccessMember(ctx, client, cloudID, m.IdentityID); err != nil {
-				if isOrgConvertedConflict(err) {
+				// A converting refusal aborts like a converted one: while the
+				// conversion runs every legacy write answers with it, so recording
+				// one member as unmanaged would only be the first of many. The
+				// caller reports it with the retry guidance.
+				if isOrgConvertedConflict(err) || isOrgConvertingConflict(err) {
 					result.OrgConverted = err
 					return result, diags
 				}
@@ -679,7 +695,7 @@ func grantCloudAccessMember(ctx context.Context, client *Client, cloudID string,
 		ctx, client, "POST", fmt.Sprintf("/api/v2/clouds/%s/collaborators/users", cloudID), reqBody,
 		http.StatusOK, http.StatusNoContent,
 	); err != nil {
-		if isOrgConvertedConflict(err) {
+		if isOrgConvertedConflict(err) || isOrgConvertingConflict(err) {
 			return diags, err
 		}
 		detail := extractAPIErrorDetail(err)
@@ -701,7 +717,7 @@ func grantCloudAccessMember(ctx context.Context, client *Client, cloudID string,
 	if roleErr == nil {
 		return diags, nil
 	}
-	if isOrgConvertedConflict(roleErr) && !weCreatedMembership {
+	if (isOrgConvertedConflict(roleErr) || isOrgConvertingConflict(roleErr)) && !weCreatedMembership {
 		// Nothing was written; a membership this call created is rolled back
 		// below like any other failed role write.
 		return diags, roleErr
