@@ -191,7 +191,7 @@ func (r *IAMUserGroupMembersResource) Delete(ctx context.Context, req resource.D
 			// The member routes answer a scoped-IAM refusal with the same 404
 			// detail as a deleted group; only the read-back tells them apart,
 			// and only a really-deleted group may drop from state here.
-			gone, readBackErr := classifyUserGroupWriteNotFound(ctx, r.client, groupID, err)
+			gone, readBackErr := classifyUserGroupWriteNotFound(ctx, r.client, groupID)
 			switch {
 			case readBackErr != nil:
 				AddAPIError(&resp.Diagnostics, "read user group back after a refused write", readBackErr)
@@ -331,7 +331,7 @@ func (r *IAMUserGroupMembersResource) applyMembers(ctx context.Context, plan *IA
 			// A group-not-found 404 on a member write is a scoped-IAM
 			// refusal when the group still reads back; report it instead of
 			// failing with the raw detail (or worse, trusting it).
-			gone, readBackErr := classifyUserGroupWriteNotFound(ctx, r.client, groupID, err)
+			gone, readBackErr := classifyUserGroupWriteNotFound(ctx, r.client, groupID)
 			switch {
 			case readBackErr != nil:
 				AddAPIError(diags, "read user group back after a refused write", readBackErr)
@@ -357,7 +357,7 @@ func (r *IAMUserGroupMembersResource) applyMembers(ctx context.Context, plan *IA
 		if isUserGroupNotFound(err) {
 			// Same read-back as the add path: an unmanageable-but-live group
 			// must read as refused, not as a missing group.
-			gone, readBackErr := classifyUserGroupWriteNotFound(ctx, r.client, groupID, err)
+			gone, readBackErr := classifyUserGroupWriteNotFound(ctx, r.client, groupID)
 			switch {
 			case readBackErr != nil:
 				AddAPIError(diags, "read user group back after a refused write", readBackErr)

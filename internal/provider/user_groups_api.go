@@ -131,11 +131,12 @@ func getUserGroup(ctx context.Context, client *Client, groupID string) (*userGro
 }
 
 // classifyUserGroupWriteNotFound decides what a 404 on a user-group WRITE
-// means, by reading the group back. The group routes answer "User group with
-// id '...' not found." both when the group is deleted and when it merely
-// reaches resources the caller does not manage IAM on - a scoped IAM admin
-// sees every group but is refused its writes with the same detail (backend
-// user_groups_service.py, _get_user_group_or_404). Treating that refusal as
+// means, by reading the group back. The group write routes answer "User group
+// with id '...' not found." both when the group is deleted and when it
+// merely reaches resources the caller does not manage IAM on: the write
+// path's _get_user_group_record_or_404(group_id, access) (backend
+// user_groups_service.py:595) refuses those callers with the same detail,
+// while the GET path still shows every group. Treating that refusal as
 // "gone" would drop state while the group lives, so the write handler must
 // either confirm the read agrees (gone) or report it.
 //
@@ -145,7 +146,7 @@ func getUserGroup(ctx context.Context, client *Client, groupID string) (*userGro
 // caller reports it with addUserGroupUnmanageableError. Any other read-back
 // failure returns gone=false with readBackErr set; the caller reports that
 // and keeps state.
-func classifyUserGroupWriteNotFound(ctx context.Context, client *Client, groupID string, writeErr error) (gone bool, readBackErr error) {
+func classifyUserGroupWriteNotFound(ctx context.Context, client *Client, groupID string) (gone bool, readBackErr error) {
 	_, err := getUserGroup(ctx, client, groupID)
 	switch {
 	case err == nil:
