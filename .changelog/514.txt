@@ -3,5 +3,5 @@ resource/anyscale_cloud_access: a converted organization's refusals now carry th
 ```
 
 ```release-note:fixed
-resource/anyscale_cloud_access: legacy writes refused while a conversion to role bindings is running now say so - "Organization Is Converting to Role Bindings", with retry guidance - instead of a raw conflict or a converted-org diagnostic that would point at migrating before the conversion finishes
+resource/anyscale_cloud_access: legacy writes refused while a conversion to role bindings is running now say so - "Organization Is Converting to Role Bindings", with retry guidance - instead of a raw conflict or a converted-org diagnostic that would point at migrating before the conversion finishes; destroying during that window fails with the same retry guidance and keeps the resource and its grants under management
 ```

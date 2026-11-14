@@ -584,12 +584,17 @@ func TestAccCloudAccessResource_ConvertingOrgCreateRefusedWithRetryDiagnostic(t 
 	}
 }
 
-// Destroy while the conversion runs: the reads still answer, every revoke is
-// refused with the conversion-in-progress detail, so destroy warns with the
-// retry guidance and drops the resource from state - same exit as the
-// converted-org destroy, different reason. Refresh-disabled for the same
+// Destroy while the conversion runs: the reads still answer and every revoke
+// is refused with the conversion-in-progress detail. The destroy must FAIL -
+// the retry guidance the diagnostic gives is honest only if the resource is
+// still there to retry with - and the resource and the grants both stay put.
+// After the conversion completes, a retry lands in the converted branch and
+// warns and drops instead - that handoff is covered by the two independent
+// destroy tests plus the classifier unit tests, not end to end.
+//
+// Driven through the real terraform CLI with refresh disabled, for the same
 // reason as the converted-org destroy above.
-func TestAccCloudAccessResource_ConvertingOrgDestroyWarnsAndDropsState(t *testing.T) {
+func TestAccCloudAccessResource_ConvertingOrgDestroyKeepsState(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newCloudAccessConvertedMock(t)
 	run := cliDevWorkspace(t, fmt.Sprintf(`
@@ -606,35 +611,45 @@ provider "anyscale" {
 
 	m.setConverting(true)
 	lines, out, err := run("destroy", "-auto-approve", "-json", "-refresh=false")
-	if err != nil || len(errorDiags(lines)) > 0 {
-		t.Fatalf("destroy while converting must succeed with a warning, got: %v %v\n%s", err, errorDiags(lines), out)
+	if err == nil {
+		t.Fatalf("destroy while converting must FAIL - retry guidance is only honest with the resource still in state - got success:\n%s", out)
 	}
 
-	found := false
+	var sawDiagnostic, sawOutcome bool
 	var all []string
 	for _, l := range lines {
 		if l.Type != "diagnostic" {
 			continue
 		}
 		all = append(all, l.Diagnostic.Severity+": "+l.Diagnostic.Summary)
-		if l.Diagnostic.Severity == "warning" && cloudAccessConvertingSummary.MatchString(l.Diagnostic.Summary) {
-			found = true
+		if l.Diagnostic.Severity == "error" && cloudAccessConvertingSummary.MatchString(l.Diagnostic.Summary) {
+			sawDiagnostic = true
+			for _, want := range append(cloudAccessConvertingDetailWants,
+				regexp.MustCompile(`stays\s+in\s+state`)) {
+				if !want.MatchString(l.Diagnostic.Detail) {
+					t.Errorf("destroy-while-converting detail %q does not contain %s", l.Diagnostic.Detail, want)
+				}
+			}
+		}
+		if strings.Contains(l.Diagnostic.Summary, "Some Members Still Have Access") {
+			sawOutcome = true
 		}
 	}
-	if !found {
-		t.Errorf("want a warning %q on destroy-while-converting; got diagnostics: %v", cloudAccessConvertingSummary, all)
+	if !sawDiagnostic {
+		t.Errorf("want an error %q on destroy-while-converting; got diagnostics: %v", cloudAccessConvertingSummary, all)
+	}
+	if sawOutcome {
+		t.Error("destroy must not claim unmanaged members: nothing was revoked and the resource stayed in state")
 	}
 
-	_, stateOut, err := run("state", "list")
-	if err != nil {
+	if _, stateOut, err := run("state", "list"); err != nil {
 		t.Fatalf("terraform state list: %v\n%s", err, stateOut)
+	} else if !strings.Contains(string(stateOut), "anyscale_cloud_access.test") {
+		t.Errorf("destroy while converting must keep the resource in state:\n%s", stateOut)
 	}
-	if strings.Contains(string(stateOut), "anyscale_cloud_access.test") {
-		t.Errorf("resource still in state after destroy while converting:\n%s", stateOut)
-	}
-	// The refused revokes left the members in place.
+	// Nothing was revoked.
 	if got := len(m.memberEmails()); got != 2 {
-		t.Errorf("converting-org mock should have refused every revoke; %d members remain, want 2", got)
+		t.Errorf("destroy while converting must revoke nobody; %d members remain, want 2", got)
 	}
 }
 

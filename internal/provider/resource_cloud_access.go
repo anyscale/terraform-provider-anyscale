@@ -742,13 +742,14 @@ func (r *CloudAccessResource) Delete(ctx context.Context, req resource.DeleteReq
 	}
 	if result.OrgConverted != nil {
 		if isOrgConvertingConflict(result.OrgConverted) {
-			// The conversion refuses every legacy write while it runs, so these
-			// revokes could not happen yet either. Warn with the retry
-			// guidance and leave state, same as the converted branch below.
-			resp.Diagnostics.AddWarning(orgConvertingSummary, orgConvertingDetail(result.OrgConverted)+fmt.Sprintf(
-				"\n\nOn cloud %s, legacy grants could not yet be revoked and were left in place. The resource was "+
-					"removed from Terraform state; re-granting or revoking after the conversion completes needs "+
-					"role bindings, not this resource.", cloudID))
+			// An error with state KEPT - the opposite of the converted branch
+			// below, on purpose. A conversion is temporary: the grants this
+			// destroy would revoke are about to be migrated, and dropping the
+			// resource now would silently surrender management of them. The
+			// retry after the conversion completes lands in the converted
+			// branch, which warns and drops as designed.
+			addOrgConvertingError(&resp.Diagnostics, result.OrgConverted,
+				fmt.Sprintf("On cloud %s, nothing was revoked and the resource stays in state. Retry the destroy after the conversion finishes.", cloudID))
 			return
 		}
 		// Erroring would leave the resource undestroyable short of
