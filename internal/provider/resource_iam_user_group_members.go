@@ -188,6 +188,18 @@ func (r *IAMUserGroupMembersResource) Delete(ctx context.Context, req resource.D
 	groupID := state.UserGroupID.ValueString()
 	if err := removeAllUserGroupMembers(ctx, r.client, groupID); err != nil {
 		if isUserGroupNotFound(err) {
+			// The member routes answer a scoped-IAM refusal with the same 404
+			// detail as a deleted group; only the read-back tells them apart,
+			// and only a really-deleted group may drop from state here.
+			gone, readBackErr := classifyUserGroupWriteNotFound(ctx, r.client, groupID, err)
+			switch {
+			case readBackErr != nil:
+				AddAPIError(&resp.Diagnostics, "read user group back after a refused write", readBackErr)
+			case !gone:
+				addUserGroupUnmanageableError(&resp.Diagnostics, groupID, err)
+			default:
+				// Really gone: destroy succeeds.
+			}
 			return
 		}
 		AddAPIError(&resp.Diagnostics, "remove user group members", err)
@@ -315,6 +327,22 @@ func (r *IAMUserGroupMembersResource) applyMembers(ctx context.Context, plan *IA
 		// Anyscale support users, but the member routes do not treat them as
 		// organization members and reject them with 404 "User IDs not found".
 		// Name the emails rather than the user IDs the backend reports.
+		if isUserGroupNotFound(err) {
+			// A group-not-found 404 on a member write is a scoped-IAM
+			// refusal when the group still reads back; report it instead of
+			// failing with the raw detail (or worse, trusting it).
+			gone, readBackErr := classifyUserGroupWriteNotFound(ctx, r.client, groupID, err)
+			switch {
+			case readBackErr != nil:
+				AddAPIError(diags, "read user group back after a refused write", readBackErr)
+			case !gone:
+				addUserGroupUnmanageableError(diags, groupID, err)
+			default:
+				AddConfigError(diags, "User Group Not Found",
+					fmt.Sprintf("No user group exists with ID %q in this organization.", groupID))
+			}
+			return
+		}
 		if errors.Is(err, ErrNotFound) && !isUserGroupNotFound(err) {
 			AddConfigError(diags, "Cannot Add User Group Members",
 				fmt.Sprintf("The Anyscale API rejected some members of user group %s as not belonging to the organization: %s. "+
@@ -326,6 +354,21 @@ func (r *IAMUserGroupMembersResource) applyMembers(ctx context.Context, plan *IA
 		return
 	}
 	if err := removeUserGroupMembers(ctx, r.client, groupID, toRemove); err != nil {
+		if isUserGroupNotFound(err) {
+			// Same read-back as the add path: an unmanageable-but-live group
+			// must read as refused, not as a missing group.
+			gone, readBackErr := classifyUserGroupWriteNotFound(ctx, r.client, groupID, err)
+			switch {
+			case readBackErr != nil:
+				AddAPIError(diags, "read user group back after a refused write", readBackErr)
+			case !gone:
+				addUserGroupUnmanageableError(diags, groupID, err)
+			default:
+				AddConfigError(diags, "User Group Not Found",
+					fmt.Sprintf("No user group exists with ID %q in this organization.", groupID))
+			}
+			return
+		}
 		AddAPIError(diags, "remove user group members", err)
 		return
 	}
