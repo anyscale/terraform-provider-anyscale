@@ -251,8 +251,8 @@ func (r *IAMRoleGrantResource) Create(ctx context.Context, req resource.CreateRe
 		case isStatusWithSubstring(err, http.StatusConflict, roleBindingArchivedRoleSubstring):
 			resp.Diagnostics.AddError("Role Is Archived",
 				fmt.Sprintf("%s An archived role cannot be newly assigned; pick another role.", extractAPIErrorDetail(err)))
-		case isRoleBindingAdminGroupRefusal(err):
-			addRoleBindingAdminGroupError(&resp.Diagnostics, err, "")
+		case isRoleBindingAdminGroupExtraRoleRefusal(err):
+			addRoleBindingAdminGroupExtraRoleError(&resp.Diagnostics, err, "grant", "")
 		case isStatusWithSubstring(err, http.StatusForbidden, roleBindingSelfGrantSubstring):
 			resp.Diagnostics.AddError("Cannot Grant a Role to the Provider's Own Identity",
 				fmt.Sprintf("%s Bind a user group that this identity belongs to, or apply with a different identity.", extractAPIErrorDetail(err)))
@@ -453,8 +453,8 @@ func (r *IAMRoleGrantResource) Delete(ctx context.Context, req resource.DeleteRe
 				extractAPIErrorDetail(err)))
 		return
 	}
-	if isRoleBindingAdminGroupRefusal(err) {
-		addRoleBindingAdminGroupError(&resp.Diagnostics, err, roleBindingAdminGroupDeleteOutcome)
+	if isRoleBindingAdminGroupRemovalRefusal(err) {
+		addRoleBindingAdminGroupGrantDeleteError(&resp.Diagnostics, err)
 		return
 	}
 	if !isHTTPStatus(err, http.StatusForbidden) {

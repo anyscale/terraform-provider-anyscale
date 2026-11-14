@@ -26,14 +26,19 @@ const (
 	testNotConvertedDetail = "Switch this organization to role bindings to change role bindings."
 	testDuplicateDetail    = "The principal already holds this role on this resource."
 	testArchivedDetail     = "This role is archived and cannot be newly assigned."
-	// The two 409 details about the organization admin group, verbatim:
-	// its bindings cannot be removed, and it only holds platform-assigned
-	// roles (product 5c6ce328ab8: converted_organizations.py:501 and
-	// role_bindings_service.py:~1782).
-	testAdminGroupRemovalDetail = "The organization admin group's role bindings cannot be removed."
-	testAdminGroupRolesDetail   = "The organization admin group holds only the roles the platform binds it to."
-	testConcurrentDetail        = "A role binding was revoked concurrently. Retry the request."
-	testAutoAddUserDetail       = "Users cannot be removed from clouds which have auto add users enabled."
+	// The two admin-group role-binding 409s, verbatim, plus two other
+	// admin-group refusals that are NOT role-binding writes and must not
+	// classify as them (product 5c6ce328ab8: converted_organizations.py:501
+	// and :253, role_bindings_service.py:~1784,
+	// iam_migration_service.py:3375). The two real texts also start with
+	// "The organization admin group", but classification matches the exact
+	// substrings, not the shared prefix, so the other two stay outside.
+	testAdminGroupRemovalDetail    = "The organization admin group's role bindings cannot be removed."
+	testAdminGroupRolesDetail      = "The organization admin group holds only the roles the platform binds it to."
+	testAdminGroupMemberKeepDetail = "The organization admin group must keep at least one member."
+	testAdminGroupRenameDetail     = "The organization admin group protects your organization against lockout and cannot be renamed."
+	testConcurrentDetail           = "A role binding was revoked concurrently. Retry the request."
+	testAutoAddUserDetail          = "Users cannot be removed from clouds which have auto add users enabled."
 )
 
 func TestOrgAccessModeClassifiers(t *testing.T) {
@@ -46,7 +51,10 @@ func TestOrgAccessModeClassifiers(t *testing.T) {
 		"archived_role": func(err error) bool {
 			return isStatusWithSubstring(err, http.StatusConflict, roleBindingArchivedRoleSubstring)
 		},
-		"admin_group": isRoleBindingAdminGroupRefusal,
+		"admin_group_removal": isRoleBindingAdminGroupRemovalRefusal,
+		"admin_group_extra_role": func(err error) bool {
+			return isStatusWithSubstring(err, http.StatusConflict, roleBindingAdminGroupExtraRoleSubstring)
+		},
 	}
 	cases := []struct {
 		name   string
@@ -58,8 +66,10 @@ func TestOrgAccessModeClassifiers(t *testing.T) {
 		{"not converted", http.StatusConflict, testNotConvertedDetail, "not_converted"},
 		{"duplicate", http.StatusConflict, testDuplicateDetail, "duplicate"},
 		{"archived role", http.StatusConflict, testArchivedDetail, "archived_role"},
-		{"admin group removal", http.StatusConflict, testAdminGroupRemovalDetail, "admin_group"},
-		{"admin group platform roles", http.StatusConflict, testAdminGroupRolesDetail, "admin_group"},
+		{"admin group removal", http.StatusConflict, testAdminGroupRemovalDetail, "admin_group_removal"},
+		{"admin group extra role", http.StatusConflict, testAdminGroupRolesDetail, "admin_group_extra_role"},
+		{"admin group member guard", http.StatusConflict, testAdminGroupMemberKeepDetail, ""},
+		{"admin group rename refusal", http.StatusConflict, testAdminGroupRenameDetail, ""},
 		{"concurrent revoke", http.StatusConflict, testConcurrentDetail, ""},
 		{"auto add user", http.StatusConflict, testAutoAddUserDetail, ""},
 		// The status must match as well as the text.

@@ -347,8 +347,10 @@ func addPolicyWriteError(ctx context.Context, client *Client, diags *diag.Diagno
 	case isStatusWithSubstring(err, http.StatusForbidden, policyManageIAMSubstring):
 		diags.AddError("Cannot Manage IAM on Scope",
 			withOutcome(detail+" The scope does not exist, or this identity does not manage IAM on it.", outcome))
-	case isRoleBindingAdminGroupRefusal(err):
-		addRoleBindingAdminGroupError(diags, err, outcome)
+	case isRoleBindingAdminGroupRemovalRefusal(err):
+		addRoleBindingAdminGroupPolicyRemovalError(diags, err, outcome)
+	case isRoleBindingAdminGroupExtraRoleRefusal(err):
+		addRoleBindingAdminGroupExtraRoleError(diags, err, "policy", outcome)
 	case isOrgNotConvertedConflict(err):
 		addOrgNotConvertedError(diags, err, outcome)
 	case isRoleBindingsDisabled(err):

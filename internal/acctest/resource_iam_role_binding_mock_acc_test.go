@@ -657,7 +657,8 @@ func TestAccIAMRoleBindingResource_DestroyFrozenRetryBound(t *testing.T) {
 }
 
 // a destroy the API refuses because it would revoke an organization admin
-// group binding fails at plan time, before anything is applied.
+// group binding fails at plan time, before anything is applied, and the
+// diagnostic says the remedy is to name the binding in roles to keep it.
 func TestAccIAMRoleBindingResource_DestroyPlanAdminGroupRefused(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
@@ -671,7 +672,7 @@ func TestAccIAMRoleBindingResource_DestroyPlanAdminGroupRefused(t *testing.T) {
 				Config:    m.providerBlock(),
 				// The error must come from the plan's dry run: no real apply.
 				ExpectError: regexp.MustCompile(`(?s)Organization Admin Group Is Managed by Anyscale.*` +
-					`cannot\s+be\s+removed.*remove\s+the\s+group\s+\(or\s+this\s+binding\)`),
+					`cannot\s+be\s+removed.*name\s+the\s+binding\s+in\s+roles\s+to\s+keep\s+it`),
 			},
 			{
 				PreConfig: func() {

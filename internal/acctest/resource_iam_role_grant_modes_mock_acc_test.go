@@ -153,7 +153,7 @@ func TestAccIAMRoleGrantResource_AdminGroupDelete(t *testing.T) {
 				Config:    m.providerBlock(),
 				ExpectError: regexp.MustCompile(`(?s)Organization Admin Group Is Managed by Anyscale.*` +
 					`The\s+organization\s+admin\s+group's\s+role\s+bindings\s+cannot\s+be\s+removed.*` +
-					`remove\s+the\s+group\s+\(or\s+this\s+binding\)\s+from\s+the\s+grant.*stays\s+in\s+Terraform\s+state`),
+					`platform-owned\s+and\s+cannot\s+be\s+revoked.*stays\s+in\s+Terraform\s+state.*terraform\s+state\s+rm`),
 			},
 			{
 				PreConfig: func() {
@@ -179,7 +179,7 @@ func TestAccIAMRoleGrantResource_AdminGroupCreateRefused(t *testing.T) {
 	check, assertCalled := rbErrorCheck(t,
 		regexp.MustCompile(`(?s)Organization Admin Group Is Managed by Anyscale.*`+
 			`holds\s+only\s+the\s+roles\s+the\s+platform\s+binds\s+it\s+to.*`+
-			`remove\s+the\s+group\s+\(or\s+this\s+binding\)\s+from\s+the\s+grant`),
+			`Remove\s+the\s+group\s+from\s+the\s+grant`),
 		rbImportHint, rbAlreadyExists)
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
