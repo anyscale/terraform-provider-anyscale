@@ -350,7 +350,9 @@ func addPolicyWriteError(ctx context.Context, client *Client, diags *diag.Diagno
 	case isRoleBindingAdminGroupRemovalRefusal(err):
 		// A destroy's policy omits the admin group's binding because
 		// nothing is kept; an ordinary apply omits it because roles left
-		// it out. The remedies differ: edit roles, or stop managing.
+		// it out. The remedies differ: edit roles, or stop managing. The
+		// op match is pinned by the destroy-path mock test - renaming the
+		// op label flips the remedy back and fails that test.
 		if strings.Contains(op, "for destroy") {
 			addRoleBindingAdminGroupDestroyRemovalError(diags, err, outcome)
 		} else {
