@@ -493,6 +493,9 @@ func (r *OrganizationUserRoleResource) writeOrganizationRole(
 			case isOrgConvertedConflict(err):
 				addOrgConvertedError(&diags, err, "")
 				return diags
+			case isOrgConvertingConflict(err):
+				addOrgConvertingError(&diags, err, "")
+				return diags
 			case orgRolesFeatureDisabled(err):
 				// Roles API not enabled in this organization: the legacy endpoint is the
 				// only write path, and in such an organization it is also what the
@@ -508,6 +511,10 @@ func (r *OrganizationUserRoleResource) writeOrganizationRole(
 		if err := setOrganizationPermissionLevel(ctx, r.client, identityID, model.BaseRole.ValueString()); err != nil {
 			if isOrgConvertedConflict(err) {
 				addOrgConvertedError(&diags, err, "")
+				return diags
+			}
+			if isOrgConvertingConflict(err) {
+				addOrgConvertingError(&diags, err, "")
 				return diags
 			}
 			if orgSelfModification(err) {
@@ -531,6 +538,10 @@ func (r *OrganizationUserRoleResource) writeOrganizationRole(
 	if err := setOrganizationRoles(ctx, r.client, userID, model.BaseRole.ValueString(), additionalRoles); err != nil {
 		if isOrgConvertedConflict(err) {
 			addOrgConvertedError(&diags, err, "")
+			return diags
+		}
+		if isOrgConvertingConflict(err) {
+			addOrgConvertingError(&diags, err, "")
 			return diags
 		}
 		if orgRolesFeatureDisabled(err) {
@@ -935,6 +946,14 @@ func (r *OrganizationUserRoleResource) deleteOrganizationRole(
 			diags.AddWarning(orgConvertedSummary, orgConvertedDetail(err)+fmt.Sprintf(
 				"\n\nFor %s, legacy deny roles could not be cleared and were left in place; access is governed by role "+
 					"bindings. The resource was removed from Terraform state.", email))
+		case isOrgConvertingConflict(err):
+			// An error with state KEPT, the opposite of the converted branch:
+			// the conversion is temporary and the legacy role this resource
+			// would clear is about to be migrated themselves, so dropping the
+			// resource now would surrender its management. The retry after
+			// the conversion completes lands in the converted branch above.
+			addOrgConvertingError(&diags, err,
+				fmt.Sprintf("For %s, nothing was cleared and the resource stays in state. Retry the destroy after the conversion finishes.", email))
 		case orgRolesFeatureDisabled(err):
 			diags.AddError("Organization Roles API Not Enabled", orgRolesDisabledDetail)
 		case orgSelfModification(err):

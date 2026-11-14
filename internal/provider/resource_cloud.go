@@ -993,6 +993,15 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	failedSettings := map[string]bool{}
 	setting, settingErr := r.applyCreateCloudSettings(ctx, cloudID, &plan, failedSettings)
 	if settingErr != nil {
+		if setting == "auto_add_user" && isOrgConvertingConflict(settingErr) {
+			// Same rollback as a converted-org refusal - the cloud is
+			// deleted and removed from state, nothing is left behind - but
+			// the diagnostic says to wait, not to migrate: the refusal ends
+			// when the conversion does. When the rollback delete itself
+			// fails, the helper has already added the exit-(b) warning.
+			r.undoCreateRefusedAutoAddUserConverting(ctx, cloudID, settingErr, resp)
+			return
+		}
 		if setting == "auto_add_user" && isOrgConvertedConflict(settingErr) {
 			if r.undoCreateRefusedAutoAddUser(ctx, cloudID, settingErr, resp) {
 				return
@@ -1088,6 +1097,27 @@ func (r *CloudResource) undoCreateRefusedAutoAddUser(ctx context.Context, cloudI
 		tflog.Error(ctx, "Failed to delete the cloud after auto_add_user was refused", map[string]any{"id": cloudID, "error": delErr.Error()})
 		addAppliedSettingWarning(&resp.Diagnostics, cloudID, "created", "auto_add_user", refusal,
 			fmt.Sprintf("Anyscale refuses auto_add_user in this organization, and rolling the create back by deleting the cloud also failed (%s)", extractAPIErrorDetail(delErr)))
+		return false
+	}
+}
+
+// undoCreateRefusedAutoAddUserConverting is undoCreateRefusedAutoAddUser's
+// converting twin: the same rollback - delete the just-created cloud, remove
+// it from state, error with the diagnostic, or fall back to the same warning
+// when the delete itself fails - but the message says to wait out the
+// conversion instead of pointing at the replacement surface, because the
+// refusal is temporary.
+func (r *CloudResource) undoCreateRefusedAutoAddUserConverting(ctx context.Context, cloudID string, refusal error, resp *resource.CreateResponse) bool {
+	if delErr := r.deleteJustCreatedCloud(ctx, cloudID); delErr == nil {
+		tflog.Info(ctx, "Deleted the cloud created in this apply after auto_add_user was refused while converting", map[string]any{"id": cloudID})
+		resp.State.RemoveResource(ctx)
+		addOrgConvertingError(&resp.Diagnostics, refusal, "The cloud was not created: Terraform deleted the cloud it had just "+
+			"created because Anyscale refuses auto_add_user while its conversion to role bindings runs. Retry once the conversion finishes.")
+		return true
+	} else {
+		tflog.Error(ctx, "Failed to delete the cloud after auto_add_user was refused", map[string]any{"id": cloudID, "error": delErr.Error()})
+		addAppliedSettingWarning(&resp.Diagnostics, cloudID, "created", "auto_add_user", refusal,
+			fmt.Sprintf("Anyscale refuses auto_add_user while its conversion runs, and rolling the create back by deleting the cloud also failed (%s)", extractAPIErrorDetail(delErr)))
 		return false
 	}
 }
@@ -1417,6 +1447,12 @@ func (r *CloudResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	}
 
 	if err := r.updateMutableFields(ctx, cloudID, plan, state); err != nil {
+		if isOrgConvertingConflict(err) {
+			addOrgConvertingError(&resp.Diagnostics, err, fmt.Sprintf("Anyscale refuses auto_add_user writes while the conversion to role "+
+				"bindings runs; nothing changed on the cloud. Set auto_add_user back to its current value (%t) to stop planning the "+
+				"change, and retry once the conversion finishes.", state.AutoAddUser.ValueBool()))
+			return
+		}
 		if isOrgConvertedConflict(err) {
 			addOrgConvertedError(&resp.Diagnostics, err, fmt.Sprintf("Anyscale refuses to change auto_add_user in a converted organization. "+
 				"Set auto_add_user back to its current value (%t) to stop planning the change.", state.AutoAddUser.ValueBool()))
