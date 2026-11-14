@@ -1,0 +1,4 @@
+```
+release-note:fixed
+resource/anyscale_iam_role_grant: A write the API refuses because it names the organization admin group now reports "Organization Admin Group Is Managed by Anyscale" instead of the removed owner-lockout diagnostic that could never match.
+```
