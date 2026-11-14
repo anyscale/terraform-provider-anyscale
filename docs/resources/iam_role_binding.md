@@ -61,8 +61,8 @@ resource "anyscale_iam_role_binding" "project" {
 
   roles = {
     # Keep the binding this identity received by creating the
-    # project, under the role it actually holds (Admin on projects
-    # created since November 2026; Project owner on older ones).
+    # project, under the role it actually holds (Admin today;
+    # Project owner or Cloud owner on scopes created earlier).
     # The API refuses to revoke it. Do not copy this entry onto a
     # project created by someone else: an identity cannot grant
     # itself a role, so the apply fails with a 403.
