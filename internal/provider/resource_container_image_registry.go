@@ -567,10 +567,11 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 	}
 
 	// name is Optional+Computed and RequiresReplace (immutable): only fill it when state does
-	// not already carry a value (unset at Create time, e.g. an upgraded pre-fix resource or a
-	// cold import, or - defensively - a still-null value somehow left over from Create). A
-	// previously-set value, whether user-typed or filled on an earlier refresh, is preserved
-	// untouched. Mirrors ray_version's fill-on-null guard immediately above.
+	// not already carry a value (unset at Create time, e.g. state written by an older
+	// provider version or a cold import, or - defensively - a still-null value somehow left
+	// over from Create). A previously-set value, whether user-typed or filled on an earlier
+	// refresh, is preserved untouched. Mirrors ray_version's fill-on-null guard immediately
+	// above.
 	if state.Name.IsNull() {
 		state.Name = types.StringValue(template.Name)
 	}

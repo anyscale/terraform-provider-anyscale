@@ -187,9 +187,9 @@ func (d *ProjectsDataSource) fetchProjects(ctx context.Context, params url.Value
 		return nil, err
 	}
 
-	// Convert to model. X-1: CreatorID/Description/LastUsedCloudID are already
+	// Convert to model. CreatorID/Description/LastUsedCloudID are already
 	// *string - StringPointerValue directly instead of a verbose if-nil-else
-	// block. DS-PROJ-1: CloudID (from ParentCloudID) is genuinely nullable
+	// block. CloudID (from ParentCloudID) is genuinely nullable
 	// server-side, same treatment.
 	allProjects := make([]ProjectSummaryModel, 0, len(results))
 	for _, project := range results {

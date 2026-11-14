@@ -69,7 +69,7 @@ func TestExtractArchivedValue(t *testing.T) {
 // resource_container_image_registry_acc_test.go). Attributes is deliberately
 // empty: there is no build_id key at all, not even an empty one, matching
 // what the resource's defensive early State.Set actually produces, and
-// since V1(c) there is no cluster_environment_id attribute in the schema to
+// there is no longer any cluster_environment_id attribute in the schema to
 // carry either.
 func buildlessRegistryState(templateID string) *terraform.State {
 	return &terraform.State{
@@ -90,8 +90,8 @@ func buildlessRegistryState(templateID string) *terraform.State {
 	}
 }
 
-// TestRegistryCheckDestroy_BuildlessTemplate_ArchivedSucceeds is the GATE
-// proof for part B of the orphan-prevention gate: the registry's real
+// TestRegistryCheckDestroy_BuildlessTemplate_ArchivedSucceeds guards the
+// buildless case of orphan prevention: the registry's real
 // CheckDestroy call
 // (NewAPIArchivedDestroyCheck("anyscale_container_image_registry",
 // "/api/v2/application_templates/%s", "result.archived_at") -- see
@@ -197,18 +197,18 @@ func TestRegistryCheckDestroy_EmptyKeyAttributeFailsInsteadOfSkipping(t *testing
 }
 
 // TestRegistryCheckDestroy_KeyingOnRemovedClusterEnvironmentIDFails
-// is the regression guard for the specific V1(c) bug this session found and
-// fixed: before the fix, the registry's real CheckDestroy call was
+// is the regression guard for a real historical bug: before the fix, the
+// registry's real CheckDestroy call was
 // NewAPIArchivedDestroyCheckByAttr("anyscale_container_image_registry",
-// "cluster_environment_id", ...). V1(c) then removed cluster_environment_id
-// from the schema entirely, so on any real post-V1(c) state
+// "cluster_environment_id", ...). cluster_environment_id was later removed
+// from the schema entirely, so on any real state since that removal
 // rs.Primary.Attributes["cluster_environment_id"] evaluates to "" (a Go map
 // miss on a key that no longer exists anywhere, not an error), tripping
 // newAPIDestroyCheckImpl's `if id == "" { continue }` guard and silently
 // skipping the resource -- CheckDestroy would report success having never
 // made a single request, regardless of whether the resource was actually
 // cleaned up. Exercises this directly against buildlessRegistryState, which
-// is shaped exactly like a real post-V1(c) resource's state (Primary.ID
+// is shaped exactly like a real current resource's state (Primary.ID
 // set, no cluster_environment_id attribute anywhere), then proves the
 // actual fix -- the plain, non-ByAttr NewAPIArchivedDestroyCheck the real
 // call site uses today -- does not share the blind spot: it queries the API

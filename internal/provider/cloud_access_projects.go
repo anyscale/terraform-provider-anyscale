@@ -30,7 +30,7 @@ import (
 // attempting them would produce 404s that this resource would then have to
 // misreport as failures.
 //
-// Live-confirmed rather than taken from the design record: an identity added as
+// Live-confirmed: an identity added as
 // both a cloud collaborator and a project collaborator, revoked at CLOUD scope
 // only, was gone from the project's collaborator list on the next read with no
 // project-level call made.
@@ -231,7 +231,7 @@ func planProjectRoles(
 
 // cloudAccessUnplannedProjectShortfall is the safe fallback when the project
 // pass could not even be PLANNED - a read failure before planProjectRoles
-// could run, most likely the reconcile's own context deadline (J.13) firing
+// could run, most likely the reconcile's own context deadline firing
 // while that read was in flight or retrying. It cannot know which project
 // roles are already correct without the read that failed, so it deliberately
 // OVER-reports rather than under-reports: every project role the
@@ -316,8 +316,8 @@ func sortedProjectIDs(m map[string]string) []string {
 // PUT, or the DELETE) without picking between them. Message only - the
 // caller already converges and records this as ungranted/unmanaged (see
 // applyProjectRoles below), so this must never become a hard error or a
-// retry: a 403 is a decision, not a transient condition, and J.13 forbids
-// retrying one.
+// retry: a 403 is a decision, not a transient condition, and the bounded
+// retry policy forbids retrying one.
 //
 // Fires on ANY 403 from these routes, not on a detail substring: the real
 // body is a bare "Permission denied" with nothing to distinguish on. The

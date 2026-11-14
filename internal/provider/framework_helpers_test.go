@@ -9,7 +9,7 @@ import (
 )
 
 // TestDynamicToInterface_ListOfObjects is the permanent regression guard for a real bug found by
-// the anyscale_service real-infra acceptance test (contract AC-R5): a Dynamic-typed attribute
+// the anyscale_service real-infra acceptance test: a Dynamic-typed attribute
 // whose value is a LIST OF OBJECTS - e.g. ray_serve_config.applications, or any future
 // Dynamic-typed field shaped this way - is inferred by HCL/Terraform as a types.Tuple, not a
 // types.List, because tuple element types can differ per position while list elements share one

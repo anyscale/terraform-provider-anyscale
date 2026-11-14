@@ -530,9 +530,9 @@ func expectOutcomeApplyCount(m *outcomeMock, want int) resource.TestCheckFunc {
 	}
 }
 
-// TestAccServiceResource_RolledBackRolloutFails (B1): a rollout that the backend auto-rolls back
-// must fail the apply, naming both versions and where to find the reason, and leave the change
-// pending so the next plan shows it again and a re-apply retries it.
+// TestAccServiceResource_RolledBackRolloutFails: a rollout that the backend auto-rolls
+// back must fail the apply, naming both versions and where to find the reason, and leave
+// the change pending so the next plan shows it again and a re-apply retries it.
 //
 // The script is the sequence observed on a real backend for a broken import_path: the rollback
 // completes (canary gone, old version primary) while the service still reports ROLLING_BACK,
@@ -598,7 +598,7 @@ func TestAccServiceResource_RolledBackRolloutFails(t *testing.T) {
 	})
 }
 
-// TestAccServiceResource_ApplyFailureKeepsPriorConfig (B2): when PUT /apply itself fails (here
+// TestAccServiceResource_ApplyFailureKeepsPriorConfig: when PUT /apply itself fails (here
 // the traced 409 for a rollout already in progress), state must keep the prior deploy fields so
 // the next plan shows the change again.
 func TestAccServiceResource_ApplyFailureKeepsPriorConfig(t *testing.T) {
@@ -643,10 +643,10 @@ func TestAccServiceResource_ApplyFailureKeepsPriorConfig(t *testing.T) {
 	}
 }
 
-// testAccServiceInterruptedRollout runs B3: an update whose wait times out while the canary is
-// still rolling out. While the canary is present the plan must be empty; once the rollout
-// settles to `settled`, the plan must be empty if the new version won and non-empty if it was
-// rolled back.
+// testAccServiceInterruptedRollout runs an update whose wait times out while the canary
+// is still rolling out. While the canary is present the plan must be empty; once the
+// rollout settles to `settled`, the plan must be empty if the new version won and
+// non-empty if it was rolled back.
 func testAccServiceInterruptedRollout(t *testing.T, name string, settled outcomeSnapshot, wantDiff bool) {
 	t.Helper()
 	m, server := newOutcomeMock(t, "svc_"+name, name, func(n int, _ map[string]any) outcomeApplyResult {
@@ -697,8 +697,8 @@ func testAccServiceInterruptedRollout(t *testing.T, name string, settled outcome
 	})
 }
 
-// TestAccServiceResource_InterruptedRolloutSucceededResource (B3, success): the rollout the
-// provider stopped waiting for completes server-side; the next plan is empty. The live v2 is
+// TestAccServiceResource_InterruptedRolloutSucceededResource: the rollout the provider
+// stopped waiting for completes server-side; the next plan is empty. The live v2 is
 // enriched, so a refresh from it (instead of recognizing the pending version) would show a diff.
 func TestAccServiceResource_InterruptedRolloutSucceededResource(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -706,17 +706,17 @@ func TestAccServiceResource_InterruptedRolloutSucceededResource(t *testing.T) {
 		outcomeSnapshot{CurrentState: "RUNNING", Primary: enriched(outcomeV2)}, false)
 }
 
-// TestAccServiceResource_InterruptedRolloutRolledBackResource (B3, rollback): the rollout the
-// provider stopped waiting for is rolled back server-side; the next plan shows the change again.
+// TestAccServiceResource_InterruptedRolloutRolledBackResource: the rollout the provider
+// stopped waiting for is rolled back server-side; the next plan shows the change again.
 func TestAccServiceResource_InterruptedRolloutRolledBackResource(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	testAccServiceInterruptedRollout(t, "outcome-interrupted-rb",
 		outcomeSnapshot{CurrentState: "RUNNING", Primary: outcomeV1}, true)
 }
 
-// TestAccServiceResource_OutOfBandDeployShowsDiff (B4): a version Terraform did not deploy
+// TestAccServiceResource_OutOfBandDeployShowsDiff: a version Terraform did not deploy
 // becoming primary (CLI deploy or rollback) shows a ray_serve_config diff refreshed from the live
-// primary; the steady state before it plans empty (B5).
+// primary; the steady state before it plans empty.
 func TestAccServiceResource_OutOfBandDeployShowsDiff(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -795,7 +795,7 @@ func (s privateStrippingServer) ReadResource(ctx context.Context, req *tfprotov6
 	return resp, err
 }
 
-// TestAccServiceResource_LegacyStateSeedsTrackingResource (B5): state written by a provider
+// TestAccServiceResource_LegacyStateSeedsTrackingResource: state written by a provider
 // without version tracking plans empty on first read with this one, and the seeded tracking
 // then detects a later out-of-band deploy.
 // The live v1 is enriched, so treating missing tracking as drift would show a diff.
@@ -855,7 +855,7 @@ func TestAccServiceResource_LegacyStateSeedsTrackingResource(t *testing.T) {
 	})
 }
 
-// TestAccServiceResource_ImportSeedsTrackingResource (B5): a cold import plans empty against a
+// TestAccServiceResource_ImportSeedsTrackingResource: a cold import plans empty against a
 // matching config, and the seeded tracking detects a later out-of-band deploy.
 func TestAccServiceResource_ImportSeedsTrackingResource(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -907,7 +907,7 @@ func TestAccServiceResource_ImportSeedsTrackingResource(t *testing.T) {
 	})
 }
 
-// TestAccServiceResource_TerminatedServiceRestartsResource (B6): a service found terminated
+// TestAccServiceResource_TerminatedServiceRestartsResource: a service found terminated
 // while still in config plans an in-place update, through the refreshed stopped (true -> false)
 // rather than a forced one; apply restarts the same id through PUT /apply (standard rollout, live
 // connections carried explicitly) and waits for RUNNING on a new version.

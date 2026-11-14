@@ -82,7 +82,7 @@ func buildCloudResourceUpdateBody(
 		"provider":          live.Provider,
 		"compute_stack":     live.ComputeStack,
 		"region":            live.Region,
-		"networking_mode":   nil, // literal null on a public deployment (D2)
+		"networking_mode":   nil, // literal null on a public deployment
 		"file_storage":      planFileStorage,
 	}
 	if isPrivateCloud {
@@ -151,7 +151,7 @@ func buildCloudResourceUpdateBody(
 	}
 
 	// object_storage is sent only when it changed, overlaid on the live
-	// block (contract rule 1). A bare bucket-name change still carries the
+	// block. A bare bucket-name change still carries the
 	// live region/endpoint/s3_addressing_style back unchanged.
 	if len(changes["object_storage"]) > 0 {
 		base, _ := rawBlockForOverlay(liveRaw, "object_storage", live.CloudResourceID)

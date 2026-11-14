@@ -8,12 +8,12 @@ import (
 	"testing"
 )
 
-// C4 regression tests: operator_status_details was typed *string on
+// Regression tests for operator_status_details: it was typed *string on
 // CloudDeploymentResult, but the API has always returned an object
 // (operator_version, check_results[], reported_at). A K8s cloud_resource
 // whose operator had reported in failed to decode on Read at all - these
-// tests use the real object shape, which would fail json.Unmarshal against
-// the pre-fix *string type.
+// tests use the real object shape, which fails json.Unmarshal if the field
+// is typed as a plain string.
 
 func TestReadCloudResource_K8sOperatorStatusDetailsDecodesWithoutError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -37,7 +37,7 @@ func TestReadCloudResource_K8sOperatorStatusDetailsDecodesWithoutError(t *testin
 	var state CloudResourceResourceModel
 
 	if _, err := r.readCloudResource(context.Background(), "cloud-id", "k8s-resource", &state, nil); err != nil {
-		t.Fatalf("unexpected decode error (this is exactly the pre-fix failure mode): %v", err)
+		t.Fatalf("unexpected decode error (operator_status_details must decode as an object): %v", err)
 	}
 
 	if state.OperatorStatus.ValueString() != "HEALTHY" {

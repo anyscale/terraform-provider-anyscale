@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-// TestDataSourceGetCollaborators_PagesBeyondFirstPage is the design contract's
-// AC3 (F2): the singular anyscale_project data source's getCollaborators used
+// TestDataSourceGetCollaborators_PagesBeyondFirstPage guards that the
+// singular anyscale_project data source's getCollaborators paginates. It used
 // to call DoRequestAndParse directly (first page only), unlike the plural
 // anyscale_projects data source's fetchProjects, which paginates. A project
 // with more collaborators than fit on one page silently dropped the rest from

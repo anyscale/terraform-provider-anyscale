@@ -94,7 +94,7 @@ func TestAccCloudResource_GCP_K8S(t *testing.T) {
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"credentials", "is_empty_cloud",
-					"file_storage", // optional even for K8S; not recovered at import by design (C3-v2)
+					"file_storage", // optional even for K8S; not recovered at import by design
 					// Create keeps the configured bare name; the backend returns GCS buckets
 					// gs://-prefixed and import recovers that form. Asserted below instead.
 					"object_storage.bucket_name",
@@ -214,7 +214,7 @@ resource "anyscale_cloud" "test" {
   object_storage {
     // Deliberately BARE (no gs:// prefix) - this is the realistic example
     // form (examples/gcp-gke-basic wires the same bare module output) and is
-    // what surfaced BUG A live via ANYSCALE_TEST_REAL_INFRA=1 (2026-07-16):
+    // what surfaced a real bug live via ANYSCALE_TEST_REAL_INFRA=1:
     // apply stores this bare value, but import flattens the API's canonical
     // gs://-prefixed form, and stripBucketPrefix only un-prefixes AWS - so
     // the two diverged. The fix is a

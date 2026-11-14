@@ -15,7 +15,7 @@ import (
 // systemClusterMockServer is a stateful describe_system_workload mock: it serves states[n] on
 // the nth request (clamped to the last entry once exhausted, matching serviceStatePollTestServer's
 // shape in service_helpers_test.go) and records the start_cluster query value seen on every
-// request, so a test can assert AC17 (every poll must pass start_cluster=false) directly against
+// request, so a test can assert that every poll passes start_cluster=false directly against
 // the wire, not just against what the Go code intends to send.
 type systemClusterMockServer struct {
 	mu                 sync.Mutex
@@ -77,8 +77,8 @@ func TestEvaluateSystemClusterState(t *testing.T) {
 		{name: "StartupErrored is terminal failure", status: &startupErrored, target: systemClusterStateRunning, wantDone: true, wantErr: true, wantErrSub: "StartupErrored"},
 		{name: "UpdatingErrored is terminal failure", status: &updatingErrored, target: systemClusterStateRunning, wantDone: true, wantErr: true, wantErrSub: "UpdatingErrored"},
 		{name: "TerminatingErrored is terminal failure", status: &terminatingErrored, target: systemClusterStateRunning, wantDone: true, wantErr: true, wantErrSub: "TerminatingErrored"},
-		{name: "Terminating is not terminal - continues (F6)", status: &terminating, target: systemClusterStateRunning, wantDone: false, wantErr: false},
-		{name: "Unknown is not terminal - continues (F6)", status: &unknown, target: systemClusterStateRunning, wantDone: false, wantErr: false},
+		{name: "Terminating is not terminal - continues", status: &terminating, target: systemClusterStateRunning, wantDone: false, wantErr: false},
+		{name: "Unknown is not terminal - continues", status: &unknown, target: systemClusterStateRunning, wantDone: false, wantErr: false},
 		{name: "Terminated is not terminal - continues (confirmed live: the normal first-poll-after-Create response)", status: &terminated, target: systemClusterStateRunning, wantDone: false, wantErr: false},
 	}
 
@@ -116,9 +116,8 @@ func TestEvaluateSystemClusterState_ErrorNamesTheCloud(t *testing.T) {
 	}
 }
 
-// TestWaitForSystemClusterStateWithTiming_TerminatedThenRunningIsQuiet proves the fix for
-// the "quiet one expected log warning" review note: describe(start_cluster=true)
-// against a cloud with no prior cluster is confirmed live (AC26) to create one and return
+// TestWaitForSystemClusterStateWithTiming_TerminatedThenRunningIsQuiet: describe(start_cluster=true)
+// against a cloud with no prior cluster creates one and returns
 // status=Terminated immediately, before the async StartingUp transition is even visible - so
 // this is the expected first-poll response on every Create, not an edge case. This test proves
 // it settles at Running without erroring, same as any other transitional sequence.
@@ -160,7 +159,7 @@ func TestWaitForSystemClusterStateWithTiming_SettlesAtRunning(t *testing.T) {
 	}
 }
 
-// TestWaitForSystemClusterStateWithTiming_SurfacesTerminalErrors is AC13, covering each of the
+// TestWaitForSystemClusterStateWithTiming_SurfacesTerminalErrors covers each of the
 // three terminal-error buckets through the real polling loop (StartingUp first), not just
 // evaluateSystemClusterState in isolation. Note: unlike Service's equivalent, describe's
 // response carries no separate error-message field (traced directly against
@@ -192,10 +191,10 @@ func TestWaitForSystemClusterStateWithTiming_SurfacesTerminalErrors(t *testing.T
 	}
 }
 
-// TestWaitForSystemClusterStateWithTiming_ContinuesOnUnknownAndTerminating is AC14: Terminating
-// and Unknown are deliberately excluded from systemClusterContinueStates (per the
-// ruling, since the backend's own no-op-retry-start bucket excludes them too), so this proves
-// the F6 fallback still treats them as "keep polling", not a hard error, by settling at Running
+// TestWaitForSystemClusterStateWithTiming_ContinuesOnUnknownAndTerminating: Terminating
+// and Unknown are deliberately excluded from systemClusterContinueStates (the backend's own
+// no-op-retry-start bucket excludes them too), so this proves the fallback still treats them
+// as "keep polling", not a hard error, by settling at Running
 // right after seeing both.
 func TestWaitForSystemClusterStateWithTiming_ContinuesOnUnknownAndTerminating(t *testing.T) {
 	server, mock := newSystemClusterStatePollTestServer(t, []string{"Terminating", "Unknown", "Running"})
@@ -214,7 +213,7 @@ func TestWaitForSystemClusterStateWithTiming_ContinuesOnUnknownAndTerminating(t 
 	}
 }
 
-// TestWaitForSystemClusterStateWithTiming_TimesOutOnUnrecognizedState is the other half of F6
+// TestWaitForSystemClusterStateWithTiming_TimesOutOnUnrecognizedState
 // (mirrors TestWaitForServiceStateWithTiming_TimesOutOnUnrecognizedState): continuing to poll
 // through an edge/unrecognized state must not mean polling forever - the timeout backstop must
 // still fire for a state that never resolves.
@@ -238,7 +237,7 @@ func TestWaitForSystemClusterStateWithTiming_TimesOutOnUnrecognizedState(t *test
 	}
 }
 
-// TestWaitForSystemClusterStateWithTiming_TimesOut is AC15: a recognized transitional state that
+// TestWaitForSystemClusterStateWithTiming_TimesOut: a recognized transitional state that
 // never settles must give up within roughly the caller's timeout, not hang forever. The
 // wall-clock sanity bound catches a regression that ignores the timeout entirely.
 func TestWaitForSystemClusterStateWithTiming_TimesOut(t *testing.T) {
@@ -266,7 +265,7 @@ func TestWaitForSystemClusterStateWithTiming_TimesOut(t *testing.T) {
 	}
 }
 
-// TestWaitForSystemClusterStateWithTiming_ContextCancelled is AC16: an already-cancelled context
+// TestWaitForSystemClusterStateWithTiming_ContextCancelled: an already-cancelled context
 // (e.g. Terraform interrupting the apply) must stop the wait promptly instead of spending the
 // full timeout polling.
 func TestWaitForSystemClusterStateWithTiming_ContextCancelled(t *testing.T) {
@@ -288,14 +287,11 @@ func TestWaitForSystemClusterStateWithTiming_ContextCancelled(t *testing.T) {
 	}
 }
 
-// TestWaitForSystemClusterStateWithTiming_AlwaysPassesStartClusterFalse is AC17, the
-// MUTATION-PROOF assertion: every poll this loop issues while the cluster is transitioning
+// TestWaitForSystemClusterStateWithTiming_AlwaysPassesStartClusterFalse asserts that
+// every poll this loop issues while the cluster is transitioning
 // normally must send start_cluster=false on the wire, never true or omitted (the router defaults
 // a missing start_cluster to true - a loop that ever sends true or omits it would silently
-// re-request a start on that tick). This has been verified mutation-proof by hand: temporarily
-// changing the describeSystemWorkload call inside waitForSystemClusterStateWithTiming from
-// `false` to `true` makes this test fail exactly as expected (asserting "false", got "true"),
-// then the change was reverted byte-for-byte.
+// re-request a start on that tick).
 //
 // Scoped deliberately to a scenario that never sees Terminated twice in a row: the backstop
 // added alongside waitForSystemClusterEnabled DOES intentionally send start_cluster=true again
@@ -647,12 +643,11 @@ func TestWaitForSystemClusterEnabledWithTiming_ContextCancelled(t *testing.T) {
 	}
 }
 
-// TestWaitForSystemClusterStateWithTiming_BackstopReissuesStartOnPersistedTerminated is the
-// mutation-relevant proof for the fix's second half: Terminated appearing ONCE (the normal
+// TestWaitForSystemClusterStateWithTiming_BackstopReissuesStartOnPersistedTerminated: Terminated
+// appearing ONCE (the normal
 // create-on-read first-poll shape) must NOT trigger a re-issued start, but Terminated persisting
-// on a SECOND consecutive poll must - this is exactly the live-repro signature confirmed on real
-// EKS (unfixed: stuck at Terminated indefinitely; the backstop exists to recover from that
-// instead of waiting out the full timeout).
+// on a SECOND consecutive poll must - the backstop exists to recover from a cluster stuck at
+// Terminated indefinitely instead of waiting out the full timeout.
 func TestWaitForSystemClusterStateWithTiming_BackstopReissuesStartOnPersistedTerminated(t *testing.T) {
 	server, mock := newSystemClusterStatePollTestServer(t, []string{"Terminated", "Terminated", "StartingUp", "Running"})
 	client := NewClientWithToken(server.URL, "test-token")

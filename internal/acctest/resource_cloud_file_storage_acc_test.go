@@ -17,7 +17,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// newFileStorageUpdateMockServer builds a stateful mock exercising D2's
+// newFileStorageUpdateMockServer builds a stateful mock exercising the
 // in-place update path: GET /resources returns the currently-stored
 // deployment; PUT /resources requires a bare JSON list (422 on anything
 // else, matching the real API's "value is not a valid list" rejection of a
@@ -26,13 +26,13 @@ import (
 // replaces the old value wholesale, including any inner field that key's own
 // old value carried but the new one didn't. That is exactly the backend's
 // documented asymmetry for sibling blocks (docs/decisions/
-// cloud-file-storage-lifecycle/README.md's Gate 1 results: "top-level block
+// cloud-file-storage-lifecycle/README.md: "top-level block
 // omitted -> preserved" vs. "field omitted inside a block that IS sent ->
 // wiped"), reproduced without hand-simulating the backend's real merge
 // logic.
 //
 // file_storage itself is the one documented exception to "omitted ->
-// preserved": G1.2 confirmed omitting it from the PUT clears it server-side
+// preserved": the design doc confirmed omitting it from the PUT clears it server-side
 // (the design's clear-by-omission path), so this mock special-cases that one
 // key to clear-on-omit rather than preserve-on-omit.
 //
@@ -153,12 +153,11 @@ func newFileStorageUpdateMockServer(
 	}
 }
 
-// TestAccCloudResource_FileStorageAddIsUpdatable proves that, for D2
-// (docs/decisions/cloud-file-storage-lifecycle/README.md), on an
-// already-live anyscale_cloud with no file_storage block, adding one
+// TestAccCloudResource_FileStorageAddIsUpdatable proves that,
+// on an already-live anyscale_cloud with no file_storage block, adding one
 // that sets only persistent_volume_claim now plans and applies an in-place
-// Update, not a replace. This is the direct inversion of the pre-D2 pinning
-// test of the same shape (every file_storage attribute carried an
+// Update, not a replace. This is the direct inversion of the old pinning
+// behavior of the same shape (every file_storage attribute carried an
 // unconditional stringplanmodifier.RequiresReplace(), and mount_path's
 // Computed+Default separately forced replace on its own absent->present
 // change) - neither marker is a static-schema property (`terraform providers
@@ -224,7 +223,7 @@ resource "anyscale_cloud" "test" {
 			{
 				// Declaring file_storage for the first time, setting only
 				// persistent_volume_claim, plans and applies an in-place
-				// Update - not the pre-D2 full replace.
+				// Update - not a full replace.
 				Config: withFileStorage,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
@@ -253,10 +252,10 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
-// TestAccCloudResource_FileStorageUpdateDoesNotWipeSiblings proves that, for
-// D2, updating file_storage on a live K8S cloud must not collaterally wipe
+// TestAccCloudResource_FileStorageUpdateDoesNotWipeSiblings proves that
+// updating file_storage on a live K8S cloud must not collaterally wipe
 // kubernetes_config.redis_endpoint or object_storage -
-// D2's round-trip PUT is a full-spec replace, so any sibling field the
+// the round-trip PUT is a full-spec replace, so any sibling field the
 // provider fails to echo back is cleared by the API, not merely left stale in
 // state. The check reads the mock's stored deployment directly over raw HTTP,
 // bypassing Terraform state entirely: config blocks are deliberately not
@@ -358,11 +357,11 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
-// TestAccCloudResource_FileStorageClearingWorks proves that, for D2, removing
+// TestAccCloudResource_FileStorageClearingWorks proves that removing
 // a previously-declared file_storage block from config plans and applies an
-// in-place Update that clears it - D2's round-trip PUT omits the key entirely
-// when planFileStorage is nil, and per the design doc's own Gate-1 evidence
-// (G1.2), omission clears file_storage on the live deployment rather than
+// in-place Update that clears it - the round-trip PUT omits the key entirely
+// when planFileStorage is nil, and per the design doc,
+// omission clears file_storage on the live deployment rather than
 // leaving the last value in place (the opposite of how the sibling blocks
 // behave on omission). Sibling fields are asserted intact for the same
 // reason as TestAccCloudResource_FileStorageUpdateDoesNotWipeSiblings above:
@@ -465,7 +464,7 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
-// TestAccCloudResource_FileStorageImportRecoversValue proves that, for D2,
+// TestAccCloudResource_FileStorageImportRecoversValue proves that
 // importing a cloud that already has file_storage set recovers it, via
 // requiredImportConfigBlocks' flattenFileStorage call. This
 // is a COLD import (no preceding Create in this test) - per CLAUDE.md's own
@@ -533,13 +532,12 @@ resource "anyscale_cloud" "test" {
 }
 
 // TestAccCloudResource_FileStorageUpdateRunningClustersError proves that,
-// for D2, when the backend refuses a file_storage update because clusters
+// when the backend refuses a file_storage update because clusters
 // are running, the practitioner sees a designed
 // diagnostic naming that cause, not an opaque 400 body. The "active
 // clusters" substring match in addFileStorageUpdateError is sourced from
-// backend source rather than a captured response - G1.3 was never run (see
-// the Gate 1 results table in
-// docs/decisions/cloud-file-storage-lifecycle/README.md) - so this test
+// backend source rather than a captured response (see
+// docs/decisions/cloud-file-storage-lifecycle/README.md), so this test
 // proves only the provider's own branching on that substring, not that the
 // real backend sends it; the code comment documenting that gap is a
 // deliberate, accepted degradation and must not be read as something this
@@ -640,7 +638,7 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
-// TestAccCloudResource_FileStorageManagedCloudRefusal proves that, for D2, a
+// TestAccCloudResource_FileStorageManagedCloudRefusal proves that a
 // file_storage change on a cloud created with `anyscale cloud setup` (rather
 // than registered) is refused, both at plan time
 // (refuseFileStorageChangeOnManagedCloud/isAnyscaleManaged, so the

@@ -96,10 +96,10 @@ import (
 // This IS implemented (RefuseWhenAutoAddUserEnabled, cloud_access_reconcile.go)
 // and unit-covered by TestReconcileCloudAccess_AutoAddUserBlocksRevokes and
 // TestReconcileCloudAccess_DestroyDoesNotRefuseOnAutoAddUser, which set the
-// flag true on a mock cloud AND make the revoke path 409, per J.9. Unit-level
-// is the current ceiling not because of any gate - the write path runs
+// flag true on a mock cloud AND make the revoke path 409. Unit-level
+// is the current ceiling not for any structural reason - the write path runs
 // through the real resource in this file already - but because nobody has
-// written the acceptance test yet. AC-9 requires this refusal proven through
+// written the acceptance test yet. This refusal must be proven through
 // the real resource; that acceptance coverage is still owed and belongs in
 // this file or a sibling, not assumed satisfied by the unit tests above.
 //
@@ -107,7 +107,7 @@ import (
 // auto_add_user=false and its revoke path never 409s - a mock that ignores
 // auto_add_user would pass happily against a resource that 409s in reality,
 // the same mock-omission shape that let the mount_targets bug ship green.
-// Whoever writes the AC-9 acceptance test needs a mock cloud with
+// Whoever writes that acceptance test needs a mock cloud with
 // auto_add_user=true AND a revoke path that actually 409s, or it proves
 // nothing.
 
@@ -127,7 +127,7 @@ const (
 
 	// What the mock reports when that member's revoke is attempted.
 	//
-	// REPRESENTATIVE, NOT GATE-1 CONFIRMED: inducing a genuinely unrevokable
+	// REPRESENTATIVE, NOT REAL-API VERIFIED: inducing a genuinely unrevokable
 	// member against the real API was not attempted, so neither this text nor
 	// the status beside it is verified. No assertion may depend on either -
 	// only on the behavioral chain (revoke fails, member stays, recorded in
@@ -167,12 +167,9 @@ type mockCloudAccessServer struct {
 // newMockCloudAccessServer serves the cloud-collaborator surface
 // anyscale_cloud_access will reconcile against.
 //
-// CORRECTED after a live Gate 1 check against the real backend (both calls
-// made against the pinned static fixture cloud, response shapes confirmed
-// byte-for-byte, not re-derived from source alone - a prior version of this
-// comment pinned four routes as "not guesses" and got two of them wrong,
-// which is exactly the failure this note exists to prevent from recurring).
-// The real routes (backend/server/api/product/routers/clouds_router.py):
+// Both routes were confirmed byte-for-byte against the real backend (calls
+// made against the pinned static fixture cloud), not derived from source
+// alone. The routes (backend/server/api/product/routers/clouds_router.py):
 //
 //	POST   /api/v2/clouds/{cloud_id}/collaborators/users/search   - list members: paginated,
 //	                                                                 returns id/value.{id,name,email}/permission_level

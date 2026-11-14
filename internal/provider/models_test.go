@@ -466,7 +466,7 @@ func TestCloudDeploymentsResponseJSON(t *testing.T) {
 	}
 }
 
-// TestBuildResultResolvedRayVersion tests F4's resolution order: a BYOD build's
+// TestBuildResultResolvedRayVersion tests the ray-version resolution order: a BYOD build's
 // byod_ray_version (parsed from the docker image tag, may differ from what the user
 // requested) takes precedence over the plain ray_version field when both are present,
 // since only byod_ray_version reflects what the image actually resolved to.

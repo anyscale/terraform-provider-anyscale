@@ -57,7 +57,7 @@ type CloudSummaryModel struct {
 	LineageTrackingEnabled types.Bool   `tfsdk:"lineage_tracking_enabled"`
 	AggregatedLogsEnabled  types.Bool   `tfsdk:"aggregated_logs_enabled"`
 
-	// DS-CLOUD-5 (Phase B), via cloudSharedAttributes.
+	// Shared with anyscale_cloud via cloudSharedAttributes.
 	AvailabilityZones types.List   `tfsdk:"availability_zones"`
 	Version           types.String `tfsdk:"version"`
 	ExternalID        types.String `tfsdk:"external_id"`
@@ -199,7 +199,7 @@ func (d *CloudsDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 		return
 	}
 
-	// DS-CLOUD-1: GET /api/v2/clouds only accepts "name" (substring) server-side -
+	// GET /api/v2/clouds only accepts "name" (substring) server-side -
 	// there is no provider or region query param on this endpoint at all, so those
 	// two are applied as client-side post-filters below instead, over every page.
 	params := url.Values{}
@@ -228,7 +228,7 @@ func (d *CloudsDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 }
 
 // fetchClouds fetches clouds matching the server-side name substring filter (params), handling
-// pagination, then applies cloudProvider/region as client-side post-filters (DS-CLOUD-1: the
+// pagination, then applies cloudProvider/region as client-side post-filters (the
 // backend has no provider/region query params on this endpoint). Either post-filter is skipped
 // when its argument is "".
 func (d *CloudsDataSource) fetchClouds(ctx context.Context, params url.Values, cloudProvider, region string) ([]CloudSummaryModel, error) {
@@ -238,8 +238,8 @@ func (d *CloudsDataSource) fetchClouds(ctx context.Context, params url.Values, c
 	}
 
 	// Convert CloudResults to CloudSummaryModels, applying the provider/region
-	// post-filters as we go. cloud_provider matches case-insensitively (PR #91
-	// fixed the same case-sensitivity trap for addProviderConfig; a user typing
+	// post-filters as we go. cloud_provider matches case-insensitively (the
+	// same case-sensitivity trap addProviderConfig once had; a user typing
 	// "aws" should match a stored "AWS" here too).
 	allClouds := make([]CloudSummaryModel, 0, len(cloudResults))
 	for _, cloud := range cloudResults {

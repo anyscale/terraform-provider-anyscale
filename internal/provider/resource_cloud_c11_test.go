@@ -12,10 +12,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 )
 
-// C11a: Update() previously sent a single PATCH /clouds/{id}, which 405s
+// Update() previously sent a single PATCH /clouds/{id}, which 405s
 // against the real API - there is no such route. The real API exposes three
-// single-field PUT routes instead. C11b: name has no update route at all,
-// so it's enforced immutable via a plan-time error instead of being sent.
+// single-field PUT routes instead. Name has no update route at all, so
+// it's enforced immutable via a plan-time error instead of being sent.
 
 func TestUpdateCloudBoolField_HitsCorrectPathAndQueryParam(t *testing.T) {
 	var gotPath string

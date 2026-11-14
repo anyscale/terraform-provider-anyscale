@@ -17,15 +17,14 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// Live write-path verification for anyscale_cloud_access - the five
-// (live)-marked items (AC-1, AC-6, AC-15, AC-17, AC-26) that cannot be
-// proven by a mock, since each asks what the real backend does with an
-// authoritative write, not what the provider sends.
+// Live write-path verification for anyscale_cloud_access - the behaviors
+// that cannot be proven by a mock, since each asks what the real backend
+// does with an authoritative write, not what the provider sends.
 //
 // The write path is unconditional; these run against the real resource on any
 // build.
 //
-// RULING A1 BINDS HARDER HERE than anywhere else: every test below creates
+// Hard rule, stricter here than anywhere else: every test below creates
 // its OWN fresh ephemeral cloud and destroys it afterward. NEVER the static
 // tfp-test-aws-useast1-STATIC fixture - an authoritative Create/Delete
 // against it would revoke real people's real access.
@@ -161,7 +160,7 @@ func cloudAccessLiveMemberEmails(t *testing.T, client *provider.Client, cloudID 
 }
 
 // cloudAccessLiveProjectMemberEmails reads a project's real, current
-// collaborator list straight from the backend, for AC-15.
+// collaborator list straight from the backend.
 func cloudAccessLiveProjectMemberEmails(t *testing.T, client *provider.Client, projectID string) map[string]bool {
 	t.Helper()
 	emails, err := fetchCollaboratorEmails(context.Background(), client, http.MethodGet,
@@ -212,10 +211,10 @@ resource "anyscale_cloud_access" "live" {
 `, cloudID, allowEmpty, memberHCL)
 }
 
-// TestAccCloudAccessResource_LiveColdImportAndDelete covers AC-1 (a cold
-// import populates member with exactly the real member set minus the
-// caller) and AC-17 (Delete revokes every managed member) on the SAME
-// ephemeral cloud, since one lifecycle naturally produces both: seed a
+// TestAccCloudAccessResource_LiveColdImportAndDelete covers two behaviors
+// on the SAME ephemeral cloud, since one lifecycle naturally produces
+// both: a cold import populates member with exactly the real member set
+// minus the caller, and Delete revokes every managed member. Seed a
 // member out-of-band, import, then let the test's own automatic destroy
 // (asserted via CheckDestroy) prove the revoke.
 //
@@ -236,7 +235,7 @@ func TestAccCloudAccessResource_LiveColdImportAndDelete(t *testing.T) {
 	}
 
 	// Seeded OUT OF BAND, before Terraform ever sees this cloud - the real
-	// member set a cold import must recover exactly, per AC-1.
+	// member set a cold import must recover exactly.
 	cloudAccessLiveOOBMember(t, client, cloudID, email, "write")
 
 	resourceName := "anyscale_cloud_access.live"
@@ -245,19 +244,19 @@ func TestAccCloudAccessResource_LiveColdImportAndDelete(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		ErrorCheck:               orgModeErrorCheck(t),
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		// AC-17: the test's own automatic destroy at the end of this test IS
+		// The test's own automatic destroy at the end of this test IS
 		// the revoke under test. Assert against the real backend, not state.
 		CheckDestroy: func(*terraform.State) error {
 			live := cloudAccessLiveMemberEmails(t, client, cloudID)
 			if live[strings.ToLower(email)] {
-				return fmt.Errorf("AC-17 FAILED: %s still has real cloud access after Delete - the backend reports %v",
+				return fmt.Errorf("revoke check FAILED: %s still has real cloud access after Delete - the backend reports %v",
 					email, live)
 			}
 			return nil
 		},
 		Steps: []resource.TestStep{
 			{
-				// AC-1: import must recover EXACTLY the real member set the
+				// Import must recover EXACTLY the real member set the
 				// out-of-band seed created, minus the caller (who was never
 				// added here, so there is nothing to exclude, but the
 				// resource must still not error resolving/excluding them).
@@ -278,11 +277,11 @@ func TestAccCloudAccessResource_LiveColdImportAndDelete(t *testing.T) {
 					}
 					attrs := states[0].Attributes
 					if got := attrs["member.%"]; got != "1" {
-						return fmt.Errorf("AC-1 FAILED: imported member.%% = %q, want \"1\" (exactly the seeded member): %+v",
+						return fmt.Errorf("import check FAILED: imported member.%% = %q, want \"1\" (exactly the seeded member): %+v",
 							got, attrs)
 					}
 					if _, ok := attrs["member."+email+".base_role"]; !ok {
-						return fmt.Errorf("AC-1 FAILED: import did not recover the seeded member %s: %+v", email, attrs)
+						return fmt.Errorf("import check FAILED: import did not recover the seeded member %s: %+v", email, attrs)
 					}
 					return nil
 				},
@@ -297,7 +296,7 @@ func TestAccCloudAccessResource_LiveColdImportAndDelete(t *testing.T) {
 				// This step itself is a real apply (Create runs again since
 				// import's state didn't persist into this step - CLAUDE.md's
 				// own documented gotcha), not a no-op - it does NOT prove
-				// AC-2 on its own. The no-op proof is step 3, below.
+				// the no-op property on its own. The no-op proof is step 3, below.
 				Config: config,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(resourceName, "member.%", "1"),
@@ -305,7 +304,7 @@ func TestAccCloudAccessResource_LiveColdImportAndDelete(t *testing.T) {
 				),
 			},
 			{
-				// AC-2: a config declaring exactly the recovered members
+				// A config declaring exactly the recovered members
 				// plans EMPTY. This is the "Test B" shape CLAUDE.md
 				// prescribes for import-recovery coverage - two sequential
 				// Config-only steps, no import involved, so state actually
@@ -321,7 +320,7 @@ func TestAccCloudAccessResource_LiveColdImportAndDelete(t *testing.T) {
 	})
 }
 
-// TestAccCloudAccessResource_LiveCreateRevokesUndeclaredMembers is AC-6: an
+// TestAccCloudAccessResource_LiveCreateRevokesUndeclaredMembers proves that an
 // authoritative Create against a cloud already holding an undeclared member
 // revokes them. The fixture is added out-of-band BEFORE Terraform ever runs,
 // then Create declares an EMPTY member set - the starkest form of "the
@@ -352,7 +351,7 @@ func TestAccCloudAccessResource_LiveCreateRevokesUndeclaredMembers(t *testing.T)
 
 	resourceName := "anyscale_cloud_access.live"
 	// allow_empty_member_set=true: an empty member map on a cloud that
-	// currently has members is otherwise a plan-time refusal (AC-11), and
+	// currently has members is otherwise a plan-time refusal, and
 	// this test's whole point is authoritative Create against exactly that
 	// starting condition.
 	config := cloudAccessLiveConfig(cloudID, "", true)
@@ -365,12 +364,12 @@ func TestAccCloudAccessResource_LiveCreateRevokesUndeclaredMembers(t *testing.T)
 				Config: config,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(resourceName, "member.%", "0"),
-					// AC-6 itself: assert against the BACKEND, not state, that
+					// Assert against the BACKEND, not state, that
 					// Create actually revoked the undeclared member.
 					func(*terraform.State) error {
 						live := cloudAccessLiveMemberEmails(t, client, cloudID)
 						if live[strings.ToLower(email)] {
-							return fmt.Errorf("AC-6 FAILED: Create did not revoke the undeclared member %s - backend still reports %v",
+							return fmt.Errorf("revoke check FAILED: Create did not revoke the undeclared member %s - backend still reports %v",
 								email, live)
 						}
 						return nil
@@ -435,8 +434,8 @@ func waitForProjectGrantable(t *testing.T, client *provider.Client, projectID st
 	}
 }
 
-// TestAccCloudAccessResource_LiveProjectRoleDropRevokes is AC-15: dropping a
-// project entry from a member's config revokes that project role on the
+// TestAccCloudAccessResource_LiveProjectRoleDropRevokes proves that dropping
+// a project entry from a member's config revokes that project role on the
 // real backend.
 func TestAccCloudAccessResource_LiveProjectRoleDropRevokes(t *testing.T) {
 	email := requireRealInfraTestUser(t)
@@ -484,18 +483,18 @@ func TestAccCloudAccessResource_LiveProjectRoleDropRevokes(t *testing.T) {
 				),
 			},
 			{
-				// The project entry is dropped, not just changed - AC-15's
-				// exact shape.
+				// The project entry is dropped, not just changed - the
+				// exact shape that must revoke.
 				Config: withoutProjectRole,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckNoResourceAttr(resourceName, "member."+email+".projects."+projectID),
-					// AC-15 itself: assert against the BACKEND that the
+					// Assert against the BACKEND that the
 					// project role was actually revoked, not merely absent
 					// from config.
 					func(*terraform.State) error {
 						live := cloudAccessLiveProjectMemberEmails(t, client, projectID)
 						if live[strings.ToLower(email)] {
-							return fmt.Errorf("AC-15 FAILED: dropping the project entry did not revoke %s's real project role - backend still reports %v",
+							return fmt.Errorf("revoke check FAILED: dropping the project entry did not revoke %s's real project role - backend still reports %v",
 								email, live)
 						}
 						return nil
@@ -506,19 +505,18 @@ func TestAccCloudAccessResource_LiveProjectRoleDropRevokes(t *testing.T) {
 	})
 }
 
-// TestAccCloudAccessResource_LiveOutOfBandRoleChangeDetectedAndCorrected is
-// AC-26: an out-of-band change made through the RBAC roles path (the same
-// path this resource itself writes through) is detected on refresh and
+// TestAccCloudAccessResource_LiveOutOfBandRoleChangeDetectedAndCorrected
+// proves that an out-of-band change made through the RBAC roles path (the
+// same path this resource itself writes through) is detected on refresh and
 // corrected on the next apply.
 //
 // Uses a ROLE CHANGE on the already-managed fixture, rather than a brand
 // new grant to a second identity, because no second safe non-admin,
-// non-caller identity exists to use for this (see J.22's ruling against
-// creating one). The mechanism under test - an RBAC-path write this
+// non-caller identity exists to use for this (creating one was ruled out).
+// The mechanism under test - an RBAC-path write this
 // resource did not make, read back on refresh, corrected on apply - is
-// identical either way: AC-26 is about the ROUTE the drift arrives through
-// (roles path vs legacy path, the J.19 distinction), not about grant vs.
-// role-change.
+// identical either way: the property under test is the ROUTE the drift
+// arrives through (roles path vs legacy path), not grant vs. role-change.
 //
 // Run: TF_ACC=1 ANYSCALE_TEST_USER_EMAIL=<disposable member> ANYSCALE_TEST_ORG_NAME=<org> go test ./internal/acctest -run '^TestAccCloudAccessResource_LiveOutOfBandRoleChangeDetectedAndCorrected$' -v -count=1
 func TestAccCloudAccessResource_LiveOutOfBandRoleChangeDetectedAndCorrected(t *testing.T) {
@@ -554,7 +552,7 @@ func TestAccCloudAccessResource_LiveOutOfBandRoleChangeDetectedAndCorrected(t *t
 				// PlanOnly + ExpectNonEmptyPlan, NOT RefreshState: RefreshState
 				// asserts a subsequent plan against the SAME config is EMPTY -
 				// it exists to prove a refresh causes no drift, the opposite of
-				// what this step needs to prove. AC-26's first half is that the
+				// what this step needs to prove. The detection half is that the
 				// drift IS visible: the plan (which refreshes first) must show a
 				// change, because state now reports "owner" from the real
 				// backend while the unchanged config still declares "writer".
@@ -567,7 +565,7 @@ func TestAccCloudAccessResource_LiveOutOfBandRoleChangeDetectedAndCorrected(t *t
 				ExpectNonEmptyPlan: true,
 			},
 			{
-				// Re-apply the ORIGINAL config (writer). AC-26's correction
+				// Re-apply the ORIGINAL config (writer). The correction
 				// half: the next apply must set the real role back to what
 				// the configuration declares.
 				Config: config,
@@ -582,7 +580,7 @@ func TestAccCloudAccessResource_LiveOutOfBandRoleChangeDetectedAndCorrected(t *t
 						roles := cloudAccessLiveReadRoles(t, client, cloudID)
 						got, ok := roles[userID]
 						if !ok || len(got) == 0 || !strings.EqualFold(got[0], "writer") {
-							return fmt.Errorf("AC-26 FAILED: the out-of-band owner grant was not corrected - backend reports base_roles=%v for %s, want [writer]",
+							return fmt.Errorf("correction check FAILED: the out-of-band owner grant was not corrected - backend reports base_roles=%v for %s, want [writer]",
 								got, email)
 						}
 						return nil
@@ -594,7 +592,8 @@ func TestAccCloudAccessResource_LiveOutOfBandRoleChangeDetectedAndCorrected(t *t
 }
 
 // cloudAccessLiveReadRoles reads the real per-user RBAC role listing for a
-// cloud - the surface AC-26 is actually about, distinct from the coarse
+// cloud - the surface the out-of-band role-change test is actually about,
+// distinct from the coarse
 // permission_level the plain member search reports.
 func cloudAccessLiveReadRoles(t *testing.T, client *provider.Client, cloudID string) map[string][]string {
 	t.Helper()

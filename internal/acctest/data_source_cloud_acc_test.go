@@ -175,7 +175,7 @@ func TestAccCloudDataSource_MatchesResourceState(t *testing.T) {
 				// Step 2: update to non-default (true). A hardcoded-false regression
 				// in the data source would pass unnoticed against a cloud left at
 				// its all-false default, so this step is the one that actually
-				// exercises the C1 fix.
+				// exercises the mapping fix.
 				Config: testAccCloudDataSourceConfig_matchesResourceState(cloudName, true),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Resource itself has the non-default values we configured.
