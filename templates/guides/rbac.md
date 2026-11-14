@@ -367,7 +367,7 @@ the Terraform form of `anyscale role-binding policy generate` and `apply`. Use i
 access to a scope; use `anyscale_iam_role_grant` when several owners share it.
 
 - **An apply revokes every direct binding the policy does not name**, including ones Anyscale grants
-  itself, such as the owner binding a project or cloud creator receives. The first apply on a scope
+  itself, such as the Admin binding a project or cloud creator receives. The first apply on a scope
   that already has bindings is no exception. When the scope ID and every role and principal are known
   at plan time, the plan dry-runs the policy: a refusal an apply would report fails the plan instead,
   and a create warns naming each grant the first apply revokes — read it before you apply. A policy
@@ -375,8 +375,11 @@ access to a scope; use `anyscale_iam_role_grant` when several owners share it.
 - **Bindings on a parent scope are not part of the policy** and are never touched.
 - **Name your own binding.** Anyscale refuses a policy that revokes the identity Terraform runs as, so if
   that identity holds a direct binding on the scope, list it under its role (see the
-  [example](../resources/iam_role_binding.md#example-usage)). An identity cannot grant itself a role,
-  so one that reaches the scope through a group needs nothing named.
+  [example](../resources/iam_role_binding.md#example-usage)). Name the role the identity actually holds
+  on that scope, not a fixed one: a project or cloud creator holds the Admin role (`Organization
+  owner`) on scopes created since November 2026, and `Project owner` on older ones; check with
+  `anyscale role-binding policy generate` when unsure. An identity cannot grant itself a role, so
+  one that reaches the scope through a group needs nothing named.
 - **Never manage one scope with this resource and `anyscale_iam_role_grant` or a CLI `policy apply`.** Each
   revokes or re-creates the other's bindings on every apply.
 - **Destroy revokes everything Anyscale allows.** It keeps the identity's own bindings and any frozen
