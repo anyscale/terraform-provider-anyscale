@@ -43,16 +43,6 @@ it first.
   `~/.anyscale/credentials.json`, either of which the provider picks up with no configuration. See
   the [Anyscale API keys documentation](https://docs.anyscale.com/auth/api-keys) for how to
   generate one.
-- Your Anyscale organization ID (starts with `org_`). If you don't have it handy, look it up with a
-  zero-argument data source instead of hunting for it:
-
-  ```terraform
-  data "anyscale_organization" "current" {}
-
-  output "my_org_id" {
-    value = data.anyscale_organization.current.id
-  }
-  ```
 
 ## Step 1: Configure the providers
 
@@ -93,10 +83,13 @@ publishes a [Terraform module](https://github.com/anyscale/terraform-google-anys
 that creates exactly what a VM cloud needs, including the GCP project itself:
 
 ```terraform
+# The organization your token authenticates against.
+data "anyscale_organization" "current" {}
+
 module "google_anyscale_v2" {
   source = "anyscale/anyscale-cloudfoundation-modules/google"
 
-  anyscale_organization_id = var.anyscale_org_id
+  anyscale_organization_id = data.anyscale_organization.current.id
 
   anyscale_project_billing_account = var.billing_account_id
   anyscale_project_folder_id       = var.root_folder_number

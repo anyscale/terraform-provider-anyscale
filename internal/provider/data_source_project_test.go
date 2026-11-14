@@ -306,3 +306,80 @@ func TestProjectDataSourceRead_ByName(t *testing.T) {
 		t.Errorf("id = %q, want %q (most recently created project with a matching name)", result.ID.ValueString(), "prj_new")
 	}
 }
+
+// projectReadDetail409 is the exact 409 detail the backend's
+// refuse_legacy_permission_reads answers for a legacy collaborator read in a
+// converted organization.
+const projectReadDetail409 = "This organization uses role bindings. See who has access in Users & IAM or with the role bindings API."
+
+// newProjectDataSourceMock serves one project plus a collaborators endpoint
+// with a configurable status and detail, so tests share the fixture shape.
+func newProjectDataSourceMock(t *testing.T, collaboratorsStatus int, collaboratorsBody string) *ProjectDataSource {
+	t.Helper()
+	const projectID = "prj_conv"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/"+projectID:
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(ProjectResponse{Result: ProjectResult{
+				ID:            projectID,
+				Name:          "converted-org-project",
+				ParentCloudID: strPtr("cld_def"),
+				CreatedAt:     "2024-01-01T00:00:00Z",
+				IsDefault:     false,
+				DirectoryName: "converted-project-dir",
+			}})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/"+projectID+"/collaborators/users":
+			w.WriteHeader(collaboratorsStatus)
+			_, _ = w.Write([]byte(collaboratorsBody))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return &ProjectDataSource{client: NewClientWithToken(server.URL, "test-token")}
+}
+
+// TestProjectDataSourceRead_ConvertedOrgCollaboratorsNull pins the converted-
+// org contract: the collaborator read's 409 must leave collaborators null -
+// unavailable, not falsely empty - while the rest of the data source still
+// resolves, with no diagnostic.
+func TestProjectDataSourceRead_ConvertedOrgCollaboratorsNull(t *testing.T) {
+	d := newProjectDataSourceMock(t, http.StatusConflict, `{"detail": "`+projectReadDetail409+`"}`)
+	result, diags := runProjectDataSourceRead(t, d, ProjectDataSourceModel{ID: types.StringValue("prj_conv")})
+	if diags.HasError() {
+		t.Fatalf("expected success with null collaborators in a converted org, got: %v", diags)
+	}
+	if result.Collaborators != nil {
+		t.Errorf("collaborators = %+v, want null (unavailable), never an empty list", result.Collaborators)
+	}
+	if result.ID.ValueString() != "prj_conv" || result.Name.ValueString() != "converted-org-project" || result.CloudID.ValueString() != "cld_def" {
+		t.Errorf("data source must still resolve: id=%q name=%q cloud_id=%q",
+			result.ID.ValueString(), result.Name.ValueString(), result.CloudID.ValueString())
+	}
+}
+
+// TestProjectDataSourceRead_CollaboratorsOtherErrorsFail pins that only the
+// converted-org 409 is tolerated: a 409 with any other detail, and any other
+// error status, still fail the read.
+func TestProjectDataSourceRead_CollaboratorsOtherErrorsFail(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"conflict other detail", http.StatusConflict, `{"detail": "some other conflict"}`},
+		{"server error", http.StatusInternalServerError, `{"detail": "boom"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newProjectDataSourceMock(t, tc.status, tc.body)
+			_, diags := runProjectDataSourceRead(t, d, ProjectDataSourceModel{ID: types.StringValue("prj_conv")})
+			if !diags.HasError() {
+				t.Fatal("expected the read to fail, got success")
+			}
+		})
+	}
+}
