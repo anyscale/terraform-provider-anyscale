@@ -454,6 +454,13 @@ func (r *CloudAccessResource) Read(ctx context.Context, req resource.ReadRequest
 			resp.Diagnostics.AddError(cloudRolesDisabledSummary, cloudRolesDisabledDetail)
 			return
 		}
+		if isOrgConvertedConflict(err) {
+			// An error, never a warning-with-stale-state: this resource is
+			// authoritative, so a member list it cannot read governs nothing, and
+			// silently keeping the old one would hide that.
+			addOrgConvertedReadError(&resp.Diagnostics, err, "State is left unchanged. The resource cannot be refreshed or applied in a converted organization.")
+			return
+		}
 		if errors.Is(err, ErrNotFound) {
 			// The cloud itself is gone, which takes its member list with it. This is
 			// the only branch that drops the resource from state.
@@ -630,8 +637,16 @@ func (r *CloudAccessResource) applyCloudAccess(
 		PriorProjects:                priorProjects,
 	})
 	diags.Append(reconcileDiags...)
+	if result.OrgConvertedRead != nil {
+		addOrgConvertedReadError(diags, result.OrgConvertedRead, "No changes were made.")
+		return true
+	}
 	if result.OrgConverted != nil {
-		addOrgConvertedError(diags, result.OrgConverted, "No changes were made.")
+		if isOrgConvertingConflict(result.OrgConverted) {
+			addOrgConvertingError(diags, result.OrgConverted, "No changes were made.")
+		} else {
+			addOrgConvertedError(diags, result.OrgConverted, "No changes were made.")
+		}
 		return true
 	}
 
@@ -715,7 +730,27 @@ func (r *CloudAccessResource) Delete(ctx context.Context, req resource.DeleteReq
 		return
 	}
 
+	if result.OrgConvertedRead != nil {
+		// The member-list read is refused; no revoke was even attempted. The
+		// same exit as the refused-write branch below: warn and leave state,
+		// because erroring would strand the resource with no exit but
+		// 'terraform state rm', which does the same thing less visibly.
+		resp.Diagnostics.AddWarning(orgConvertedSummary, orgConvertedReadDetail(result.OrgConvertedRead)+fmt.Sprintf(
+			"\n\nOn cloud %s, the member list could not be read and nothing was revoked; access is governed by role "+
+				"bindings. The resource was removed from Terraform state.", cloudID))
+		return
+	}
 	if result.OrgConverted != nil {
+		if isOrgConvertingConflict(result.OrgConverted) {
+			// The conversion refuses every legacy write while it runs, so these
+			// revokes could not happen yet either. Warn with the retry
+			// guidance and leave state, same as the converted branch below.
+			resp.Diagnostics.AddWarning(orgConvertingSummary, orgConvertingDetail(result.OrgConverted)+fmt.Sprintf(
+				"\n\nOn cloud %s, legacy grants could not yet be revoked and were left in place. The resource was "+
+					"removed from Terraform state; re-granting or revoking after the conversion completes needs "+
+					"role bindings, not this resource.", cloudID))
+			return
+		}
 		// Erroring would leave the resource undestroyable short of
 		// 'terraform state rm', which does the same thing less visibly.
 		resp.Diagnostics.AddWarning(orgConvertedSummary, orgConvertedDetail(result.OrgConverted)+fmt.Sprintf(
@@ -1425,6 +1460,15 @@ func (r *CloudAccessResource) discloseFirstApplyRevoke(
 
 	revoked, determined, err := cloudAccessFirstApplyRevokeSet(ctx, r.client, cloudID.ValueString(), declared, caller)
 	if !determined {
+		if isOrgConvertedConflict(err) {
+			// Fail-closed with the same classification as Read: in a converted
+			// organization this resource can neither read who has access nor
+			// manage it, and this warning should not read like a transient miss.
+			diags.AddWarning(orgConvertedSummary, orgConvertedReadDetail(err)+
+				"\n\nThe disclosure could not name who a first apply would revoke, and the create itself will be refused "+
+				"for the same reason. Nothing here blocks the plan; the apply fails with this same refusal.")
+			return
+		}
 		// FAILS LOUDLY rather than skipping silently - a silent skip here would
 		// recreate the exact undisclosed-revoke hazard this warning exists to
 		// remove, while looking identical in plan output to "nobody else has
@@ -1537,6 +1581,13 @@ func (r *CloudAccessResource) readScopedProjectRoles(ctx context.Context, member
 
 	roles, err := cloudAccessProjectRoles(ctx, r.client, projectIDs)
 	if err != nil {
+		if isOrgConvertedConflict(err) {
+			// Same classification as the member-list read above: the project
+			// collaborator read is refused in a converted organization, and
+			// this resource cannot govern what it cannot read.
+			addOrgConvertedReadError(&diags, err, "State is left unchanged. The resource cannot be refreshed or applied in a converted organization.")
+			return nil, diags
+		}
 		// An unreadable project is an ERROR, not a skipped entry. Silently omitting
 		// it would report its roles as absent, and for an authoritative resource
 		// "absent" is an instruction to revoke - so a transient read failure would

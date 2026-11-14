@@ -1,0 +1,7 @@
+```release-note:fixed
+resource/anyscale_cloud_access: a converted organization's refusals now carry the dedicated diagnostic everywhere - the refused member and project reads say to run `terraform state rm` and manage access with `anyscale_iam_role_grant` instead of surfacing a generic read error, destroy outside a refresh warns and removes the resource from state, and the first-apply disclosure names the refusal instead of a transient miss
+```
+
+```release-note:fixed
+resource/anyscale_cloud_access: legacy writes refused while a conversion to role bindings is running now say so - "Organization Is Converting to Role Bindings", with retry guidance - instead of a raw conflict or a converted-org diagnostic that would point at migrating before the conversion finishes
+```
