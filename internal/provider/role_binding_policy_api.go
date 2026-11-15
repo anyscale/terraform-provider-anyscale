@@ -88,12 +88,14 @@ type roleBindingPolicyApplyResponse struct {
 // Refusal detail substrings of PUT .../policy. Full texts:
 //   - 403 "This policy would revoke your own role binding 'rb_..'. Name it in the policy to keep it." (measured)
 //   - 409 "This policy would revoke the frozen role binding 'rb_..'. Name it in the policy to keep it." (traced)
-//   - 403 "You do not manage IAM on <type> '<id>'." for a scope that is deleted,
-//     does not exist, or that the caller does not manage IAM on (measured)
+//
+// The manage-IAM 403 ("You do not manage IAM on <type> '<id>'.", measured,
+// answered for a scope that is deleted, does not exist, or that the caller
+// does not manage IAM on) is matched by roleBindingManageIAMSubstring in
+// iam_access_diagnostics.go, which also builds its diagnostic.
 const (
 	policyOwnBindingSubstring    = "would revoke your own role binding"
 	policyFrozenBindingSubstring = "would revoke the frozen role binding"
-	policyManageIAMSubstring     = "You do not manage IAM on"
 )
 
 // policyRefusedBindingID extracts the rb_ ID a revoke refusal names.
@@ -341,9 +343,24 @@ func namePolicyElement(detail string, index [][]policyElement) string {
 	return fmt.Sprintf("%s (role %q, %s %q)", detail, e.RoleID, e.PrincipalType, e.PrincipalID)
 }
 
-// addPolicyWriteError reports a refused PUT .../policy, dry run or not. op names
-// the call; outcome, when set, says what the refusal means for state.
-func addPolicyWriteError(ctx context.Context, client *Client, diags *diag.Diagnostics, op string, index [][]policyElement, err error, outcome string) {
+// policyWriteOpPhrase names the refused policy write for a diagnostic. op is
+// the label the generic API error also uses; the phrase is what the
+// manage-IAM diagnostic says the caller was doing.
+func policyWriteOpPhrase(op string) string {
+	switch {
+	case strings.Contains(op, "for destroy"):
+		return "applying the role binding policy for destroy"
+	case strings.Contains(op, "check"):
+		return "checking the role binding policy"
+	default:
+		return "applying the role binding policy"
+	}
+}
+
+// addPolicyWriteError reports a refused PUT .../policy, dry run or not. op
+// names the call on the scope (scopeType, scopeID); outcome, when set, says
+// what the refusal means for state.
+func addPolicyWriteError(ctx context.Context, client *Client, diags *diag.Diagnostics, op, scopeType, scopeID string, index [][]policyElement, err error, outcome string) {
 	detail := extractAPIErrorDetail(err)
 	switch {
 	case isStatusWithSubstring(err, http.StatusForbidden, policyOwnBindingSubstring):
@@ -355,9 +372,9 @@ func addPolicyWriteError(ctx context.Context, client *Client, diags *diag.Diagno
 	case isStatusWithSubstring(err, http.StatusForbidden, roleBindingSelfGrantSubstring):
 		diags.AddError("Cannot Grant a Role to the Provider's Own Identity",
 			withOutcome(namePolicyElement(detail, index)+" Grant it to a user group this identity belongs to, or apply with a different identity.", outcome))
-	case isStatusWithSubstring(err, http.StatusForbidden, policyManageIAMSubstring):
-		diags.AddError("Cannot Manage IAM on Scope",
-			withOutcome(detail+" The scope does not exist, or this identity does not manage IAM on it.", outcome))
+	case isStatusWithSubstring(err, http.StatusForbidden, roleBindingManageIAMSubstring):
+		diags.AddError(iamManageAccessSummary,
+			withOutcome(iamManageAccessDetail(detail, policyWriteOpPhrase(op), iamScopeDesc(scopeType, scopeID), true), outcome))
 	case isRoleBindingAdminGroupRemovalRefusal(err):
 		// A destroy's policy omits the admin group's binding because
 		// nothing is kept; an ordinary apply omits it because roles left
@@ -375,7 +392,11 @@ func addPolicyWriteError(ctx context.Context, client *Client, diags *diag.Diagno
 		addOrgNotConvertedError(diags, err, outcome)
 	case isRoleBindingsDisabled(err):
 		// PUT also answers 404 for an unknown role or group, so ask whether
-		// the feature is on before calling it off.
+		// the feature is on before calling it off. A 404 that names a user
+		// group is split further by reading the group back: the write routes
+		// refuse a group the caller cannot see for them with the same
+		// "not found" the API gives for a deleted group, while GET still
+		// reads it - that refusal reports lost IAM, not a missing group.
 		enabled, probeErr := roleBindingsEnabled(ctx, client)
 		switch {
 		case probeErr != nil:
@@ -383,6 +404,21 @@ func addPolicyWriteError(ctx context.Context, client *Client, diags *diag.Diagno
 		case !enabled:
 			addRoleBindingsDisabledError(diags, outcome)
 		default:
+			if m := roleBindingGroupNotFoundDetail.FindStringSubmatch(detail); m != nil {
+				_, getErr := getUserGroup(ctx, client, m[1])
+				switch {
+				case getErr == nil:
+					diags.AddError(iamManageAccessSummary,
+						withOutcome(iamManageAccessGroupUnseenDetail(namePolicyElement(detail, index), policyWriteOpPhrase(op), iamScopeDesc(scopeType, scopeID)), outcome))
+					return
+				case !isUserGroupNotFound(getErr):
+					// The group read-back itself failed, so the two halves of
+					// this 404 - deleted, or unseen - stay unverified.
+					diags.AddError("Role or User Group Not Found",
+						withOutcome(namePolicyElement(detail, index)+" Reading the group to tell a deleted group from an unseen one failed: "+extractAPIErrorDetail(getErr), outcome))
+					return
+				}
+			}
 			diags.AddError("Role or User Group Not Found", withOutcome(namePolicyElement(detail, index), outcome))
 		}
 	default:
@@ -398,9 +434,9 @@ func addPolicyWriteError(ctx context.Context, client *Client, diags *diag.Diagno
 // a warning whose detail says exactly that the apply would fail; the apply
 // itself still refuses - the real PUT answers with the same refusal the
 // dry-run saw.
-func addPolicyWritePlanWarning(ctx context.Context, client *Client, diags *diag.Diagnostics, op string, index [][]policyElement, err error) {
+func addPolicyWritePlanWarning(ctx context.Context, client *Client, diags *diag.Diagnostics, op, scopeType, scopeID string, index [][]policyElement, err error) {
 	var scratch diag.Diagnostics
-	addPolicyWriteError(ctx, client, &scratch, op, index, err, "")
+	addPolicyWriteError(ctx, client, &scratch, op, scopeType, scopeID, index, err, "")
 	for _, d := range scratch {
 		if d.Severity() == diag.SeverityWarning {
 			// A warning from the check stays as it is: only errors are

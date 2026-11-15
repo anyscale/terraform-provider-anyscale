@@ -348,3 +348,70 @@ func TestAccIAMRoleBindingResource_DestroyMixHintCLI(t *testing.T) {
 	}
 	t.Errorf("no destroy-plan warning; diagnostics: %v", cliDiagnostics(lines, ""))
 }
+
+// A policy plan-time check refused with the manage-IAM 403 (measured on the
+// real API as "You do not manage IAM on <type> '<id>'.") surfaces as a
+// warning, not a plan error: the summary is the manage-access one, the detail
+// is prefixed "If applied, this change fails:", and it carries the operation,
+// the scope it names, the remedy, the deleted-scope clause, and the
+// destroy-is-unaffected note.
+func TestAccIAMRoleBindingResource_ManageIAMOnWriteWarningCLI(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newPolicyMock(t)
+	m.setNoIAM("project", pmProject, true)
+
+	run := cliDevWorkspace(t, pmConfig(m, "project_id", pmProject, pmBase()...))
+	lines := pmRunOK(t, run, "plan", "-json")
+	pmExpectWarning(t, lines, "Not Allowed to Manage Access",
+		"If applied, this change fails:",
+		"You do not manage IAM on project '"+pmProject+"'.",
+		"checking the role binding policy on project \""+pmProject+"\"",
+		"requires an identity that manages IAM there",
+		"the Admin role there",
+		"If the scope was deleted, this refusal also appears; check it still exists.",
+		"the destroy itself is not affected")
+
+	if real, dry := pmApplyBodies(t, m.takeRequests()); len(real) != 0 || len(dry) == 0 {
+		t.Errorf("plan made %d applies and %d dry runs, want 0 and at least 1", len(real), len(dry))
+	}
+
+	// The apply, which really PUTs, still refuses with the same diagnostic
+	// as a plan error.
+	lines, out, err := run("apply", "-json", "-auto-approve")
+	if err == nil || len(cliDiagnostics(lines, "error")) == 0 {
+		t.Fatalf("apply should refuse with an error: %v %v\n%s", err, cliDiagnostics(lines, "error"), out)
+	}
+	found := false
+	for _, d := range cliDiagnostics(lines, "error") {
+		if strings.HasPrefix(d, "error: Not Allowed to Manage Access") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("apply error should be the manage-access one; diagnostics: %v", cliDiagnostics(lines, "error"))
+	}
+}
+
+// A policy plan-time check that names a user group it cannot see as not
+// found ("roles[i].principals[j]: <detail>", measured on the real API) while
+// the group still reads back with GET: the warning says lost IAM on the
+// group - this identity cannot bind roles for it - prefixed "If applied,
+// this change fails:".
+func TestAccIAMRoleBindingResource_InvisibleGroupOnWriteWarningCLI(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newPolicyMock(t)
+	invisible := "ug_policyinvisible000000001"
+	m.addInvisibleGroup(invisible)
+
+	run := cliDevWorkspace(t, pmConfig(m, "project_id", pmProject, append(pmBase(), pmRole(pmReader, nil, []string{invisible}))...))
+	lines := pmRunOK(t, run, "plan", "-json")
+	pmExpectWarning(t, lines, "Not Allowed to Manage Access",
+		"If applied, this change fails:",
+		"roles[1].principals[0]: User group '"+invisible+"' not found.",
+		"(role \""+pmReader+"\", user_group \""+invisible+"\")",
+		"names a user group this identity cannot bind roles for")
+	if real, dry := pmApplyBodies(t, m.takeRequests()); len(real) != 0 || len(dry) == 0 {
+		t.Errorf("plan made %d applies and %d dry runs, want 0 and at least 1", len(real), len(dry))
+	}
+}

@@ -229,3 +229,29 @@ func TestAccIAMUserGroupResource_MockGoneAfterWriteDestroySucceeds(t *testing.T)
 		t.Errorf("group count after destroy = %d, want 0", got)
 	}
 }
+
+// TestAccIAMUserGroupResource_MockCreateForbidden drives Create: a 403
+// (measured on the real API as "Permission denied.") reports lost IAM on the
+// organization with the manage-access diagnostic, names the operation and
+// scope, and creates nothing.
+func TestAccIAMUserGroupResource_MockCreateForbidden(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newUserGroupMockServer(t, ugUserA)
+	m.setCreateForbidden("Permission denied.")
+	check, assertCalled := rbErrorCheck(t,
+		regexp.MustCompile(`(?s)Not\s+Allowed\s+to\s+Manage\s+Access.*`+
+			`Permission\s+denied\..*`+
+			`creating\s+a\s+user\s+group\s+on\s+the\s+organization.*`+
+			`requires\s+an\s+identity\s+that\s+manages\s+IAM\s+there.*`+
+			`Apply\s+with\s+an\s+identity\s+that\s+manages\s+IAM\s+on\s+that\s+scope.*ask\s+an\s+admin`),
+		scopedAdminRefusal)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		ErrorCheck:               check,
+		Steps:                    []resource.TestStep{{Config: ugMockConfig(m, "tfacc-ug-forbidden-create")}},
+	})
+	assertCalled()
+	if got := m.groupCount(); got != 0 {
+		t.Errorf("refused create left %d groups behind, want 0", got)
+	}
+}

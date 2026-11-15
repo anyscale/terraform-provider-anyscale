@@ -207,3 +207,99 @@ func TestAccIAMRoleGrantResource_UnrecognizedConflictPassesThrough(t *testing.T)
 	})
 	assertCalled()
 }
+
+// ---- writes the API refuses because the caller does not manage IAM ----
+
+// A create refused with the manage-IAM 403 (measured on the real API as
+// "You do not manage IAM on <type> '<id>'.") reports lost IAM: the
+// diagnostic names the operation and scope and says what identity to apply
+// with - never a duplicate, never an import hint.
+func TestAccIAMRoleGrantResource_ManageIAMOnCreate(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newRBMock(t)
+	orgID := "org_00000000000000000000000001"
+	m.setCreateForbidden(fmt.Sprintf("You do not manage IAM on organization '%s'.", orgID))
+	check, assertCalled := rbErrorCheck(t,
+		regexp.MustCompile(`(?s)Not\s+Allowed\s+to\s+Manage\s+Access.*`+
+			`You\s+do\s+not\s+manage\s+IAM\s+on\s+organization\s+'`+orgID+`'.*`+
+			`creating\s+a\s+role\s+grant\s+on\s+organization\s+"`+orgID+`".*`+
+			`requires\s+an\s+identity\s+that\s+manages\s+IAM\s+there.*`+
+			`Apply\s+with\s+an\s+identity\s+that\s+manages\s+IAM\s+on\s+that\s+scope.*`+
+			`Admin\s+role\s+there.*ask\s+an\s+admin.*If\s+the\s+scope\s+was\s+deleted`),
+		rbImportHint, rbAlreadyExists)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		ErrorCheck:               check,
+		CheckDestroy:             rbDestroyed(m),
+		Steps: []resource.TestStep{{
+			Config: m.providerBlock() + fmt.Sprintf(`
+resource "anyscale_iam_role_grant" "test" {
+  user_group_id   = %q
+  role_id         = %q
+  organization_id = %q
+}
+`, rbGroup, rbRole, orgID),
+		}},
+	})
+	assertCalled()
+}
+
+// A create that names a group the write route refuses as not found, while
+// the group itself still reads back with GET ("User group 'ug_...' not
+// found.", measured): lost IAM on the group, not a missing group, so the
+// manage-access diagnostic gets the group wording.
+func TestAccIAMRoleGrantResource_InvisibleGroupOnCreate(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newRBMock(t)
+	invisible := "ug_00000000000000000000000099"
+	m.addInvisibleGroup(invisible)
+	check, assertCalled := rbErrorCheck(t,
+		regexp.MustCompile(`(?s)Not\s+Allowed\s+to\s+Manage\s+Access.*`+
+			`User\s+group\s+'`+invisible+`'\s+not\s+found\..*`+
+			`names\s+a\s+user\s+group\s+this\s+identity\s+cannot\s+bind\s+roles\s+for.*`+
+			`Apply\s+with\s+an\s+identity\s+that\s+manages\s+IAM\s+on\s+that\s+scope.*ask\s+an\s+admin`),
+		rbImportHint, rbAlreadyExists)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		ErrorCheck:               check,
+		CheckDestroy:             rbDestroyed(m),
+		Steps: []resource.TestStep{{
+			Config: m.providerBlock() + fmt.Sprintf(`
+resource "anyscale_iam_role_grant" "test" {
+  user_group_id = %q
+  role_id       = %q
+  cloud_id      = %q
+}
+`, invisible, rbRole, rbCloud),
+		}},
+	})
+	assertCalled()
+}
+
+// A create that names a group which does not read back either keeps the
+// ordinary 404 reporting: the raw API error, never the manage-access
+// diagnostic.
+func TestAccIAMRoleGrantResource_UnknownGroupOnCreate(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newRBMock(t)
+	unknown := "ug_00000000000000000000000098"
+	check, assertCalled := rbErrorCheck(t,
+		regexp.MustCompile(`(?s)Failed\s+to\s+create\s+role\s+binding\s+\(HTTP\s+404\).*`+
+			`User\s+group\s+'`+unknown+`'\s+not\s+found`),
+		regexp.MustCompile(`Not\s+Allowed\s+to\s+Manage\s+Access`))
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		ErrorCheck:               check,
+		CheckDestroy:             rbDestroyed(m),
+		Steps: []resource.TestStep{{
+			Config: m.providerBlock() + fmt.Sprintf(`
+resource "anyscale_iam_role_grant" "test" {
+  user_group_id = %q
+  role_id       = %q
+  cloud_id      = %q
+}
+`, unknown, rbRole, rbCloud),
+		}},
+	})
+	assertCalled()
+}

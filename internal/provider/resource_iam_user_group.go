@@ -91,6 +91,13 @@ func (r *IAMUserGroupResource) Create(ctx context.Context, req resource.CreateRe
 			r.addDuplicateNameError(ctx, &resp.Diagnostics, name, err)
 			return
 		}
+		if isHTTPStatus(err, http.StatusForbidden) {
+			// Creating a group manages IAM on the organization, and a 403
+			// (measured: "Permission denied.") means this identity does not
+			// manage IAM there.
+			addIAMManageAccessError(&resp.Diagnostics, extractAPIErrorDetail(err), "creating a user group", "the organization", false)
+			return
+		}
 		AddAPIError(&resp.Diagnostics, "create user group", err)
 		return
 	}
