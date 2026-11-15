@@ -254,7 +254,8 @@ func (r *IAMRoleBindingResource) ModifyPlan(ctx context.Context, req resource.Mo
 		if creating {
 			resp.Diagnostics.AddWarning("Role Binding Not Checked at Plan",
 				fmt.Sprintf("The %s ID is not known until apply, so this plan cannot check the policy or list the bindings the first apply revokes. "+
-					"Anyscale grants the identity that creates a project or cloud its owner role on it; name that binding in roles, or the first apply fails with HTTP 403.",
+					"Anyscale grants the identity that creates a project or cloud its Admin role on it (stored as Organization owner); "+
+					"name that binding in roles, or the first apply fails with HTTP 403.",
 					scopeType))
 		}
 		return
