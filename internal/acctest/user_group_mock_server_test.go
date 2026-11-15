@@ -49,6 +49,16 @@ type userGroupMockServer struct {
 	listPageSize int
 	// writes records every mutating request in order.
 	writes []string
+
+	// scoped simulates a token that manages IAM on some but not all of the
+	// resources the groups reach: every group WRITE answers 404 with the
+	// same detail as a deleted group, while reads (GET group, members,
+	// memberships, org collaborators) still answer normally.
+	scoped bool
+	// vanishOnWrite deletes the group on its first WRITE and then answers
+	// 404 with the same detail, so the read-back GET finds nothing: the
+	// "the group really is gone" half of the 404 pair.
+	vanishOnWrite bool
 }
 
 type userGroupMockGroup struct {
@@ -166,6 +176,18 @@ func (m *userGroupMockServer) groupCount() int {
 	return len(m.groups)
 }
 
+func (m *userGroupMockServer) setScoped(v bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.scoped = v
+}
+
+func (m *userGroupMockServer) setVanishOnWrite(v bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.vanishOnWrite = v
+}
+
 func (m *userGroupMockServer) takeWrites() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -218,6 +240,27 @@ func (m *userGroupMockServer) serve(w http.ResponseWriter, r *http.Request) {
 			entry += " " + strings.TrimSpace(string(body))
 		}
 		m.writes = append(m.writes, entry)
+	}
+
+	// The scoped-IAM refusal (and the vanish knob) applies to the group
+	// WRITE routes only; GET never carries it, so a read-back still sees a
+	// live group that only its writes report missing.
+	if (m.scoped || m.vanishOnWrite) && r.Method != http.MethodGet {
+		const base = "/api/v2/user_groups"
+		writePath := r.URL.Path
+		if writePath == base+"/" {
+			// Create names no group; the refusal is about a caller reaching
+			// an existing one.
+		} else if strings.HasPrefix(writePath, base+"/") {
+			id := writePath[len(base)+1:]
+			id = strings.TrimSuffix(id, "/members")
+			if m.vanishOnWrite {
+				delete(m.groups, id)
+				m.vanishOnWrite = false
+			}
+			m.fail(w, http.StatusNotFound, fmt.Sprintf("User group with id '%s' not found.", id))
+			return
+		}
 	}
 
 	const base = "/api/v2/user_groups"
