@@ -1,4 +1,4 @@
-// Real-infrastructure tests for anyscale_runtime_env_package: the Gate 1 evidence in
+// Real-infrastructure tests for anyscale_runtime_env_package: the real-API confirmation for
 // docs/decisions/service-working-dir-upload/README.md. Both upload to the pinned static VM
 // cloud's data bucket. Nothing can delete those objects, but the fixtures are fixed, so repeated
 // runs write the same keys instead of accumulating. Run one at a time:
@@ -80,9 +80,10 @@ app = Marker.bind()
 	}
 }
 
-// TestAccRuntimeEnvPackageResource_RealInfra covers G1-a/b/c (and G1-g/h read-only probes when
-// such clouds exist in the org): the presigned-URL response shape for a missing object, a real
-// upload and its READ re-check, the uploaded bytes, an empty re-plan, and cloud scoping.
+// TestAccRuntimeEnvPackageResource_RealInfra covers the presigned-URL response shape for a
+// missing object, a real upload and its READ re-check, the uploaded bytes, an empty re-plan,
+// and cloud scoping, plus read-only probes for other cloud kinds when such clouds exist in
+// the org.
 func TestAccRuntimeEnvPackageResource_RealInfra(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	SkipIfNoRealInfra(t)
@@ -95,21 +96,21 @@ func TestAccRuntimeEnvPackageResource_RealInfra(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	// G1-a: READ for an object that does not exist.
+	// READ for an object that does not exist.
 	missing, err := provider.RequestRuntimeEnvPackageURL(ctx, client, cloud.ID, "", "tfacc-gate1-probe-missing.zip", provider.CloudDataBucketRead)
 	if err != nil {
-		t.Fatalf("G1-a: %v", err)
+		t.Fatalf("READ (missing object): %v", err)
 	}
-	t.Logf("G1-a READ (missing): %s", presignShape(missing))
+	t.Logf("READ (missing): %s", presignShape(missing))
 	keyPattern := regexp.MustCompile(`^[^/]+/` + regexp.QuoteMeta(cloud.ID) + `/runtime_env_packages/tfacc-gate1-probe-missing\.zip$`)
 	if missing.FileExists || missing.URLScheme != "http" || !keyPattern.MatchString(missing.BucketPath) ||
 		missing.FileURI != "s3://"+missing.BucketName+"/"+missing.BucketPath {
-		t.Fatalf("G1-a: unexpected shape: %s", presignShape(missing))
+		t.Fatalf("unexpected shape: %s", presignShape(missing))
 	}
 
-	// G1-c: a cloud resource from another cloud is refused for this cloud.
+	// A cloud resource from another cloud is refused for this cloud.
 	checkForeignCloudResourceRefused(t, ctx, client, cloud.ID)
-	// G1-g / G1-h: read-only probes, only if the org already has such clouds.
+	// Read-only probes against other cloud kinds, only if the org already has such clouds.
 	probeOtherCloudKinds(t, ctx, client, cloud.ID)
 
 	dir := t.TempDir()
@@ -128,16 +129,16 @@ resource "anyscale_runtime_env_package" "test" {
 				Config: config,
 				Check: func(s *terraform.State) error {
 					a := s.RootModule().Resources["anyscale_runtime_env_package.test"].Primary.Attributes
-					t.Logf("G1-b uploaded object: %s", a["uri"])
+					t.Logf("uploaded object: %s", a["uri"])
 					if !strings.HasSuffix(a["uri"], "/"+a["relative_path"]) || !strings.HasSuffix(a["relative_path"], "/pkg_"+a["content_hash"]+".zip") {
 						return fmt.Errorf("uri %q / relative_path %q / content_hash %q disagree", a["uri"], a["relative_path"], a["content_hash"])
 					}
-					// G1-b: the object now exists, and its bytes are the package.
+					// The object now exists, and its bytes are the package.
 					got, err := provider.RequestRuntimeEnvPackageURL(ctx, client, cloud.ID, "", "pkg_"+a["content_hash"]+".zip", provider.CloudDataBucketRead)
 					if err != nil {
 						return err
 					}
-					t.Logf("G1-b READ (after upload): %s", presignShape(got))
+					t.Logf("READ (after upload): %s", presignShape(got))
 					if !got.FileExists || got.FileSize <= 0 || got.FileURI != a["uri"] {
 						return fmt.Errorf("after upload: %s", presignShape(got))
 					}
@@ -211,7 +212,7 @@ func downloadPresigned(ctx context.Context, presigned string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// checkForeignCloudResourceRefused is G1-c: a WRITE request naming another cloud's cloud
+// checkForeignCloudResourceRefused: a WRITE request naming another cloud's cloud
 // resource must 404. Nothing is written either way: the request only mints a URL. Without
 // another cloud in the org, a nonexistent resource ID checks the same 404 branch
 // (_get_cloud_resource_record answers both cases identically).
@@ -224,7 +225,7 @@ func checkForeignCloudResourceRefused(t *testing.T, ctx context.Context, client 
 		} `json:"results"`
 	}](ctx, client, http.MethodGet, "/api/v2/clouds?count=50", nil, http.StatusOK)
 	if err != nil {
-		t.Fatalf("G1-c: list clouds: %v", err)
+		t.Fatalf("list clouds: %v", err)
 	}
 	for _, other := range list.Results {
 		if other.ID == cloudID {
@@ -240,13 +241,13 @@ func checkForeignCloudResourceRefused(t *testing.T, ctx context.Context, client 
 	}
 	_, err = provider.RequestRuntimeEnvPackageURL(ctx, client, cloudID, foreign, "tfacc-gate1-probe-foreign.zip", provider.CloudDataBucketWrite)
 	if !errors.Is(err, provider.ErrNotFound) {
-		t.Fatalf("G1-c: %s was not refused with 404: %v", label, err)
+		t.Fatalf("%s was not refused with 404: %v", label, err)
 	}
-	t.Logf("G1-c: %s is refused with 404", label)
+	t.Logf("%s is refused with 404", label)
 }
 
-// probeOtherCloudKinds runs a READ-only presign against a Kubernetes cloud (G1-g) and an
-// Anyscale-hosted cloud (G1-h) if the org already has one. It creates nothing.
+// probeOtherCloudKinds runs a READ-only presign against a Kubernetes cloud and an
+// Anyscale-hosted cloud if the org already has one. It creates nothing.
 func probeOtherCloudKinds(t *testing.T, ctx context.Context, client *provider.Client, skipCloudID string) {
 	t.Helper()
 	list, err := provider.DoRequestAndParse[struct {
@@ -258,7 +259,7 @@ func probeOtherCloudKinds(t *testing.T, ctx context.Context, client *provider.Cl
 		} `json:"results"`
 	}](ctx, client, http.MethodGet, "/api/v2/clouds?count=50", nil, http.StatusOK)
 	if err != nil {
-		t.Logf("G1-g/h: could not list clouds: %v", err)
+		t.Logf("could not list clouds: %v", err)
 		return
 	}
 	var k8sDone, hostedDone bool
@@ -269,9 +270,9 @@ func probeOtherCloudKinds(t *testing.T, ctx context.Context, client *provider.Cl
 		var label string
 		switch {
 		case c.IsAioa && !hostedDone:
-			label, hostedDone = "G1-h (hosted)", true
+			label, hostedDone = "Anyscale-hosted cloud", true
 		case c.ComputeStack == "K8S" && !k8sDone:
-			label, k8sDone = "G1-g (K8S, READ only)", true
+			label, k8sDone = "Kubernetes cloud (READ only)", true
 		default:
 			continue
 		}
@@ -283,10 +284,10 @@ func probeOtherCloudKinds(t *testing.T, ctx context.Context, client *provider.Cl
 		t.Logf("%s %s/%s: %s", label, c.Provider, c.ComputeStack, presignShape(p))
 	}
 	if !k8sDone {
-		t.Logf("G1-g: no Kubernetes cloud in this org; not probed")
+		t.Logf("no Kubernetes cloud in this org; not probed")
 	}
 	if !hostedDone {
-		t.Logf("G1-h: no Anyscale-hosted cloud in this org; not probed")
+		t.Logf("no Anyscale-hosted cloud in this org; not probed")
 	}
 }
 
@@ -364,7 +365,7 @@ func checkDeployedVersion(svc *provider.ServiceResult, wantImport, wantKey, want
 	return nil
 }
 
-// TestAccRuntimeEnvPackageResource_RealInfraService is G1-e and G1-f: a service deploys the
+// TestAccRuntimeEnvPackageResource_RealInfraService: a service deploys the
 // uploaded s3:// URI, a content change rolls out the new package, and the package referenced as
 // relative_working_dir also deploys on a single-resource cloud. Each step's module exists only in
 // that step's upload, and the live primary version is checked to be the one the step deployed.
@@ -460,14 +461,14 @@ resource "anyscale_service" "test" {
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             NewAPIDestroyCheck("anyscale_service", "/api/v2/services-v2/%s"),
 		Steps: []resource.TestStep{
-			// G1-e: deploy from the uploaded s3:// URI.
+			// Deploy from the uploaded s3:// URI.
 			step("v1", "working_dir", "uri"),
-			// G1-e: a content change uploads a new object and rolls it out.
+			// A content change uploads a new object and rolls it out.
 			withPlanChecks(step("v2", "working_dir", "uri"),
 				plancheck.ExpectResourceAction("anyscale_runtime_env_package.app", plancheck.ResourceActionUpdate),
 				plancheck.ExpectResourceAction("anyscale_service.test", plancheck.ResourceActionUpdate),
 			),
-			// G1-f: relative_working_dir on a single-resource cloud.
+			// relative_working_dir on a single-resource cloud.
 			step("v3", "relative_working_dir", "relative_path"),
 		},
 	})

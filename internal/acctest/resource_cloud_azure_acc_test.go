@@ -16,7 +16,7 @@ import (
 // the two things that would silently corrupt an Azure cloud if this test
 // didn't catch them are covered explicitly below: the abfss:// bucket must
 // never gain or lose its scheme, and azure_config must not be treated as a
-// C3-v2 "required" block (it isn't - only kubernetes_config/object_storage
+// "required" block (it isn't - only kubernetes_config/object_storage
 // are required for K8S, regardless of provider).
 
 // TestAccCloudResource_Lifecycle_AzureK8S_MockServer proves the AKS create ->
@@ -99,7 +99,7 @@ resource "anyscale_cloud" "test" {
 			// both asserted here (not ignored), so this is real round-trip
 			// proof for the abfss:// passthrough and for redis_endpoint, not
 			// just a plan-echo. azure_config is ignored deliberately: it is
-			// optional, and C3-v2's requiredImportConfigBlocks only recovers
+			// optional, and requiredImportConfigBlocks only recovers
 			// kubernetes_config+object_storage for K8S regardless of provider
 			// (same as aws_config/gcp_config never being recovered for a K8S
 			// cloud) - confirmed against the real requiredImportConfigBlocks
@@ -110,7 +110,7 @@ resource "anyscale_cloud" "test" {
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"credentials", "is_empty_cloud",
-					"azure_config", // optional, never recovered at import by design (C3-v2) - same treatment as aws_config/gcp_config for a K8S cloud
+					"azure_config", // optional, never recovered at import by design - same treatment as aws_config/gcp_config for a K8S cloud
 				},
 			},
 			// ImportStateVerify above only proves imported state matches

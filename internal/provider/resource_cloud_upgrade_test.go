@@ -243,7 +243,7 @@ func TestCloudResourceStateUpgradeV0toV1_FullK8SCloud(t *testing.T) {
 }
 
 // Real v1->v2 upgrader test (anyscale_cloud), covering the
-// enable_system_cluster removal (AC22). The v1 fixture sets
+// enable_system_cluster removal. The v1 fixture sets
 // EnableSystemCluster to a real, non-null true (not just BoolNull) so this
 // proves the upgrade tolerates real prior data, not merely an
 // already-empty field. Uses cloudResourceModelV1 (not CloudResourceModel)
@@ -316,7 +316,7 @@ func TestCloudResourceStateUpgradeV1toV2_DropsEnableSystemCluster(t *testing.T) 
 	}
 	// >= 2, not == 2: this test's actual intent is "the v1->v2 bump for the
 	// enable_system_cluster removal landed", not "no later PR ever bumps the
-	// schema again" - PR3's own lineage/log rename bumped it again to 3.
+	// schema again" - the later lineage/log rename bumped it again to 3.
 	if v2SchemaResp.Schema.Version < 2 {
 		t.Fatalf("current schema Version = %d, want >= 2 (bumped for the enable_system_cluster removal)", v2SchemaResp.Schema.Version)
 	}
@@ -358,7 +358,7 @@ func TestCloudResourceStateUpgradeV1toV2_DropsEnableSystemCluster(t *testing.T) 
 }
 
 // TestCloudResourceStateUpgradeV2toV3_RenamesLineageLogFields is the
-// load-bearing proof for PR3's rename: seeds real, non-default values
+// load-bearing proof of the rename: seeds real, non-default values
 // (true, not the zero-value false a bug could hide behind) into the
 // OLD-named fields on a v2 state fixture, drives the real production
 // v2->v3 upgrader, and asserts the NEW-named fields carry those exact

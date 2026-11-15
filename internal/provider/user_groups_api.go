@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 )
 
 // userGroupsBetaBanner opens the MarkdownDescription of every user group
@@ -126,6 +128,47 @@ func getUserGroup(ctx context.Context, client *Client, groupID string) (*userGro
 		return nil, err
 	}
 	return &resp.Result, nil
+}
+
+// classifyUserGroupWriteNotFound decides what a 404 on a user-group WRITE
+// means, by reading the group back. The group write routes answer "User group
+// with id '...' not found." both when the group is deleted and when it
+// merely reaches resources the caller does not manage IAM on: the write
+// path's _get_user_group_record_or_404(group_id, access) (backend
+// user_groups_service.py:595) refuses those callers with the same detail,
+// while the GET path still shows every group. Treating that refusal as
+// "gone" would drop state while the group lives, so the write handler must
+// either confirm the read agrees (gone) or report it.
+//
+// Returns gone=true when the read-back also 404s with the group detail: the
+// group really is deleted. Returns gone=false and a nil readBackErr when the
+// group reads back fine - the write was a permission-led refusal, and the
+// caller reports it with addUserGroupUnmanageableError. Any other read-back
+// failure returns gone=false with readBackErr set; the caller reports that
+// and keeps state.
+func classifyUserGroupWriteNotFound(ctx context.Context, client *Client, groupID string) (gone bool, readBackErr error) {
+	_, err := getUserGroup(ctx, client, groupID)
+	switch {
+	case err == nil:
+		return false, nil
+	case isUserGroupNotFound(err):
+		return true, nil
+	default:
+		return false, err
+	}
+}
+
+// addUserGroupUnmanageableError reports a user-group write refused with a
+// not-found detail while the group itself still reads fine: the caller can
+// see the group but cannot change it. writeErr is the refused write's own
+// error, whose detail is included for the record.
+func addUserGroupUnmanageableError(diags *diag.Diagnostics, groupID string, writeErr error) {
+	diags.AddError("Cannot Manage User Group", fmt.Sprintf(
+		"The API rejected a change to user group %s as not found, but the group still exists and this token can read it - "+
+			"this token does not manage IAM on every resource the group's role bindings reach, and such writes are refused as not found. "+
+			"State is unchanged and the group was not modified. The refused write said: %s\n\n"+
+			"Manage the group with a token that holds IAM management on its scope (an organization admin token), or outside Terraform.",
+		groupID, extractAPIErrorDetail(writeErr)))
 }
 
 // listUserGroups returns every live group in the token's organization.
@@ -247,9 +290,10 @@ func getUserGroupMembers(ctx context.Context, client *Client, groupID string) (m
 	return nil, false, nil
 }
 
-// removeAllUserGroupMembers empties a group. Per the backend source, group
-// delete does not revoke access members derived from the group, while member
-// removal does, so the group is emptied before it is deleted.
+// removeAllUserGroupMembers empties a group. The group resource calls it
+// before deleting the group and the members resource calls it on destroy.
+// Deleting a group retires the role bindings it holds, so the access the group
+// grants ends with the delete.
 //
 // A member who leaves the organization between the listing and the removal
 // makes the backend reject the whole request with 404 "User IDs not found".

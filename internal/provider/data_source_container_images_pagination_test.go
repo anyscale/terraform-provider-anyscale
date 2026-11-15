@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// TestFetchContainerImages_MultiPage is the GATE-F2 multi-page proof for the
+// TestFetchContainerImages_MultiPage is the multi-page proof for the
 // plural container-images data source's list call site. Sibling proof for
 // the sweeper's identical search endpoint lives in
 // internal/acctest/sweeper_container_image_pagination_test.go - same shape,
@@ -19,7 +19,7 @@ import (
 // against a 2-page mock and asserts both pages are collected AND that the
 // second request carries the exact token the first response returned.
 //
-// Post-F2 (6e6ea79): fetchContainerImages calls GET /api/v2/application_templates/
+// fetchContainerImages calls GET /api/v2/application_templates/
 // via the shared PaginatedRequest helper, which threads next_paging_token as a
 // URL query parameter (paging_token) rather than an ext/v0-style request body
 // field. Each result's latest-build summary now arrives embedded on the

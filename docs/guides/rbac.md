@@ -102,9 +102,15 @@ group remove each other's members on every apply, and nothing can detect that fr
 person who leaves the organization drops out of the group; the next plan proposes re-adding them and
 the apply fails, because they are no longer an organization member.
 
-In a [converted organization](#organization-access-mode), the "All users" group adds every joining member
-automatically and refuses removals, so do not manage it with `anyscale_iam_user_group_members`: it would show a
-perpetual diff, then fail with a 409.
+In a [converted organization](#organization-access-mode), Anyscale manages three groups:
+
+- **All users** adds every joining member automatically and refuses removals. Do not manage it with
+  `anyscale_iam_user_group_members`: it would show a perpetual diff, then fail with a 409.
+- **Service accounts** holds every service account in the organization. Its members cannot be added or
+  removed, and the group cannot be deleted or renamed. Do not manage it with
+  `anyscale_iam_user_group_members` either.
+- The **organization admin group** cannot be deleted or renamed, its last member cannot be removed, and
+  service accounts cannot join it.
 
 ### Directory-synced groups are read-only here
 
@@ -196,8 +202,8 @@ and conversion is one-way.
 | Not affected by mode | [`anyscale_iam_user_group`](../resources/iam_user_group.md), [`anyscale_iam_user_group_members`](../resources/iam_user_group_members.md), [`anyscale_iam_organization_user`](../resources/iam_organization_user.md), [`anyscale_project`](../resources/project.md), [`anyscale_cloud`](../resources/cloud.md) (except `auto_add_user`) | same |
 
 The provider does not detect the mode in advance; the API refuses the write and the provider reports it.
-Role bindings are also behind a feature flag (see [Role bindings (Beta)](#role-bindings-beta)). An
-organization is unconverted until an admin converts it.
+Role bindings are also behind a feature flag (see [Role bindings (Beta)](#role-bindings-beta)). A
+new organization starts converted; an existing one stays unconverted until an admin converts it.
 
 **Azure control planes.** On an Anyscale control plane in Azure (`console.azure.anyscale.com`), access
 is managed with Azure role-based access control in the Azure portal, in either mode. When the

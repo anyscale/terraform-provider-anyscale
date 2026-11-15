@@ -1,0 +1,7 @@
+```release-note:fixed
+resource/anyscale_iam_user_group: destroying or renaming a group no longer treats a scoped-IAM refusal as a deleted group - a write answered with "not found" is now read back, and a group that still exists fails with "Cannot Manage User Group" instead of being dropped from state or failing with a raw error
+```
+
+```release-note:fixed
+resource/anyscale_iam_user_group_members: the same not-found read-back now covers removing or changing members, so a scoped-IAM refusal keeps the group and its members intact instead of silently dropping the resource from state
+```

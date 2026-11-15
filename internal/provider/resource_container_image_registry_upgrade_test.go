@@ -11,11 +11,11 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
-// This file is F3's state-upgrade regression: id held the build ID under v0, but a
+// This file is the v0-to-v1 state-upgrade regression: id held the build ID under v0, but a
 // registry's build can be superseded by a new latest build without the resource itself
 // being replaced, so v1 re-keys id to cluster_environment_id instead (see the identity
-// comment on ContainerImageRegistryResourceModel.ID). F5 (digest) landed in the same
-// version bump; it has nothing to migrate and must come back null.
+// comment on ContainerImageRegistryResourceModel.ID). digest is new in
+// v1; it has nothing to migrate and must come back null.
 //
 // Like resource_compute_config_upgrade_test.go's TestComputeConfigStateUpgradeV0toV1, this
 // drives the real exported UpgradeState() map and upgradeContainerImageRegistryStateV0toV1
@@ -115,7 +115,7 @@ func TestContainerImageRegistryStateUpgradeV0toV1(t *testing.T) {
 		}
 	})
 
-	t.Run("digest is null after upgrade (F5: new in v1, nothing to migrate)", func(t *testing.T) {
+	t.Run("digest is null after upgrade (new in v1, nothing to migrate)", func(t *testing.T) {
 		v0Model := minimalV0RegistryModel(t)
 		v1Model, diags := upgradeV0RegistryFixture(t, v0Model)
 		if diags.HasError() {

@@ -163,6 +163,21 @@ func (r *IAMUserGroupResource) Update(ctx context.Context, req resource.UpdateRe
 	// the backend's detail says which, and AddAPIError surfaces it verbatim.
 	group, err := renameUserGroup(ctx, r.client, groupID, plan.Name.ValueString())
 	if err != nil {
+		if isUserGroupNotFound(err) {
+			// A not-found on the rename is either a deleted group or a
+			// scoped-IAM refusal; only the read-back can tell them apart, and
+			// only the real deletion keeps the not-found outcome.
+			gone, readBackErr := classifyUserGroupWriteNotFound(ctx, r.client, groupID)
+			switch {
+			case readBackErr != nil:
+				AddAPIError(&resp.Diagnostics, "read user group back after a refused rename", readBackErr)
+			case !gone:
+				addUserGroupUnmanageableError(&resp.Diagnostics, groupID, err)
+			default:
+				AddAPIError(&resp.Diagnostics, "rename user group", err)
+			}
+			return
+		}
 		AddAPIError(&resp.Diagnostics, "rename user group", err)
 		return
 	}
@@ -182,6 +197,17 @@ func (r *IAMUserGroupResource) Delete(ctx context.Context, req resource.DeleteRe
 	groupID := state.ID.ValueString()
 	if err := removeAllUserGroupMembers(ctx, r.client, groupID); err != nil {
 		if isUserGroupNotFound(err) {
+			// The same 404 answers a scoped-IAM refusal, which must not read as
+			// "already gone": dropping state here would strand a live group.
+			gone, readBackErr := classifyUserGroupWriteNotFound(ctx, r.client, groupID)
+			switch {
+			case readBackErr != nil:
+				AddAPIError(&resp.Diagnostics, "read user group back after a refused write", readBackErr)
+			case !gone:
+				// The group exists and this token cannot change it - an error,
+				// never a silent state drop.
+				addUserGroupUnmanageableError(&resp.Diagnostics, groupID, err)
+			}
 			return
 		}
 		AddAPIError(&resp.Diagnostics, "remove members before deleting user group", err)
@@ -189,6 +215,17 @@ func (r *IAMUserGroupResource) Delete(ctx context.Context, req resource.DeleteRe
 	}
 	if err := deleteUserGroup(ctx, r.client, groupID); err != nil {
 		if isUserGroupNotFound(err) {
+			// Same read-back as above: the delete route refuses the same
+			// scoped-IAM callers with the group-not-found detail.
+			gone, readBackErr := classifyUserGroupWriteNotFound(ctx, r.client, groupID)
+			switch {
+			case readBackErr != nil:
+				AddAPIError(&resp.Diagnostics, "read user group back after a refused delete", readBackErr)
+			case !gone:
+				addUserGroupUnmanageableError(&resp.Diagnostics, groupID, err)
+			default:
+				// Really gone: destroy succeeds.
+			}
 			return
 		}
 		AddAPIError(&resp.Diagnostics, "delete user group", err)

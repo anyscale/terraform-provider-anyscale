@@ -102,7 +102,7 @@ func TestAccIAMOrganizationUsersDataSource_UserFieldsPopulated(t *testing.T) {
 	})
 }
 
-// TestAccIAMOrganizationUsersDataSource_FilterByEmail is DS-OU-6's mutation-proof
+// TestAccIAMOrganizationUsersDataSource_FilterByEmail is the mutation-proof
 // guard for the email filter. The old version only asserted users.# was set,
 // which passes even if the filter is a silent no-op (the current user is
 // always in the unfiltered list too). This asserts every returned user's email
@@ -127,7 +127,7 @@ func TestAccIAMOrganizationUsersDataSource_FilterByEmail(t *testing.T) {
 	})
 }
 
-// TestAccIAMOrganizationUsersDataSource_FilterByName is DS-OU-6's mutation-proof
+// TestAccIAMOrganizationUsersDataSource_FilterByName is the mutation-proof
 // guard for the name filter - same shape as FilterByEmail above.
 func TestAccIAMOrganizationUsersDataSource_FilterByName(t *testing.T) {
 	t.Parallel()
@@ -149,7 +149,7 @@ func TestAccIAMOrganizationUsersDataSource_FilterByName(t *testing.T) {
 }
 
 // TestAccIAMOrganizationUsersDataSource_ServiceAccountFilterPartitionsUsers is
-// DS-OU-6's mutation-proof guard for is_service_account, replacing the old
+// Mutation-proof guard for is_service_account, replacing the old
 // _ServiceAccountsOnly and _UsersOnly tests. Those only asserted users.# was
 // set, which is unfalsifiable in this test org: it currently has zero service
 // accounts, so a real is_service_account=true filter and a completely broken

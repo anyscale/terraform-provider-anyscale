@@ -99,18 +99,11 @@ func TestResolveContainerfile(t *testing.T) {
 	})
 }
 
-// TestTimeoutsCreateResolvesExpectedDuration replaces the now-obsolete
-// TestParseTimeout (parseTimeout/defaultBuildTimeout's hand-rolled string
-// parsing is gone, replaced by timeouts.Value.Create/Update(ctx, default) -
-// per PR2-TIMEOUTS-PLAN.md, the framework's own validator now owns the
-// invalid-format/missing-unit error paths at plan time, so those two cases
-// don't have a unit-level equivalent here anymore). Mirrors the two most
-// meaningful cases from the old table: an omitted value resolving to the
-// real default, and an explicit value parsing correctly.
-//
-// Landed as a compile-unblocking fix while migrating this resource to
-// timeouts{} (PR2) - the full PR2 test contract is owned separately per
-// PR2-TIMEOUTS-PLAN.md and may replace or extend this.
+// TestTimeoutsCreateResolvesExpectedDuration covers the two most
+// meaningful cases of timeouts.Value.Create/Update(ctx, default): an omitted
+// value resolving to the real default, and an explicit value parsing correctly.
+// The framework's own validator owns the invalid-format/missing-unit error
+// paths at plan time, so those cases don't have a unit-level equivalent here.
 func TestTimeoutsCreateResolvesExpectedDuration(t *testing.T) {
 	attrTypes := map[string]attr.Type{"create": types.StringType, "update": types.StringType}
 
@@ -143,11 +136,9 @@ func TestTimeoutsCreateResolvesExpectedDuration(t *testing.T) {
 // TestEvaluateBuildStatus_AllAcceptedStatuses proves evaluateBuildStatus — the pure classifier
 // waitForBuild's polling loop now delegates to — correctly classifies every status the backend's
 // BuildStatus/ClusterEnvironmentBuildStatus enums actually emit, by calling the REAL function
-// rather than a hand-copied switch. That distinction is the whole point: the two tests this
-// replaced (TestBuildStatusValues, TestBuildStatusTerminalCheck) each re-implemented the switch
-// inline using the two-L "cancelled" spelling, so both passed even while the real waitForBuild
-// switch only matched two-L and silently mis-handled the backend's actual one-L "canceled" value
-// as "unknown build status" (F1).
+// rather than a hand-copied switch. That distinction is the whole point: a hand-copied switch
+// can silently diverge from the real one — the backend's actual one-L "canceled" value must not
+// fall through as "unknown build status".
 func TestEvaluateBuildStatus_AllAcceptedStatuses(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -179,8 +170,7 @@ func TestEvaluateBuildStatus_AllAcceptedStatuses(t *testing.T) {
 		},
 		{
 			// Non-nil but empty must fall back the same as nil, not render a bare
-			// trailing colon (was covered only by a hand-copied test, never the
-			// real function — see TestBuildErrorMessageHandling's removal).
+			// trailing colon.
 			name:            "failed with an empty (non-nil) error message also falls back to a generic message",
 			status:          "failed",
 			errorMessage:    strPtr(""),
@@ -190,7 +180,7 @@ func TestEvaluateBuildStatus_AllAcceptedStatuses(t *testing.T) {
 			wantErrExcludes: "build failed:",
 		},
 		{
-			// This is the F1 regression case: the backend's real wire value is one L.
+			// The backend's real wire value is one L.
 			name:            "canceled (one L, the real backend spelling) is a clean terminal cancellation",
 			status:          "canceled",
 			wantDone:        true,
@@ -238,8 +228,8 @@ func TestEvaluateBuildStatus_AllAcceptedStatuses(t *testing.T) {
 				t.Errorf("evaluateBuildStatus(status=%q) err = %q, want it to contain %q", tt.status, err.Error(), tt.wantErrContains)
 			}
 			if tt.wantErrExcludes != "" && strings.Contains(err.Error(), tt.wantErrExcludes) {
-				t.Errorf("evaluateBuildStatus(status=%q) err = %q, must NOT contain %q — that is the exact F1 "+
-					"regression signature of a real status falling through to the default case", tt.status, err.Error(), tt.wantErrExcludes)
+				t.Errorf("evaluateBuildStatus(status=%q) err = %q, must NOT contain %q — that means a real status "+
+					"fell through to the default case", tt.status, err.Error(), tt.wantErrExcludes)
 			}
 		})
 	}
@@ -327,8 +317,8 @@ func TestWaitForBuildRealPath_TerminalStatuses(t *testing.T) {
 				t.Errorf("waitForBuild() error = %q, want it to contain %q", err.Error(), tt.wantErrContains)
 			}
 			if tt.wantErrExcludes != "" && strings.Contains(err.Error(), tt.wantErrExcludes) {
-				t.Errorf("waitForBuild() error = %q, must NOT contain %q — this is F1: a real cancelled build "+
-					"falling through to the default case instead of a clean cancellation error", err.Error(), tt.wantErrExcludes)
+				t.Errorf("waitForBuild() error = %q, must NOT contain %q — that means a real cancelled build "+
+					"fell through to the default case instead of a clean cancellation error", err.Error(), tt.wantErrExcludes)
 			}
 		})
 	}
