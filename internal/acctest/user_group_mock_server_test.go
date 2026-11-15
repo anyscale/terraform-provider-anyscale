@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/text/cases"
 )
 
 // userGroupMockServer is a stateful fake of the user_groups API and the
@@ -23,6 +25,9 @@ import (
 //   - IDs are ug_ + 26 chars; source is "user" for API-created groups.
 //   - Create and rename strip the name; a name taken by a live group is 409
 //     "A user group with the name '<n>' already exists in this organization."
+//     Uniqueness folds case and collapses whitespace, like the backend, and
+//     hiddenNames simulates a group the caller cannot list, which counts
+//     toward uniqueness without appearing in any listing.
 //   - The not-found 404 detail differs by route: GET says "... not found or
 //     does not belong to your organization.", PATCH/DELETE say "... not
 //     found.". Both start "User group with id".
@@ -49,7 +54,10 @@ type userGroupMockServer struct {
 	listPageSize int
 	// writes records every mutating request in order.
 	writes []string
-
+	// hiddenNames are normalized names of groups the caller cannot list -
+	// platform groups such as Anyscale support - which count toward name
+	// uniqueness without appearing in listings.
+	hiddenNames map[string]bool
 	// scoped simulates a token that manages IAM on some but not all of the
 	// resources the groups reach: every group WRITE answers 404 with the
 	// same detail as a deleted group, while reads (GET group, members,
@@ -105,6 +113,15 @@ provider "anyscale" {
 }
 
 // seedGroup inserts a group directly, outside Terraform.
+func (m *userGroupMockServer) setHiddenNameTaken(name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.hiddenNames == nil {
+		m.hiddenNames = map[string]bool{}
+	}
+	m.hiddenNames[foldName(name)] = true
+}
+
 func (m *userGroupMockServer) seedGroup(name string, source *string, memberIDs ...string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -221,9 +238,20 @@ func (m *userGroupMockServer) fail(w http.ResponseWriter, status int, detail str
 	m.reply(w, status, map[string]any{"error": map[string]any{"detail": detail}})
 }
 
+// foldName mirrors the backend's name-uniqueness normalization (product
+// ab183de91af): whitespace runs collapse and case folds away, so
+// "All Users" and "all  users" are the same name here too.
+func foldName(name string) string {
+	return cases.Fold().String(strings.Join(strings.Fields(name), " "))
+}
+
 func (m *userGroupMockServer) nameTaken(name, exceptID string) bool {
+	if m.hiddenNames != nil && m.hiddenNames[foldName(name)] {
+		return true
+	}
+	want := foldName(name)
 	for _, g := range m.groups {
-		if g.Name == name && g.ID != exceptID {
+		if foldName(g.Name) == want && g.ID != exceptID {
 			return true
 		}
 	}

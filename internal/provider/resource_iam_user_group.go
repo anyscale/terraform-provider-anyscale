@@ -61,7 +61,7 @@ func (r *IAMUserGroupResource) Schema(ctx context.Context, req resource.SchemaRe
 			},
 			"name": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The group name, 1-255 characters with no leading or trailing whitespace. Must be unique among the organization's groups. Changing it renames the group in place.",
+				MarkdownDescription: "The group name, 1-255 characters with no leading or trailing whitespace. Must be unique in the organization, ignoring case and spacing. Changing it renames the group in place.",
 				Validators: []validator.String{
 					stringvalidator.UTF8LengthBetween(1, 255),
 					userGroupNameTrimmedValidator{},
@@ -101,25 +101,32 @@ func (r *IAMUserGroupResource) Create(ctx context.Context, req resource.CreateRe
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-// addDuplicateNameError reports a 409 from create. The existing group's ID is
-// looked up so the import command can be copied as-is; if that lookup fails
-// the command keeps a placeholder. The create is never retried.
+// addDuplicateNameError reports a 409 from create. Uniqueness ignores case
+// and spacing, so the existing group is looked up under the same
+// normalization the backend enforces. A listed group gets the import
+// command with its ID; a group this identity cannot list - a platform group
+// such as "Anyscale support", or one outside its reach - cannot be imported,
+// so no import command is offered. The create is never retried.
 func (r *IAMUserGroupResource) addDuplicateNameError(ctx context.Context, diags *diag.Diagnostics, name string, createErr error) {
-	importID := "<group_id>"
-	if existing, err := findUserGroupByName(ctx, r.client, name); err == nil && existing != nil {
-		importID = existing.ID
-		if isUserGroupSCIM(existing) {
-			diags.AddError("User Group Name Already Exists",
-				fmt.Sprintf("%s The existing group (%s) is synced from your identity provider and cannot be imported. Choose a different name.",
-					extractAPIErrorDetail(createErr), existing.ID))
-			return
-		}
-	} else if err != nil {
+	switch existing, err := findUserGroupByNormalizedName(ctx, r.client, name); {
+	case err != nil:
 		tflog.Warn(ctx, "Could not look up the existing user group for the import hint", map[string]any{"error": err.Error()})
+		diags.AddError("User Group Name Already Exists",
+			fmt.Sprintf("%s To manage the existing group with Terraform, import it (its ID could not be looked up):\n\n  terraform import <resource address> <group_id>",
+				extractAPIErrorDetail(createErr)))
+	case existing != nil && isUserGroupSCIM(existing):
+		diags.AddError("User Group Name Already Exists",
+			fmt.Sprintf("%s The existing group (%s) is synced from your identity provider and cannot be imported. Choose a different name.",
+				extractAPIErrorDetail(createErr), existing.ID))
+	case existing != nil:
+		diags.AddError("User Group Name Already Exists",
+			fmt.Sprintf("%s To manage the existing group with Terraform, import it:\n\n  terraform import <resource address> %s",
+				extractAPIErrorDetail(createErr), existing.ID))
+	default:
+		diags.AddError("User Group Name Already Exists",
+			fmt.Sprintf("%s Group names are unique in the organization, ignoring case and spacing. The name collides with a group this identity cannot list, such as a platform group, so it cannot be imported. Choose a different name.",
+				extractAPIErrorDetail(createErr)))
 	}
-	diags.AddError("User Group Name Already Exists",
-		fmt.Sprintf("%s To manage the existing group with Terraform, import it:\n\n  terraform import <resource address> %s",
-			extractAPIErrorDetail(createErr), importID))
 }
 
 func (r *IAMUserGroupResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {

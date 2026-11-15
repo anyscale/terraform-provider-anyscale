@@ -30,7 +30,7 @@ resource "anyscale_iam_user_group" "ml_platform" {
 
 ### Required
 
-- `name` (String) The group name, 1-255 characters with no leading or trailing whitespace. Must be unique among the organization's groups. Changing it renames the group in place.
+- `name` (String) The group name, 1-255 characters with no leading or trailing whitespace. Must be unique in the organization, ignoring case and spacing. Changing it renames the group in place.
 
 ### Read-Only
 
