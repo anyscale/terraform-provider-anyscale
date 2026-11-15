@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+
+	"golang.org/x/text/cases"
 )
 
 // userGroupsBetaBanner opens the MarkdownDescription of every user group
@@ -160,16 +162,27 @@ func listUserGroups(ctx context.Context, client *Client) ([]userGroupResult, err
 	return unique, nil
 }
 
-// findUserGroupByName returns the live group with exactly this name, or nil.
-// Names are unique among an organization's live groups, so there is at most
-// one.
+// normalizeUserGroupName mirrors the uniqueness normalization the backend
+// applies to group names (product ab183de91af): runs of whitespace collapse
+// to single spaces, and case folds away - "All Users", "all  users" and
+// "ALL USERS" are one name as far as uniqueness goes. Groups this identity
+// cannot list count too, so "Anyscale support" is never free.
+func normalizeUserGroupName(name string) string {
+	return cases.Fold().String(strings.Join(strings.Fields(name), " "))
+}
+
+// findUserGroupByName returns the live group whose name matches under the
+// backend's uniqueness normalization, or nil - including when no listed
+// group matches, because the colliding group may be one this identity
+// cannot list.
 func findUserGroupByName(ctx context.Context, client *Client, name string) (*userGroupResult, error) {
 	groups, err := listUserGroups(ctx, client)
 	if err != nil {
 		return nil, err
 	}
+	want := normalizeUserGroupName(name)
 	for i := range groups {
-		if groups[i].Name == name {
+		if normalizeUserGroupName(groups[i].Name) == want {
 			return &groups[i], nil
 		}
 	}
