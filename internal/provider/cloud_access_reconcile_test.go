@@ -1399,26 +1399,16 @@ func TestCloudAccessModifyPlan_RefusesDeclaringOrgAdmins(t *testing.T) {
 		return &m
 	}
 
-	// The admin signal reads out of the API, so at plan it forecasts the
-	// apply's refusal as a warning, not an error.
-	t.Run("declaring an org admin warns, forecasting the apply", func(t *testing.T) {
+	t.Run("declaring an org admin is an error naming them", func(t *testing.T) {
 		mock := newMock()
 		diags := runCloudAccessModifyPlanWithClient(t, cloudAccessTestClient(t, mock.handler(t, cloudID)),
 			planWith("admin@example.com", "alice@example.com"))
 
-		d := cloudAccessFindWarning(diags, "This Member Appears To Be An Organization Admin")
+		d := cloudAccessFindError(diags, "This Member Appears To Be An Organization Admin")
 		if d == nil {
-			t.Fatalf("expected the org-admin forecast warning: %v", diags)
-		}
-		for _, want := range []string{"If applied, this change fails.", "the destroy itself is not affected", "admin@example.com"} {
-			if !strings.Contains(d.Detail(), want) {
-				t.Errorf("forecast detail lacks %q: %s", want, d.Detail())
-			}
+			t.Fatalf("expected the org-admin refusal: %v", diags)
 		}
 		cloudAccessAssertErrorPath(t, d, path.Root("member").AtMapKey("admin@example.com"))
-		if diags.HasError() {
-			t.Fatalf("a forecast warning must not error the plan: %v", diags)
-		}
 	})
 
 	t.Run("every declared admin is reported, not just the first", func(t *testing.T) {
@@ -1429,12 +1419,12 @@ func TestCloudAccessModifyPlan_RefusesDeclaringOrgAdmins(t *testing.T) {
 		for _, email := range []string{"admin@example.com", "other-admin@example.com"} {
 			found := false
 			for _, d := range diags {
-				if d.Severity() == diag.SeverityWarning && d.Summary() == "This Member Appears To Be An Organization Admin" && strings.Contains(d.Detail(), email) {
+				if d.Severity() == diag.SeverityError && strings.Contains(d.Detail(), email) {
 					found = true
 				}
 			}
 			if !found {
-				t.Errorf("expected a warning naming %s: %v", email, diags)
+				t.Errorf("expected an error naming %s: %v", email, diags)
 			}
 		}
 	})
@@ -1443,7 +1433,7 @@ func TestCloudAccessModifyPlan_RefusesDeclaringOrgAdmins(t *testing.T) {
 		mock := newMock()
 		diags := runCloudAccessModifyPlanWithClient(t, cloudAccessTestClient(t, mock.handler(t, cloudID)),
 			planWith("Admin@Example.com"))
-		if cloudAccessFindWarning(diags, "This Member Appears To Be An Organization Admin") == nil {
+		if cloudAccessFindError(diags, "This Member Appears To Be An Organization Admin") == nil {
 			t.Errorf("a differently-cased spelling of the admin's address slipped past the check: %v", diags)
 		}
 	})

@@ -7,5 +7,5 @@ resource/anyscale_service: terraform destroy no longer fails at plan when the pr
 ```
 
 ```release-note:fixed
-resource/anyscale_cloud_access: terraform destroy no longer fails at plan when an unchanged member map includes someone who appears to be an organization admin - an admin declaration that actually changed still warns at plan ("If applied, this change fails") and the apply still records the API's refusal in ungranted_members rather than granting
+resource/anyscale_cloud_access: terraform destroy no longer fails at plan when a declared member became an organization admin out of band - the admin check now skips members whose declaration is unchanged, so an ordinary destroy makes no admin lookup at all. A member declaration that actually changed still errors at plan, since the apply cannot refuse one (a refused grant is recorded in ungranted_members by design)
 ```

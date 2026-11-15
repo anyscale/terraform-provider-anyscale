@@ -1408,25 +1408,26 @@ func (r *CloudAccessResource) refuseDeclaringOrgAdmins(ctx context.Context, plan
 		if !isAdmin {
 			continue
 		}
-		// The admin signal is read out of the API, so it warns at plan - a
-		// forecast of what the apply would answer - instead of erroring: an
-		// error here also blocked 'terraform destroy', which plans the
-		// configuration first in a pass indistinguishable from an ordinary
-		// plan. The apply still refuses: the roles write rejects an org
-		// admin outright, in the reconcile, with no acceptable mid-apply
-		// recovery - and that refusal is an error then.
-		diags.AddAttributeWarning(
+		// This check stays an ERROR, unlike the plan-time API checks
+		// the destroy-gate contract downgrades to warnings: an error here
+		// also blocked 'terraform destroy', but the fix is the unchanged-
+		// member skip above, not a warning. The reconcile deliberately
+		// treats a refused grant as non-fatal (ungranted_members plus a
+		// warning, to avoid tainting), so a downgraded check would mean an
+		// apply that appears to succeed while never granting the admin -
+		// and every later plan retrying it. Apply cannot refuse here, so
+		// the plan must.
+		diags.AddAttributeError(
 			path.Root("member").AtMapKey(email),
 			"This Member Appears To Be An Organization Admin",
-			"If applied, this change fails. "+fmt.Sprintf("%q appears to be an organization admin, based on the best available signal this resource can "+
+			fmt.Sprintf("%q appears to be an organization admin, based on the best available signal this resource can "+
 				"read - not a guarantee. If they are, the cloud roles API refuses to change an organization admin's role, "+
 				"and this resource has no way to recover from that failure mid-apply. Remove that entry from member.\n\n"+
 				"Organization admins are outside this resource's scope in both directions: the member-search endpoint "+
 				"this resource reads never reports them, so a real admin is already invisible on refresh and never "+
 				"revoked. Declaring one here would only ever fail the write - and discovering that after another "+
 				"member's grant already succeeded is exactly the situation this early check exists to catch, even "+
-				"though it cannot catch every case.", email)+
-				"\n\nA terraform destroy also plans the configuration first and may show this warning; the destroy itself is not affected.",
+				"though it cannot catch every case.", email),
 		)
 	}
 }
