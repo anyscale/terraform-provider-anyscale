@@ -1,0 +1,3 @@
+```release-note:fixed
+resource/anyscale_iam_user_group: A duplicate create now finds the existing group under the same uniqueness the backend enforces - ignoring case and spacing - and, when the collision is with a group the identity cannot list such as a platform group, says so and offers no import command.
+```
