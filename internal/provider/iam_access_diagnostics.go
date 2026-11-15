@@ -40,7 +40,7 @@ func iamScopeDesc(resourceType, resourceID string) string {
 	return fmt.Sprintf("%s %q", resourceType, resourceID)
 }
 
-// amiManageAccessDeletedScopeClause is appended for role-grant and policy
+// iamManageAccessDeletedScopeClause is appended for role-grant and policy
 // writes: the API answers the same 403 for a scope that was deleted or never
 // existed, so the detail says to check the scope still exists. User group
 // creates target the organization and do not need it.
