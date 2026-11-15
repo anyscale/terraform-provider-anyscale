@@ -5,6 +5,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
@@ -38,6 +39,26 @@ type inPlaceChange struct {
 	str   string
 	list  []string
 	isStr bool
+	// unknown marks a change whose new value is not decided yet at plan
+	// time: the configuration references a resource the same apply
+	// creates. Unknown means "changed, value not yet known": plan-time
+	// walkers only ask WHETHER something changed. Update re-walks the
+	// now-known plan, so a marker never reaches the PUT builder; if one
+	// ever does, the builder refuses rather than send or delete anything.
+	unknown bool
+}
+
+// hasUnknown reports whether any recorded change still carries a plan-time
+// unknown marker.
+func (c inPlaceChanges) hasUnknown() bool {
+	for _, attrs := range c {
+		for _, change := range attrs {
+			if change.unknown {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // any reports whether at least one in-place attribute changed.
@@ -152,6 +173,10 @@ func stringChange(b map[string]inPlaceChange, ch *stringChangeResult, api string
 		b[api] = inPlaceChange{}
 		return
 	}
+	if ch.unknown {
+		b[api] = inPlaceChange{unknown: true}
+		return
+	}
 	b[api] = inPlaceChange{send: true, str: ch.value, isStr: true}
 }
 
@@ -159,12 +184,22 @@ func stringChange(b map[string]inPlaceChange, ch *stringChangeResult, api string
 // order, or a removal when the plan is null. The Read refresh keeps a
 // same-set state order, so a pure reorder by the practitioner still lands
 // here, and an out-of-band reorder never does.
+//
+// A list carrying an unknown value or element is recorded as changed with no
+// send values and is never converted: unknowns cannot land in a []string,
+// and the conversion error would fail every later plan, destroy included
+// (the value the reader is appending may resolve in the same apply that
+// creates it, e.g. a new security group).
 func listChange(ctx context.Context, b map[string]inPlaceChange, plan, state types.List, api string, d *diag.Diagnostics) {
 	if plan.Equal(state) {
 		return
 	}
 	if plan.IsNull() {
 		b[api] = inPlaceChange{}
+		return
+	}
+	if plan.IsUnknown() || listHasUnknownElement(plan) {
+		b[api] = inPlaceChange{unknown: true}
 		return
 	}
 	var items []string
@@ -175,20 +210,57 @@ func listChange(ctx context.Context, b map[string]inPlaceChange, plan, state typ
 	b[api] = inPlaceChange{send: true, list: items}
 }
 
+// listHasUnknownElement reports whether any element of the list is unknown.
+// A whole-list unknown must be checked separately (IsUnknown).
+func listHasUnknownElement(list types.List) bool {
+	for _, element := range list.Elements() {
+		if element.IsUnknown() {
+			return true
+		}
+	}
+	return false
+}
+
+// listElementsKnown reports whether a list is fully decided: not the
+// unknown value itself, and no unknown elements. A null list is decided.
+func listElementsKnown(list types.List) bool {
+	return !list.IsUnknown() && !listHasUnknownElement(list)
+}
+
+// mapElementsKnown is listElementsKnown for a string map: map keys are static
+// in HCL, so only values can be undecided.
+func mapElementsKnown(m types.Map) bool {
+	if m.IsUnknown() {
+		return false
+	}
+	for _, element := range m.Elements() {
+		if element.IsUnknown() {
+			return false
+		}
+	}
+	return true
+}
+
 // stringChangeResult is what planString computes for one scalar.
 type stringChangeResult struct {
 	changed bool
 	removed bool
 	value   string
+	unknown bool
 }
 
-// planString diffs one scalar pair.
+// planString diffs one scalar pair. An unknown plan value records "changed,
+// not decided yet"; plan-time walkers only ask WHETHER something changed,
+// and Update re-walks the now-known plan for the value.
 func planString(plan, state types.String) *stringChangeResult {
 	if plan.Equal(state) {
 		return nil
 	}
 	if plan.IsNull() {
 		return &stringChangeResult{changed: true, removed: true}
+	}
+	if plan.IsUnknown() {
+		return &stringChangeResult{changed: true, unknown: true}
 	}
 	return &stringChangeResult{changed: true, value: plan.ValueString()}
 }
@@ -486,6 +558,10 @@ func refuseUnsupportedInPlaceChanges(ctx context.Context, b inPlaceBlocks, diags
 		if d.HasError() {
 			diags.Append(d...)
 		} else {
+			// Refusals fire only on decided values: an unknown here defers
+			// to refuseInPlaceChangesOnKnownValues, the Update re-check, so
+			// a config that references a resource the same apply creates
+			// still plans.
 			vpcDiffers := !pm.VPCID.Equal(sm.VPCID)
 			switch {
 			case vpcDiffers && pm.VPCID.IsNull():
@@ -494,6 +570,11 @@ func refuseUnsupportedInPlaceChanges(ctx context.Context, b inPlaceBlocks, diags
 					"aws_config.vpc_id cannot be removed: an AWS VM cloud resource needs a VPC. "+
 						"To move the resource to another VPC, change vpc_id together with its subnets in config, or recreate the resource out of band and re-import it.",
 				)
+			case vpcDiffers && pm.VPCID.IsUnknown():
+				// vpc_id is not decided yet; the Update re-check raises the
+				// refusal if the resolved value is genuinely a bad change.
+			case vpcDiffers && (!listElementsKnown(pm.SubnetIDs) || !mapElementsKnown(pm.SubnetIDsToAZ)):
+				// The subnet forms are not decided yet; defer.
 			case vpcDiffers:
 				subnetsChanged, sd := subnetIDsChanged(ctx, b.planAWS, b.stateAWS)
 				if sd.HasError() {
@@ -565,4 +646,70 @@ func blockRemoved(name string, plan, state types.Object, diags *diag.Diagnostics
 		"The block cannot be removed: every attribute in it now updates in place and the Anyscale API preserves an omitted block, so a removed block would never converge. "+
 			"Keep the block in config; clear it field by field instead if that is what you want (the API clears omitted fields). To recreate the resource, use `terraform state rm` and import after recreating it by hand.",
 	)
+}
+
+// awsSubnetSetChangeSummary and awsSubnetSetChangeDetail are the subnet
+// list-form set-change refusal, shared by the plan-time modifier and the
+// Update re-check so a deferred refusal reads exactly like the plan-time
+// one.
+const (
+	awsSubnetSetChangeSummary = "Changing subnets in place requires aws_config.subnet_ids_to_az"
+	awsSubnetSetChangeDetail  = "With subnet_ids, Anyscale derives availability zones itself and can pair them with the wrong subnets. " +
+		"Rewrite the setting as subnet_ids_to_az with each subnet's zone; the change then applies in place."
+)
+
+// refuseInPlaceChangesOnKnownValues re-runs, in Update and before the first
+// write, every in-place refusal that a plan-time unknown deferred. Plan-time
+// refusals decide nothing on values that are not known yet (a configuration
+// may reference a resource the same apply creates), so this is where those
+// checks land - on the now-known plan, with the same diagnostics.
+func refuseInPlaceChangesOnKnownValues(ctx context.Context, b inPlaceBlocks, diags *diag.Diagnostics) {
+	refuseUnsupportedInPlaceChanges(ctx, b, diags)
+	refuseSubnetSetChangeWhenKnown(ctx, b.planAWS, b.stateAWS, diags)
+}
+
+// refuseSubnetSetChangeWhenKnown raises the subnet list-form set-change
+// refusal on fully decided values. awsSubnetIDsPlanModifier raises it at
+// plan time when the list is known there; an unknown element defers, and
+// this Update re-check is where the deferred refusal lands, so a resolved
+// set change can never become a silent, PUT-less difference.
+func refuseSubnetSetChangeWhenKnown(ctx context.Context, planAWS, stateAWS types.Object, diags *diag.Diagnostics) {
+	if planAWS.IsNull() || planAWS.IsUnknown() || stateAWS.IsNull() || stateAWS.IsUnknown() {
+		return
+	}
+	var pm, sm AWSConfigModel
+	var d diag.Diagnostics
+	d.Append(planAWS.As(ctx, &pm, basetypes.ObjectAsOptions{})...)
+	d.Append(stateAWS.As(ctx, &sm, basetypes.ObjectAsOptions{})...)
+	if d.HasError() {
+		diags.Append(d...)
+		return
+	}
+	if pm.SubnetIDs.IsNull() || !listElementsKnown(pm.SubnetIDs) {
+		return
+	}
+	var planIDs []string
+	if d2 := pm.SubnetIDs.ElementsAs(ctx, &planIDs, false); d2.HasError() {
+		return
+	}
+	if !sm.SubnetIDs.IsNull() && !sm.SubnetIDs.IsUnknown() {
+		var stateIDs []string
+		if d2 := sm.SubnetIDs.ElementsAs(ctx, &stateIDs, false); d2.HasError() {
+			return
+		}
+		if !stringSetsEqual(planIDs, stateIDs) {
+			diags.AddAttributeError(path.Root("aws_config").AtName("subnet_ids"), awsSubnetSetChangeSummary, awsSubnetSetChangeDetail)
+			return
+		}
+		return
+	}
+	if !sm.SubnetIDsToAZ.IsNull() && !sm.SubnetIDsToAZ.IsUnknown() {
+		var stateMap map[string]string
+		if d2 := sm.SubnetIDsToAZ.ElementsAs(ctx, &stateMap, false); d2.HasError() {
+			return
+		}
+		if !stringSetsEqual(planIDs, mapKeys(stateMap)) {
+			diags.AddAttributeError(path.Root("aws_config").AtName("subnet_ids"), awsSubnetSetChangeSummary, awsSubnetSetChangeDetail)
+		}
+	}
 }

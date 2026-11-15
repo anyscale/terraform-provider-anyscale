@@ -779,9 +779,7 @@ func (awsSubnetIDsPlanModifier) PlanModifyList(ctx context.Context, req planmodi
 }
 
 func awsRefuseSubnetSetChange(diags *diag.Diagnostics, p path.Path) {
-	diags.AddAttributeError(p, "Changing subnets in place requires aws_config.subnet_ids_to_az",
-		"With subnet_ids, Anyscale derives availability zones itself and can pair them with the wrong subnets. "+
-			"Rewrite the setting as subnet_ids_to_az with each subnet's zone; the change then applies in place.")
+	diags.AddAttributeError(p, awsSubnetSetChangeSummary, awsSubnetSetChangeDetail)
 }
 
 func mapKeys(m map[string]string) []string {

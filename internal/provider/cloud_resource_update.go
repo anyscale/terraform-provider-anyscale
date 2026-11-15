@@ -70,6 +70,14 @@ func buildCloudResourceUpdateBody(
 	isPrivateCloud bool,
 	wantProvider, wantComputeStack, wantRegion string,
 ) (map[string]any, error) {
+	if changes.hasUnknown() {
+		// Unreachable in a normal run - Update re-walks the known plan and
+		// the walk's guards already refused - but the overlay's send=false
+		// means REMOVAL, so a marker landing here must never be applied.
+		return nil, fmt.Errorf(
+			"internal error: an in-place change still carries a plan-time unknown at PUT time; refusing rather than send or delete values - please report this to the provider developers",
+		)
+	}
 	if live.Provider != wantProvider || live.ComputeStack != wantComputeStack || live.Region != wantRegion {
 		return nil, fmt.Errorf(
 			"cloud resource %s: live provider/compute_stack/region (%s/%s/%s) disagree with Terraform state (%s/%s/%s); refusing to update under a possibly-wrong identity",
