@@ -550,7 +550,7 @@ func TestAccIAMUserGroupResource_MockDuplicateNameVariant(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config:      ugMockConfig(m, "TFACC-ug   MOCK  dup", nil...),
-				ExpectError: regexp.MustCompile(`(?s)already exists.*ignoring\s+case\s+and\s+spacing.*terraform import <resource address> ` + regexp.QuoteMeta(existing)),
+				ExpectError: regexp.MustCompile(`(?s)already exists.*terraform import <resource address> ` + regexp.QuoteMeta(existing)),
 			},
 		},
 	})
@@ -582,6 +582,36 @@ func TestAccIAMUserGroupResource_MockDuplicateNameHidden(t *testing.T) {
 		},
 	})
 	assertCalled()
+}
+
+// TestAccIAMUserGroupResource_MockDataSourceNameMatchedExactly: the user
+// group data source's name argument is matched exactly, even though group
+// names are only UNIQUE ignoring case and spacing - a case variant must not
+// resolve to the look-alike group.
+func TestAccIAMUserGroupResource_MockDataSourceNameMatchedExactly(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newUserGroupMockServer(t)
+	user := "user"
+	m.seedGroup("tfacc-ug exact pin", &user)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		ErrorCheck: func(err error) error {
+			if err == nil {
+				return fmt.Errorf("the case-variant lookup resolved; the data source name argument must be matched exactly")
+			}
+			if matched, _ := regexp.MatchString(`not found|Not Found`, err.Error()); !matched {
+				return fmt.Errorf("expected a not-found diagnostic, got: %w", err)
+			}
+			return nil
+		},
+		Steps: []resource.TestStep{{
+			Config: m.providerBlock() + `
+data "anyscale_iam_user_group" "case_variant" {
+  name = "TFACC-UG EXACT pin"
+}
+`,
+		}},
+	})
 }
 
 // TestAccIAMUserGroupResource_MockNameValidation: the server strips surrounding

@@ -108,7 +108,7 @@ func (r *IAMUserGroupResource) Create(ctx context.Context, req resource.CreateRe
 // such as "Anyscale support", or one outside its reach - cannot be imported,
 // so no import command is offered. The create is never retried.
 func (r *IAMUserGroupResource) addDuplicateNameError(ctx context.Context, diags *diag.Diagnostics, name string, createErr error) {
-	switch existing, err := findUserGroupByName(ctx, r.client, name); {
+	switch existing, err := findUserGroupByNormalizedName(ctx, r.client, name); {
 	case err != nil:
 		tflog.Warn(ctx, "Could not look up the existing user group for the import hint", map[string]any{"error": err.Error()})
 		diags.AddError("User Group Name Already Exists",
@@ -120,7 +120,7 @@ func (r *IAMUserGroupResource) addDuplicateNameError(ctx context.Context, diags 
 				extractAPIErrorDetail(createErr), existing.ID))
 	case existing != nil:
 		diags.AddError("User Group Name Already Exists",
-			fmt.Sprintf("%s Group names are unique in the organization, ignoring case and spacing. To manage the existing group with Terraform, import it:\n\n  terraform import <resource address> %s",
+			fmt.Sprintf("%s To manage the existing group with Terraform, import it:\n\n  terraform import <resource address> %s",
 				extractAPIErrorDetail(createErr), existing.ID))
 	default:
 		diags.AddError("User Group Name Already Exists",
