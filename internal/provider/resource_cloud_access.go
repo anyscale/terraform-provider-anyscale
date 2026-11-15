@@ -24,8 +24,9 @@ import (
 )
 
 // defaultCloudAccessTimeout bounds one Create/Update/Delete reconcile,
-// including every per-write retry J.13 permits (at most 3 attempts per write,
-// exponential backoff capped at cloudAccessRetryMaxBackoff). 5 minutes gives
+// including every per-write retry the bounded policy permits
+// (3 attempts per write, exponential backoff capped at
+// cloudAccessRetryMaxBackoff). 5 minutes gives
 // real headroom even for a large member map with several retried transient
 // failures, while still being a real bound rather than an unbounded reconcile.
 const defaultCloudAccessTimeout = 5 * time.Minute
@@ -1309,7 +1310,7 @@ func (r *CloudAccessResource) refuseDeclaringTheCaller(
 }
 
 // refuseDeclaringOrgAdmins reports an error if the plan declares an
-// organization admin as a member (J.22) - the cloud roles write refuses
+// organization admin as a member - the cloud roles write refuses
 // outright to change an org admin's role, and catching that mid-reconcile
 // (after some other member's grant already succeeded) leaves no acceptable
 // outcome: erroring taints Create, and unmanaged_grants isn't the right place

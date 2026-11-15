@@ -54,25 +54,25 @@ var (
 )
 
 const (
-	// cloudAccessRetryMaxAttempts is J.13's bound: at most three attempts per
+	// cloudAccessRetryMaxAttempts bounds writes: at most three attempts per
 	// write, never unbounded.
 	cloudAccessRetryMaxAttempts   = 3
 	cloudAccessRetryBackoffFactor = 2.0
 )
 
 // cloudAccessRetryableError reports whether err is a genuinely transient
-// condition worth retrying (J.13): 429, 502, 503, 504, or a connection-level
+// condition worth retrying: 429, 502, 503, 504, or a connection-level
 // failure. Deliberately narrow - every other 4xx is a terminal decision, and
 // retrying is safe here only because the roles write has SET semantics
 // (live-confirmed as V8, so a repeat write is idempotent) and the bootstrap
-// already absorbs its own conflict response (J.3); neither holds for a batch
+// already absorbs its own conflict response; neither holds for a batch
 // endpoint, which is why those stay unused here.
 func cloudAccessRetryableError(err error) bool {
 	return transientWriteError(err,
 		http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout)
 }
 
-// cloudAccessDoWriteRetry wraps DoRequestRaw with J.13's bounded retry
+// cloudAccessDoWriteRetry wraps DoRequestRaw with the bounded retry
 // policy. A budget exhausted mid-reconcile converges and records (Ungranted
 // or Unmanaged, plus a warning) rather than erroring - the
 // never-error-after-a-successful-write rule admits no exemption here.
@@ -362,7 +362,7 @@ type cloudAccessReconcileOptions struct {
 	RefuseWhenAutoAddUserEnabled bool
 
 	// RefuseWhenGroupPolicyBound aborts before any write when the cloud carries
-	// a group policy binding (J.20): an asynchronous reconciler flattens group
+	// a group policy binding: an asynchronous reconciler flattens group
 	// membership into the same collaborator rows with no origin marker, so this
 	// resource can't tell a group-derived member from a manual one and would
 	// revoke it only to lose to a later silent re-grant, forever out of
@@ -473,7 +473,8 @@ func reconcileCloudAccess(
 	// case of a cloud with no pending revokes. Unlike auto_add_user, an
 	// inconclusive answer here does NOT abort - see cloudAccessGroupPolicyBinding
 	// for why 403 is the expected, common failure on this BETA endpoint rather
-	// than a rare one, and J.20 in the design record for the full rationale.
+	// than a rare one - see docs/decisions/rbac-surface-consolidation for
+	// the full rationale.
 	if len(toRevoke) > 0 && opts.RefuseWhenGroupPolicyBound {
 		switch status, err := cloudAccessGroupPolicyBinding(ctx, client, cloudID); status {
 		case cloudAccessGroupPolicyPresent:
@@ -529,9 +530,9 @@ func reconcileCloudAccess(
 
 	// A grant failure anywhere in this apply (cloud-scope above, or
 	// project-scope below) suppresses every destructive action for the rest of
-	// this reconcile - J.5's hazard applied to an apply that never reached its
-	// intended end state: revoking outside that unfinished set could leave the
-	// cloud with less access than intended, in the worst case without an owner.
+	// this reconcile: a revoke outside an apply that never reached its
+	// intended end state could leave the cloud with less access than
+	// intended, in the worst case without an owner.
 	anyGrantFailed := len(result.Ungranted) > 0
 
 	// PROJECT PASS, between the cloud grants and the cloud revokes. Before,
@@ -894,7 +895,7 @@ func reconcileProjectRoles(
 		// failure this late (cloud-scope grants above may already have succeeded)
 		// erroring here would taint the resource exactly like an unrecovered grant
 		// failure would - most likely cause in practice is the reconcile's own
-		// context deadline (J.13) firing while this read was in flight or retrying,
+		// context deadline firing while this read was in flight or retrying,
 		// which is a timeout, not a decision, and must converge the same way any
 		// other mid-reconcile shortfall does.
 		reason := "could not re-read the cloud's member list to plan project roles"

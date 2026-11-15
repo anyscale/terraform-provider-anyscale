@@ -184,12 +184,14 @@ func (s *mockInvitationServer) snapshot(id string) (mockInvitation, bool) {
 	return *inv, true
 }
 
-// TestAccIAMOrganizationInvitationResource_Lifecycle_MockServer is the contract's T1/AC
-// mandatory CI-enforced lifecycle test (section 7): Create -> Read -> RequiresReplace on
-// email change -> Delete/invalidate -> Import, all against a scripted mock, no env-var
-// gating, no real invitation sent. Uses a case-stable mock (lowercaseEmail: false) to keep
-// this test focused on general lifecycle correctness - the email-casing defect has its own
-// dedicated regression test above (TestAccIAMOrganizationInvitationResource_MixedCaseEmail_MockServer).
+// TestAccIAMOrganizationInvitationResource_Lifecycle_MockServer is the
+// contract's mandatory CI-enforced lifecycle test: Create -> Read ->
+// RequiresReplace on email change -> Delete/invalidate -> Import, all
+// against a scripted mock, no env-var gating, no real invitation sent.
+// Uses a case-stable mock (lowercaseEmail: false) to keep this test
+// focused on general lifecycle correctness - the email-casing defect
+// has its own dedicated regression test above
+// (TestAccIAMOrganizationInvitationResource_MixedCaseEmail_MockServer).
 func TestAccIAMOrganizationInvitationResource_Lifecycle_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 

@@ -244,7 +244,7 @@ type CloudDeploymentResult struct {
 // OperatorStatusDetails carries Kubernetes Anyscale Operator health details,
 // present once a K8s cloud_resource's operator has reported in. Previously
 // typed as *string on CloudDeploymentResult, which failed to decode as soon
-// as the API returned this object (C4/F2 investigation) - the API has always
+// as the API returned this object - the API has always
 // returned an object here, never a string.
 type OperatorStatusDetails struct {
 	OperatorVersion *string               `json:"operator_version"`
@@ -254,8 +254,7 @@ type OperatorStatusDetails struct {
 
 // OperatorCheckResult is a single named health check the operator reports,
 // e.g. connectivity or permissions checks. Not yet surfaced as its own
-// schema attribute (deferred per CLOUD-SYNC-DESIGN.md C4) - decoded here so
-// it doesn't need touching again when it is.
+// schema attribute - decoded here so it doesn't need touching again when it is.
 type OperatorCheckResult struct {
 	Name    *string `json:"name"`
 	Status  *string `json:"status"`

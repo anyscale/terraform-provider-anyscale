@@ -245,8 +245,8 @@ func TestGenerateRandomStringUniqueness(t *testing.T) {
 	}
 }
 
-// TestGetOrGenerateCredentials_WasPlaceholderSignal is a regression test for
-// C9: getOrGenerateCredentials used to fabricate a placeholder credential
+// TestGetOrGenerateCredentials_WasPlaceholderSignal:
+// getOrGenerateCredentials used to fabricate a placeholder credential
 // with no signal to the caller at all, so a broken all-in-one cloud (config
 // present, credential un-derivable) applied silently. wasPlaceholder must
 // distinguish "fabricated" from "real/derived" so the caller (Create) can
@@ -294,7 +294,7 @@ func TestGetOrGenerateCredentials_WasPlaceholderSignal(t *testing.T) {
 		// kubernetes_config. Before this fix, getOrGenerateCredentials had no AWS
 		// case for this and fell straight through to the placeholder branch,
 		// firing a "set aws_config.controlplane_iam_role_arn" warning that does
-		// not apply to K8S clouds - confirmed live during native-B's real EKS
+		// not apply to K8S clouds - confirmed live against a real EKS
 		// validation (aws-eks-basic, compute_stack = K8S).
 		k8sObj, diags := flattenKubernetesConfig(ctx, &KubernetesConfig{AnyscaleOperatorIAMIdentity: "arn:aws:iam::123:role/eks-operator"})
 		if diags.HasError() {
@@ -324,7 +324,7 @@ func TestGetOrGenerateCredentials_WasPlaceholderSignal(t *testing.T) {
 		// bare string (the AWS/Azure K8S fallback shape) fails that parse and
 		// breaks GCP+K8S cloud creation outright - this test exists because an
 		// earlier version of this fix got that wrong (mirrored AWS's bare-string
-		// return for GCP too) and native-B only ever exercised AWS EKS, not GKE,
+		// return for GCP too) and real-infra validation only ever exercised AWS EKS, not GKE,
 		// so the bug went unexercised until this test.
 		k8sObj, diags := flattenKubernetesConfig(ctx, &KubernetesConfig{AnyscaleOperatorIAMIdentity: "gke-operator@my-project.iam.gserviceaccount.com"})
 		if diags.HasError() {
@@ -359,7 +359,7 @@ func TestGetOrGenerateCredentials_WasPlaceholderSignal(t *testing.T) {
 	t.Run("all-in-one with config present but no derivable role: placeholder AND suspicious", func(t *testing.T) {
 		// aws_config is present (all-in-one, not empty cloud) but its
 		// controlplane_iam_role_arn was left unset - exactly the
-		// forgot-the-role case C9 exists to catch.
+		// forgot-the-role case this signal exists to catch.
 		awsObj, diags := flattenAWSConfig(ctx, &AWSConfig{VPCID: "vpc-123"})
 		if diags.HasError() {
 			t.Fatalf("failed to build test aws_config: %v", diags)

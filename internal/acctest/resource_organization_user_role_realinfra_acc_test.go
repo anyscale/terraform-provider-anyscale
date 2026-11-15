@@ -387,9 +387,9 @@ provider "anyscale" {}
 }
 
 // restoreCollaboratorIfOwner demotes the test member back to collaborator
-// through the legacy endpoint when a failed R5 run left them an owner. The
-// owner precondition in requireRealInfraTestUser would otherwise refuse every
-// later run.
+// through the legacy endpoint when a failed legacy-PUT test run left them
+// an owner. The owner precondition in requireRealInfraTestUser would
+// otherwise refuse every later run.
 func restoreCollaboratorIfOwner(t *testing.T, email, identityID string) {
 	t.Helper()
 	member, found := readLiveOrgRole(t, email)
@@ -417,14 +417,11 @@ func restoreCollaboratorIfOwner(t *testing.T, email, identityID string) {
 	}
 }
 
-// TestAccOrganizationUserRoleResourceR5LegacyPutPreservesDenyRoles is the R5
-// gate: it answers whether the legacy permission_level write path clobbers deny
-// roles set through the roles path.
-//
-// This is the check that can still invalidate the routing design in a resource
-// that is ALREADY MERGED to main, which is why it blocks the tag rather than the
-// merge. If the deny role does not survive, the design's central assumption -
-// that the two write paths are independent - is false.
+// TestAccOrganizationUserRoleResourceR5LegacyPutPreservesDenyRoles proves
+// that a legacy permission_level PUT must not clobber existing deny roles
+// that were set through the roles path. If the deny role does not survive,
+// the design's central assumption - that the two write paths are
+// independent - is false.
 //
 // Omitting deny_roles alone plans a no-op (deny_roles is UseStateForUnknown; see
 // TestAccOrganizationUserRoleResource_DenyRolesOmittedPlanStability), so no write
@@ -466,8 +463,8 @@ resource "anyscale_organization_user_role" "realinfra" {
 `, email, baseRole)
 	}
 
-	// THE R5 ASSERTION. Read fresh from the API after a legacy permission_level
-	// PUT and require both the new base role and the deny role.
+	// Read fresh from the API after a legacy permission_level PUT and
+	// require both the new base role and the previously-set deny role.
 	legacyWriteKeptDenyRole := func(wantBase string) resource.TestCheckFunc {
 		return func(*terraform.State) error {
 			live := mustReadLiveOrgRole(t, email)
@@ -475,7 +472,7 @@ resource "anyscale_organization_user_role" "realinfra" {
 				return fmt.Errorf("the legacy write did not land: backend base_role is %q, want %q", live.BaseRole, wantBase)
 			}
 			if !containsFold(live.AdditionalRoles, denyRole) {
-				return fmt.Errorf("R5 FAILED - the legacy permission_level write CLOBBERED an existing deny role. "+
+				return fmt.Errorf("the legacy permission_level write CLOBBERED an existing deny role. "+
 					"Backend now reports deny roles %v; %q was set through the roles path and is gone. "+
 					"The routing design in anyscale_organization_user_role assumes these two write paths are "+
 					"independent, and this proves they are not", live.AdditionalRoles, denyRole)

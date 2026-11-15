@@ -11,7 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// TestFetchCurrentOrganization_HappyPath covers AC1: a zero-argument read
+// TestFetchCurrentOrganization_HappyPath covers the zero-argument read: it
 // maps all four attributes from organizations[0].
 func TestFetchCurrentOrganization_HappyPath(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -44,8 +44,8 @@ func TestFetchCurrentOrganization_HappyPath(t *testing.T) {
 	}
 }
 
-// TestFetchCurrentOrganization_NullDefaultCloudID is the mutation-proof test
-// for AC2: when userinfo omits default_cloud_id, state must hold
+// TestFetchCurrentOrganization_NullDefaultCloudID is the mutation-proof null
+// test: when userinfo omits default_cloud_id, state must hold
 // types.StringNull(), never types.StringValue(""). Asserting only
 // ValueString() == "" would pass for either representation, so this asserts
 // IsNull() and non-equality to StringValue("") explicitly - flipping the
@@ -76,8 +76,8 @@ func TestFetchCurrentOrganization_NullDefaultCloudID(t *testing.T) {
 	}
 }
 
-// TestFetchCurrentOrganization_EmptyOrganizations covers AC3: an empty
-// organizations array is a defensive anomaly, not a panic.
+// TestFetchCurrentOrganization_EmptyOrganizations covers an empty
+// organizations array: a defensive anomaly, not a panic.
 func TestFetchCurrentOrganization_EmptyOrganizations(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

@@ -2,7 +2,7 @@
 // binary against an httptest backend that returns the wire shape of
 // POST /api/v2/clouds/{id}/generate_cloud_data_bucket_presigned_url (201, a result envelope,
 // lowercase url_scheme, file_uri built from bucket_path) and records every PUT to the presigned
-// URL. They are the Gate 2 evidence cited in docs/decisions/service-working-dir-upload/README.md.
+// URL. They are the mock-server evidence cited in docs/decisions/service-working-dir-upload/README.md.
 package acctest
 
 import (
@@ -275,7 +275,7 @@ func checkPkgZip(body []byte, want map[string]string) error {
 	return nil
 }
 
-// TestAccRuntimeEnvPackageResource_unchangedTreeEmptyPlan (G2-c): re-creating every file with
+// TestAccRuntimeEnvPackageResource_unchangedTreeEmptyPlan: re-creating every file with
 // new mtimes and in a different order plans nothing and uploads nothing.
 func TestAccRuntimeEnvPackageResource_unchangedTreeEmptyPlan(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -315,7 +315,7 @@ func TestAccRuntimeEnvPackageResource_unchangedTreeEmptyPlan(t *testing.T) {
 	})
 }
 
-// TestAccRuntimeEnvPackageResource_contentChangePlansUpdate (G2-a): editing a file while the
+// TestAccRuntimeEnvPackageResource_contentChangePlansUpdate: editing a file while the
 // configuration is unchanged plans an in-place Update with uri unknown, Core accepts the
 // ModifyPlan-set content_hash, and apply uploads a new object without touching the old one.
 func TestAccRuntimeEnvPackageResource_contentChangePlansUpdate(t *testing.T) {
@@ -424,7 +424,7 @@ func TestAccRuntimeEnvPackageResource_objectGoneRecreates(t *testing.T) {
 	})
 }
 
-// TestAccRuntimeEnvPackageResource_changedAfterPlanErrors (G2-d): a file edited after plan,
+// TestAccRuntimeEnvPackageResource_changedAfterPlanErrors: a file edited after plan,
 // before apply, fails the apply instead of uploading content the plan did not show.
 func TestAccRuntimeEnvPackageResource_changedAfterPlanErrors(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -550,7 +550,7 @@ func (s *pkgMockService) expectApplies(want int) resource.TestCheckFunc {
 	}
 }
 
-// TestAccRuntimeEnvPackageResource_serviceRedeploysOnChange (G2-b): a service whose
+// TestAccRuntimeEnvPackageResource_serviceRedeploysOnChange: a service whose
 // ray_serve_config references the package's uri plans an Update in the same plan as a content
 // change, through every service plan-time path (rollout_strategy IN_PLACE makes the IN_PLACE
 // check run on the partially-unknown ray_serve_config), and deploys the new uri. When the object

@@ -31,7 +31,7 @@ func TestAccCloudsDataSource_NoFilters(t *testing.T) {
 	})
 }
 
-// TestAccCloudsDataSource_FilterByProvider is DS-CLOUD-1's mutation-proof
+// TestAccCloudsDataSource_FilterByProvider is the mutation-proof
 // acceptance guard for cloud_provider. The old version only asserted clouds.#
 // was set for both an "AWS" and a "GCP" query, which passes even if the filter
 // is a complete no-op (this org's one real cloud is AWS - a no-op returns it
@@ -70,7 +70,7 @@ func TestAccCloudsDataSource_FilterByProvider(t *testing.T) {
 	})
 }
 
-// TestAccCloudsDataSource_FilterByRegion is DS-CLOUD-1's mutation-proof
+// TestAccCloudsDataSource_FilterByRegion is the mutation-proof
 // acceptance guard for region - same shape as FilterByProvider above. The old
 // version was worse than presence-only: its body never queried anyscale_clouds
 // with a region filter at all, it looked up the singular anyscale_cloud by ID
@@ -106,7 +106,7 @@ func TestAccCloudsDataSource_FilterByRegion(t *testing.T) {
 	})
 }
 
-// TestAccCloudsDataSource_FilterByNameContains is DS-CLOUD-1's mutation-proof
+// TestAccCloudsDataSource_FilterByNameContains is the mutation-proof
 // acceptance guard for name_contains - same shape as the two above, using a
 // substring that cannot match the real test cloud's name for the negative case.
 func TestAccCloudsDataSource_FilterByNameContains(t *testing.T) {
@@ -323,7 +323,7 @@ func TestAccCloudsDataSource_MultipleFilters(t *testing.T) {
 	})
 }
 
-// TestAccCloudsDataSource_FilterByProviderAndRegion is DS-CLOUD-1's
+// TestAccCloudsDataSource_FilterByProviderAndRegion is the
 // mutation-proof acceptance guard for combining two filters at once - proves
 // AND semantics, not just that each filter works in isolation. A matching
 // provider with a non-matching region must still exclude the test cloud.
@@ -418,7 +418,7 @@ data "anyscale_cloud" "verify" {
 # name_contains + cloud_provider together, provider sourced dynamically from
 # the test cloud itself (rather than a hardcoded literal) so this keeps
 # matching the real test cloud regardless of which provider it happens to be
-# on. Post DS-CLOUD-1 both filters narrow server/client-side for real, so
+# on. Both filters narrow server/client-side for real, so
 # testAccCheckCloudsListIncludesID below is a real assertion, not a placebo.
 data "anyscale_clouds" "test" {
   name_contains  = "%s"

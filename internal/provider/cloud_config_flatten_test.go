@@ -141,10 +141,9 @@ func TestFlattenObjectStorage_ProviderAwarePrefix(t *testing.T) {
 	})
 }
 
-// TestFlattenKubernetesConfig_APIBackedFieldsPopulate replaces
-// TestFlattenKubernetesConfig_OnlyAPIBackedFieldsPopulateNamespaceGetsDefault
-// now that namespace/ingress_host/cluster_name/context/kubeconfig_path are
-// removed (task #8, user-approved breaking change): they were pure
+// TestFlattenKubernetesConfig_APIBackedFieldsPopulate covers what
+// remains now that namespace/ingress_host/cluster_name/context/kubeconfig_path are
+// removed (user-approved breaking change): they were pure
 // Terraform-side bookkeeping the API never saw, and flattenKubernetesConfig
 // no longer sets or references them at all. What is left to prove is only
 // that the 3 real API-backed fields still populate correctly.
@@ -236,7 +235,7 @@ func TestFlattenFileStorage_MountTargets(t *testing.T) {
 	})
 }
 
-// TestFlattenAWSConfig_ClusterInstanceProfileID is a regression test for C6:
+// TestFlattenAWSConfig_ClusterInstanceProfileID is a regression test:
 // aws_config.cluster_instance_profile_id must round-trip through import like
 // every other optional AWSConfig field.
 func TestFlattenAWSConfig_ClusterInstanceProfileID(t *testing.T) {
