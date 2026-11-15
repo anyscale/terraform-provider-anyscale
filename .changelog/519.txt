@@ -1,0 +1,9 @@
+```release-note:fixed
+resource/anyscale_iam_user_group: Creating a group without IAM rights now reports "Not Allowed to Manage Access" with what to do about it, instead of a raw failed-request error.
+```
+```release-note:fixed
+resource/anyscale_iam_role_grant: Creating a grant now reports "Not Allowed to Manage Access" when the identity does not manage IAM on the scope, and reads back a not-found group to tell a deleted group from one this identity cannot see.
+```
+```release-note:fixed
+resource/anyscale_iam_role_binding: Policy writes report "Not Allowed to Manage Access" instead of a raw refusal, and a group the policy names is read back: one that exists but cannot be seen says so instead of "not found".
+```
