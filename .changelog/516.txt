@@ -1,0 +1,7 @@
+```release-note:fixed
+resource/anyscale_organization_user_role: writes refused while a conversion to role bindings is running now say so - "Organization Is Converting to Role Bindings", with retry guidance - on both write paths, and destroying during that window fails with the same retry guidance and keeps the resource, since the conversion is temporary; the post-conversion retry keeps the converted-org warn-and-drop behavior
+```
+
+```release-note:fixed
+resource/anyscale_cloud: setting auto_add_user while a conversion to role bindings is running now says to retry after the conversion (at update, with nothing changed on the cloud; at create, the just-created cloud is rolled back and removed from state, same as a converted-org refusal but with wait-not-migrate wording)
+```

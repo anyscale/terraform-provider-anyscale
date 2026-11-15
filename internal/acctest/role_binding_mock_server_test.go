@@ -31,8 +31,8 @@ import (
 //   - Every write answers 409 "Switch this organization to role bindings..."
 //     until the organization converts (unconverted models that); reads are
 //     not gated.
-//   - A revoke that would leave the organization without an Organization
-//     owner answers 409 (deleteMode "lockout").
+//   - A revoke of an organization admin group binding answers the admin
+//     group 409 (deleteMode "admin_group").
 //   - Deleting a group cascades its bindings.
 //   - Listings page by offset: paging_token is the next offset, count is
 //     capped at 50.
@@ -52,7 +52,8 @@ type roleBindingMockServer struct {
 	// deleteMode simulates DELETE races: "revoked" revokes the binding and
 	// answers 403, as a concurrent revoke between refresh and delete would;
 	// "denied" answers 403 and keeps it, as a lost permission would;
-	// "lockout" answers 409 and keeps it, as the owner-lockout refusal would.
+	// "admin_group" answers the admin-group 409 and keeps the binding, as
+	// the platform refusal would.
 	deleteMode string
 	// unconverted makes every write answer 409, as in an organization that
 	// has not converted to role bindings.
@@ -107,7 +108,10 @@ const roleBindingMockCaller = "usr_mockcaller0000000000000000"
 // self-grant and self-revoke refusals.
 const (
 	roleBindingMockNotConvertedDetail = "Switch this organization to role bindings to change role bindings."
-	roleBindingMockLockoutDetail      = "This change would leave the organization without an Organization owner."
+	// The two admin-group 409s, verbatim from the backend at product
+	// 5c6ce328ab8 (converted_organizations.py:501, role_bindings_service.py ~1782).
+	roleBindingMockAdminGroupRemovalDetail = "The organization admin group's role bindings cannot be removed."
+	roleBindingMockAdminGroupRolesDetail   = "The organization admin group holds only the roles the platform binds it to."
 	// role_bindings_service.py check_bindings and check_revocation.
 	roleBindingMockSelfGrantDetail  = "You cannot assign a role to yourself directly. Assign it to a user group you belong to."
 	roleBindingMockSelfRevokeDetail = "You cannot revoke your own role binding."
@@ -456,8 +460,8 @@ func (m *roleBindingMockServer) serve(w http.ResponseWriter, r *http.Request) {
 			m.fail(w, http.StatusForbidden, roleBindingMockSelfRevokeDetail)
 			return
 		}
-		if m.deleteMode == "lockout" {
-			m.fail(w, http.StatusConflict, roleBindingMockLockoutDetail)
+		if m.deleteMode == "admin_group" {
+			m.fail(w, http.StatusConflict, roleBindingMockAdminGroupRemovalDetail)
 			return
 		}
 		delete(m.bindings, rest[0])

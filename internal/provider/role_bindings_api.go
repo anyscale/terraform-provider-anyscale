@@ -112,7 +112,6 @@ func addRoleBindingsDisabledError(diags *diag.Diagnostics, outcome string) {
 // Outcomes for addRoleBindingsDisabledError.
 const (
 	roleBindingsDisabledReadOutcome   = "The binding was kept in Terraform state unchanged."
-	roleBindingLockoutDeleteOutcome   = "Grant the role to another principal before revoking this one. The binding was not revoked and stays in Terraform state."
 	roleBindingsDisabledDeleteOutcome = "The binding was not revoked and stays in Terraform state; to stop managing it, run `terraform state rm` on its address."
 )
 
@@ -130,13 +129,90 @@ const roleBindingDuplicateSubstring = "already holds this role"
 // newly assigned." (role_bindings_service.py:1166-1170 at product 3b1f86a).
 const roleBindingArchivedRoleSubstring = "is archived and cannot be newly assigned"
 
-// roleBindingLockoutSubstring is the detail substring of the 409 a binding
-// write answers when it would leave the organization with no Organization
-// owner of its own. The full detail is "This change would leave the
-// organization without an Organization owner."
-// (backend/server/api/base/resources/converted_organizations.py:314 at
-// product 3b1f86a).
-const roleBindingLockoutSubstring = "without an Organization owner"
+// The organization admin group's role bindings are platform-owned, and the
+// API refuses writes that would change them, with one of two 409 details -
+// matched by the exact substrings below rather than a shared prefix: other
+// admin-group refusals exist that are not role-binding writes ("The
+// organization admin group must keep at least one member.",
+// iam_migration_service.py:3375; "...cannot be renamed.",
+// converted_organizations.py:253) and must not classify as these.
+//
+// Removal, on role-grant Delete and on a policy apply whose roles omit the
+// binding: "The organization admin group's role bindings cannot be removed."
+// (backend/server/api/base/resources/converted_organizations.py:501 at
+// product 5c6ce328ab8). Adding a role to the group, on a create whose
+// principal names it: "The organization admin group holds only the roles the
+// platform binds it to." (backend/server/api/product/services/
+// role_bindings_service.py:~1784 at product 5c6ce328ab8).
+const (
+	roleBindingAdminGroupRemovalSubstring   = "admin group's role bindings cannot be removed"
+	roleBindingAdminGroupExtraRoleSubstring = "holds only the roles the platform binds it to"
+)
+
+// isRoleBindingAdminGroupRemovalRefusal reports the 409 for a write that
+// would remove one of the organization admin group's bindings.
+func isRoleBindingAdminGroupRemovalRefusal(err error) bool {
+	return isStatusWithSubstring(err, http.StatusConflict, roleBindingAdminGroupRemovalSubstring)
+}
+
+// isRoleBindingAdminGroupExtraRoleRefusal reports the 409 for a write that
+// tries to add a role to the organization admin group.
+func isRoleBindingAdminGroupExtraRoleRefusal(err error) bool {
+	return isStatusWithSubstring(err, http.StatusConflict, roleBindingAdminGroupExtraRoleSubstring)
+}
+
+// addRoleBindingAdminGroupExtraRoleError reports a write the API refused
+// because it names the organization admin group as the principal of a new
+// binding. The platform binds that group's roles itself, so the remedy is to
+// remove the group from the configuration. outcome, when set, applies to a
+// policy apply.
+func addRoleBindingAdminGroupExtraRoleError(diags *diag.Diagnostics, err error, configWhat string, outcome string) {
+	detail := extractAPIErrorDetail(err) +
+		" The platform binds the organization admin group's roles itself, so a write cannot add to them. Remove the group from the " + configWhat + "."
+	if outcome != "" {
+		detail += " " + outcome
+	}
+	diags.AddError("Organization Admin Group Is Managed by Anyscale", detail)
+}
+
+// addRoleBindingAdminGroupGrantDeleteError reports a role-grant destroy the
+// API refused: the binding is one of the organization admin group's, so it
+// stays as it is. The destroy itself was triggered by removing the grant
+// from the configuration, so removing it again cannot end the loop - the way
+// to stop managing the binding is terraform state rm.
+func addRoleBindingAdminGroupGrantDeleteError(diags *diag.Diagnostics, err error) {
+	detail := extractAPIErrorDetail(err) +
+		" The organization admin group's role bindings are platform-owned and cannot be revoked. The binding was not revoked and stays in Terraform state; to stop managing it, run `terraform state rm` on its address."
+	diags.AddError("Organization Admin Group Is Managed by Anyscale", detail)
+}
+
+// addRoleBindingAdminGroupDestroyRemovalError reports a binding destroy the
+// API refused: destroy's authoritative roles omit the organization admin
+// group's binding, so the apply would revoke it. Nothing is revoked, and
+// the way to stop managing the scope is terraform state rm, not editing
+// roles - the destroy itself was asked for.
+func addRoleBindingAdminGroupDestroyRemovalError(diags *diag.Diagnostics, err error, outcome string) {
+	detail := extractAPIErrorDetail(err) +
+		" Anyscale keeps the organization admin group's role bindings, so a destroy cannot revoke them. Nothing was revoked. To stop managing this scope, run `terraform state rm` on its address."
+	if outcome != "" {
+		detail += " " + outcome
+	}
+	diags.AddError("Organization Admin Group Is Managed by Anyscale", detail)
+}
+
+// addRoleBindingAdminGroupPolicyRemovalError reports a policy apply the API
+// refused: the authoritative roles list omits one of the organization admin
+// group's bindings, so the apply would revoke it. The remedy is the opposite
+// of omission - name the binding in roles to keep it. outcome, when set,
+// applies to the policy operation.
+func addRoleBindingAdminGroupPolicyRemovalError(diags *diag.Diagnostics, err error, outcome string) {
+	detail := extractAPIErrorDetail(err) +
+		" The apply would revoke an organization admin group binding because roles omits it; name the binding in roles to keep it."
+	if outcome != "" {
+		detail += " " + outcome
+	}
+	diags.AddError("Organization Admin Group Is Managed by Anyscale", detail)
+}
 
 // roleBindingSelfGrantSubstring is the detail substring of create's 403 when
 // the caller names itself as the user principal. The full detail is "You
@@ -150,17 +226,6 @@ const roleBindingSelfGrantSubstring = "cannot assign a role to yourself directly
 // revoke your own role binding." (role_bindings_service.py:1151-1157 at
 // product 3b1f86a).
 const roleBindingSelfRevokeSubstring = "cannot revoke your own role binding"
-
-// addRoleBindingLockoutError reports a write the API refused because it would
-// leave the organization without an Organization owner. outcome, when set,
-// says what that means for the operation.
-func addRoleBindingLockoutError(diags *diag.Diagnostics, err error, outcome string) {
-	detail := extractAPIErrorDetail(err) + " To proceed, keep at least one Organization owner binding."
-	if outcome != "" {
-		detail += " " + outcome
-	}
-	diags.AddError("Change Would Leave Organization Without an Owner", detail)
-}
 
 func roleBindingPath(roleBindingID string) string {
 	return roleBindingsBasePath + "/" + url.PathEscape(roleBindingID)
