@@ -21,9 +21,9 @@ import (
 //
 //	TF_ACC=1 ANYSCALE_TEST_ORG_MODE=converted go test ./internal/acctest/ -run '^TestAccIAMRoleBindingResource_RealAPI$' -v
 //
-// The frozen-binding and lockout paths are mock-only: no test organization can
-// produce a frozen binding, and a lockout needs the organization's owners
-// stripped.
+// The frozen-binding and admin-group paths are mock-only: no test organization
+// can produce a frozen binding, and the admin group's bindings cannot be
+// written by anyone.
 
 type realPolicyWire struct {
 	Roles []struct {
