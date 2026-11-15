@@ -38,6 +38,12 @@ type policyMockServer struct {
 	// scopes are the "<type>/<id>" scopes that exist.
 	scopes map[string]bool
 	// noIAM are existing scopes the caller does not manage IAM on.
+
+	// callerID is the identity userinfo reports, and the one whose own
+	// bindings the apply routes refuse to revoke. Tests switch it to prove a
+	// destroy by a second identity.
+	callerID string
+
 	noIAM       map[string]bool
 	flagOff     bool
 	unconverted bool
@@ -69,14 +75,17 @@ type policyMockBinding struct {
 
 const policyMockCaller = "usr_policycaller00000000000000"
 
+func (m *policyMockServer) setCallerID(id string) { m.with(func() { m.callerID = id }) }
+
 func newPolicyMockServer(t *testing.T) *policyMockServer {
 	t.Helper()
 	m := &policyMockServer{
-		t:      t,
-		roles:  map[string]bool{},
-		groups: map[string]bool{},
-		scopes: map[string]bool{},
-		noIAM:  map[string]bool{},
+		t:        t,
+		roles:    map[string]bool{},
+		groups:   map[string]bool{},
+		scopes:   map[string]bool{},
+		noIAM:    map[string]bool{},
+		callerID: policyMockCaller,
 	}
 	m.Server = httptest.NewServer(http.HandlerFunc(m.serve))
 	t.Cleanup(m.Close)
@@ -252,7 +261,7 @@ func (m *policyMockServer) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "/api/v2/userinfo" && r.Method == http.MethodGet:
 		m.reply(w, http.StatusOK, map[string]any{"result": map[string]any{
-			"id": policyMockCaller, "email": "caller@example.com", "name": "Caller", "username": "caller",
+			"id": m.callerID, "email": "caller@example.com", "name": "Caller", "username": "caller",
 			"organization_ids": []string{"org_policymock000000000000000"},
 			"organizations":    []any{map[string]any{"id": "org_policymock000000000000000", "name": "mock"}},
 		}})
@@ -402,7 +411,7 @@ func (m *policyMockServer) serveApply(w http.ResponseWriter, scopeType, scopeID 
 			}
 			key := policyMockKey{p.PrincipalType, p.PrincipalID, role.RoleID}
 			if _, ok := held[key]; !ok {
-				if p.PrincipalType == "user" && p.PrincipalID == policyMockCaller {
+				if p.PrincipalType == "user" && p.PrincipalID == m.callerID {
 					m.fail(w, http.StatusForbidden, at+"You cannot assign a role to yourself directly. Assign it to a user group you belong to.")
 					return
 				}
@@ -422,7 +431,7 @@ func (m *policyMockServer) serveApply(w http.ResponseWriter, scopeType, scopeID 
 			m.fail(w, http.StatusConflict, fmt.Sprintf("This policy would revoke the frozen role binding '%s'. Name it in the policy to keep it.", b.ID))
 			return
 		}
-		if b.PrincipalType == "user" && b.PrincipalID == policyMockCaller {
+		if b.PrincipalType == "user" && b.PrincipalID == m.callerID {
 			m.fail(w, http.StatusForbidden, fmt.Sprintf("This policy would revoke your own role binding '%s'. Name it in the policy to keep it.", b.ID))
 			return
 		}
