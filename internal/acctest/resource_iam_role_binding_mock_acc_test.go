@@ -314,8 +314,13 @@ func TestAccIAMRoleBindingResource_CreateTakeover(t *testing.T) {
 	})
 }
 
-// dry-run refusals fail the plan with the server's text plus what
-// to do about it.
+// dry-run refusals are plan-time WARNINGS now, not plan failures: the
+// refusal is a forecast of what the apply will answer, asserted end to end
+// (wording included) through the CLI in
+// resource_iam_role_binding_destroy_gate_mock_acc_test.go. What this test
+// still pins in-process: the dry run itself happens for each refusal class -
+// a plan made no real policy PUT - and every refusal class survives the
+// round trip to a plan rather than an error.
 func TestAccIAMRoleBindingResource_DryRunRefusals(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newPolicyMock(t)
@@ -323,39 +328,38 @@ func TestAccIAMRoleBindingResource_DryRunRefusals(t *testing.T) {
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				// Omits the caller's own owner binding: the error names the
-				// entry that keeps it.
-				Config:   pmConfig(m, "project_id", pmProject, pmRole(pmReader, nil, []string{pmGroupA})),
-				PlanOnly: true,
-				ExpectError: regexp.MustCompile(`(?s)would\s+revoke\s+your\s+own\s+role\s+binding.*` +
-					`"` + pmOwner + `"\s+=\s+\{\s+user_ids\s+=\s+\["` + policyMockCaller + `"\]`),
+				// Omits the caller's own owner binding: the refusal names the
+				// entry that keeps it, in the plan warning.
+				Config:             pmConfig(m, "project_id", pmProject, pmRole(pmReader, nil, []string{pmGroupA})),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
 			},
 			{
 				Config: pmConfig(m, "project_id", pmProject,
 					pmRole(pmOwner, []string{policyMockCaller}, nil),
 					pmRole(pmReader, nil, []string{"ug_doesnotexist00000000000001"})),
-				PlanOnly:    true,
-				ExpectError: regexp.MustCompile(`(?s)Role or User Group Not Found.*User\s+group\s+'ug_doesnotexist00000000000001'\s+not\s+found`),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
 			},
 			{
 				Config: pmConfig(m, "project_id", pmProject,
 					pmRole(pmOwner, []string{policyMockCaller}, nil),
 					pmRole("rol_doesnotexist0000000000001", nil, []string{pmGroupA})),
-				PlanOnly:    true,
-				ExpectError: regexp.MustCompile(`(?s)Role or User Group Not Found.*Role\s+not\s+found.*role\s+"rol_doesnotexist0000000000001"`),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
 			},
 			{
 				// The caller cannot grant itself a role it does not hold.
 				Config: pmConfig(m, "project_id", pmProject,
 					pmRole(pmOwner, []string{policyMockCaller}, nil),
 					pmRole(pmReader, []string{policyMockCaller}, nil)),
-				PlanOnly:    true,
-				ExpectError: regexp.MustCompile(`(?s)cannot\s+assign\s+a\s+role\s+to\s+yourself.*role\s+"` + pmReader + `"`),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
 			},
 		},
 	})
 	if real, _ := pmApplyBodies(t, m.takeRequests()); len(real) != 0 {
-		t.Errorf("a refused plan applied a policy: %v", real)
+		t.Errorf("a plan made a real policy PUT: %v", real)
 	}
 }
 
@@ -375,10 +379,12 @@ func TestAccIAMRoleBindingResource_ByIDLookupsRetryPropagation(t *testing.T) {
 			pmFact(pmOwner, "user", policyMockCaller), pmFact(fmt.Sprintf("rol_frozen%020d", 1), "user", pmBob)),
 		Steps: []resource.TestStep{
 			{
-				Config:   pmConfig(m, "project_id", pmProject, pmRole(pmReader, nil, []string{pmGroupA})),
-				PlanOnly: true,
-				ExpectError: regexp.MustCompile(`(?s)would\s+revoke\s+your\s+own\s+role\s+binding.*` +
-					`"` + pmOwner + `"\s+=\s+\{\s+user_ids\s+=\s+\["` + policyMockCaller + `"\]`),
+				// The own-binding refusal is a plan warning now; the keep-
+				// binding hint lookup (the GET by id under the denials) still
+				// happens inside it.
+				Config:             pmConfig(m, "project_id", pmProject, pmRole(pmReader, nil, []string{pmGroupA})),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
 			},
 			{Config: pmConfig(m, "project_id", pmProject, append(pmBase(), frozen...)...)},
 		},
@@ -721,9 +727,13 @@ func TestAccIAMRoleBindingResource_ReadForbidden(t *testing.T) {
 				PreConfig:    func() { m.deleteScope("project", pmProject) },
 				RefreshState: true,
 				Check:        inState(false),
-				// The follow-up plan creates the policy anew, and its dry run
-				// is refused on the deleted project.
-				ExpectError: regexp.MustCompile(`Cannot Manage IAM on Scope`),
+				// The refresh drops the resource; the follow-up plan
+				// dry-runs the policy anew on the deleted project, and that
+				// refusal is a plan warning now, not an error. The follow-up
+				// plan legitimately recreates the resource, so it is not
+				// required to be empty; the apply of it is what refuses (the
+				// CLI gate test covers the warning wording).
+				ExpectNonEmptyPlan: true,
 			},
 			{Config: m.providerBlock()},
 		},
@@ -766,9 +776,13 @@ func TestAccIAMRoleBindingResource_UnconvertedOrg(t *testing.T) {
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config:      pmConfig(m, "project_id", pmProject, pmBase()...),
-				PlanOnly:    true,
-				ExpectError: regexp.MustCompile(`(?s)Organization Not Converted to Role Bindings.*converts\s+it\s+to\s+role\s+bindings`),
+				// The unconverted-org refusal is a plan warning now; the
+				// wording (retry guidance and the converted-org summary) is
+				// asserted where warnings are visible, and the apply still
+				// refuses with the full error.
+				Config:             pmConfig(m, "project_id", pmProject, pmBase()...),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
 			},
 		},
 	})

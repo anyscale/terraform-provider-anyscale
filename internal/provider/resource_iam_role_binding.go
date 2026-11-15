@@ -240,8 +240,8 @@ func (r *IAMRoleBindingResource) ModifyPlan(ctx context.Context, req resource.Mo
 	}
 	scopeType, scopeID := plan.scope()
 	creating := req.State.Raw.IsNull()
+	var state RoleBindingPolicyModel
 	if !creating {
-		var state RoleBindingPolicyModel
 		resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 		if resp.Diagnostics.HasError() {
 			return
@@ -269,10 +269,35 @@ func (r *IAMRoleBindingResource) ModifyPlan(ctx context.Context, req resource.Mo
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	// Run the dry-run only when something it checks would change. The policy
+	// PUT is over every role the scope's bindings hold, so an update whose
+	// roles match the refreshed state plans no change to what the dry-run
+	// examines, and an unchanged resource makes no plan-time API call at all.
+	// 'terraform destroy' plans the configuration first, that pass sees an
+	// unchanged resource here exactly as an ordinary re-plan does, and the
+	// destroy is free to continue; a drifted one still refreshes into a
+	// difference and gets checked.
+	if !creating {
+		stateGrants, stateDiags := policyGrantsFromModel(ctx, state.Roles)
+		resp.Diagnostics.Append(stateDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if equivalentPolicy(grants, stateGrants) {
+			return
+		}
+	}
+
 	policy, index := grants.wire()
 	result, err := applyRoleBindingPolicy(ctx, r.client, scopeType, scopeID.ValueString(), policy, true)
 	if err != nil {
-		addPolicyWriteError(ctx, r.client, &resp.Diagnostics, "check role binding policy", index, err, "")
+		// A refusal at plan warns rather than errors: every case the check
+		// reports is the API's own answer to the dry-run, and the apply (or
+		// the destroy plan) must still be able to run. The apply's real PUT
+		// answers with the same refusal, so the warning is a forecast, not a
+		// lost one.
+		addPolicyWritePlanWarning(ctx, r.client, &resp.Diagnostics, "check role binding policy", index, err)
 		return
 	}
 	if !creating {
