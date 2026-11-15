@@ -10,7 +10,8 @@ import (
 
 // This file proves anyscale_cloud_access's plan-time first-apply-revoke
 // disclosure warning the same way warning_diagnostics_acc_test.go proves
-// C5/C9: resource.Test's reattach path does not surface warning-level
+// the deprecation and credential warnings:
+// resource.Test's reattach path does not surface warning-level
 // diagnostics at all (confirmed empirically there), so this drives a real
 // `terraform plan -json` against a freshly-built provider binary instead -
 // the only way to observe what a practitioner actually sees before their

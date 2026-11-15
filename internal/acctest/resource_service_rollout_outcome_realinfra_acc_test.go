@@ -15,7 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// TestAccServiceResource_RealInfra_RolledBackRollout closes the real-API (Gate 1) items of
+// TestAccServiceResource_RealInfra_RolledBackRollout covers the real-API items of
 // docs/decisions/service-rollout-outcome against a real backend:
 //
 //  1. creates a service on the static VM cloud;
@@ -162,7 +162,7 @@ func terminateServiceOutOfBand(t *testing.T, serviceID string) {
 		resp, err := provider.DoRequestAndParse[provider.ServiceResponse](ctx, client, "GET",
 			fmt.Sprintf("/api/v2/services-v2/%s", serviceID), nil, 200)
 		if err == nil && resp.Result.CurrentState == "TERMINATED" {
-			t.Logf("GATE1 terminated GET shape: %s", serviceSnapshotLine(&resp.Result))
+			t.Logf("probeterminated GET shape: %s", serviceSnapshotLine(&resp.Result))
 			return
 		}
 		time.Sleep(15 * time.Second)
@@ -183,7 +183,7 @@ func (p *serviceSnapshotPoller) start(serviceID string) {
 		p.done = make(chan struct{})
 		client, err := GetTestClient()
 		if err != nil {
-			p.t.Logf("GATE1 poller disabled: %v", err)
+			p.t.Logf("probepoller disabled: %v", err)
 			return
 		}
 		p.wg.Add(1)
@@ -195,7 +195,7 @@ func (p *serviceSnapshotPoller) start(serviceID string) {
 					fmt.Sprintf("/api/v2/services-v2/%s", serviceID), nil, 200)
 				if err == nil {
 					if line := serviceSnapshotLine(&resp.Result); line != last {
-						p.t.Logf("GATE1 %s %s", time.Now().UTC().Format(time.RFC3339), line)
+						p.t.Logf("probe%s %s", time.Now().UTC().Format(time.RFC3339), line)
 						last = line
 					}
 				}
@@ -236,7 +236,7 @@ func (p *serviceSnapshotPoller) logEvents(serviceID string) {
 		Results []event `json:"results"`
 	}](context.Background(), client, "GET", fmt.Sprintf("/api/v2/services-v2/%s/events?count=30", serviceID), nil, 200)
 	if err != nil {
-		p.t.Logf("GATE1 events fetch failed: %v", err)
+		p.t.Logf("probeevents fetch failed: %v", err)
 		return
 	}
 	deref := func(s *string) string {
@@ -249,7 +249,7 @@ func (p *serviceSnapshotPoller) logEvents(serviceID string) {
 		if e.CurrentState == nil {
 			continue
 		}
-		p.t.Logf("GATE1 event type=%s current_state=%s message=%s", deref(e.EventType), deref(e.CurrentState), deref(e.Message))
+		p.t.Logf("probeevent type=%s current_state=%s message=%s", deref(e.EventType), deref(e.CurrentState), deref(e.Message))
 	}
 }
 

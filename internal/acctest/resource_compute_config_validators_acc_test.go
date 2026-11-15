@@ -102,8 +102,7 @@ resource "anyscale_compute_config" "test" {
 	// NOTE: `terraform validate` under dev_overrides always emits its own
 	// boilerplate "Provider development overrides are in effect" WARNING,
 	// unrelated to this validator - a bare "any warning exists" check would
-	// pass even if this validator does not exist at all (confirmed: it does
-	// pass against the pre-fix tree). Require the warning to actually
+	// pass even if this validator does not exist at all. Require the warning to actually
 	// mention the two attributes in question, not just any warning.
 	found := false
 	for _, d := range result.Diagnostics {

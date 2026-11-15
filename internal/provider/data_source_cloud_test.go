@@ -11,12 +11,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// TestReadCloudIntoModel_MapsFromResponseNotConstant is a regression test for
-// change C1: data_source_cloud.go used to hardcode auto_add_user,
+// TestReadCloudIntoModel_MapsFromResponseNotConstant is a regression test:
+// data_source_cloud.go used to hardcode auto_add_user,
 // lineage_tracking_enabled, aggregated_logs_enabled, is_empty_cloud to
 // false and cloud_resource_id to null, regardless of what the API returned. Each case
 // below sets the mocked API to the OPPOSITE of the old hardcoded value, so
-// this test fails against the pre-fix implementation.
+// this test fails if Read goes back to hardcoding instead of mapping the
+// response.
 func TestReadCloudIntoModel_MapsFromResponseNotConstant(t *testing.T) {
 	t.Run("cloud with resources: booleans true, resource ID from default resource", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -113,13 +114,13 @@ func TestReadCloudIntoModel_MapsFromResponseNotConstant(t *testing.T) {
 }
 
 // TestReadCloudIntoModel_C2ParityFieldsMapFromResponse is a regression test
-// for change C2: the singular anyscale_cloud data source previously exposed
+// for parity with the plural data source: the singular anyscale_cloud data source previously exposed
 // none of the fields the plural anyscale_clouds data source already had
 // per-item (compute_stack, created_at, creator_id, is_default, is_private_cloud).
 // is_aioa/is_bring_your_own_resource/is_private_service_cloud were part of
-// the original C2 parity set but were removed from both data sources
+// the original parity set but were removed from both data sources
 // (read-only, backend-internal classification values users could not act
-// on) - see the data_source_attr_removal spec.
+// on).
 func TestReadCloudIntoModel_C2ParityFieldsMapFromResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -427,13 +428,11 @@ func TestCloudNullableFields(t *testing.T) {
 	}
 }
 
-// TestFindCloudByName_PagesBeyondFirstPage is the DS-CLOUD-2/X-4 mutation-proof
-// regression guard: findCloudByName reads only page 1 of GET /api/v2/clouds via
-// a raw DoRequest call, with no pagination at all. In an org whose cloud list
-// exceeds one page, a valid name past page 1 resolves to "not found". This
-// currently FAILS - the named cloud sits on page 2 and today's code never asks
-// for it - which is the mutation-proof evidence. Must pass once findCloudByName
-// (or its X-2 shared-helper replacement) pages through PaginatedRequest.
+// TestFindCloudByName_PagesBeyondFirstPage guards findCloudByName's
+// pagination against a regression to reading only page 1 of
+// GET /api/v2/clouds with no pagination at all. In an org whose cloud list
+// exceeds one page, a valid name past page 1 would otherwise resolve to
+// "not found".
 func TestFindCloudByName_PagesBeyondFirstPage(t *testing.T) {
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

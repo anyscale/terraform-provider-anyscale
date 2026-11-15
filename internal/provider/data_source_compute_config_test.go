@@ -72,7 +72,7 @@ func runComputeConfigDataSourceRead(t *testing.T, d *ComputeConfigDataSource, mo
 	return result, readResp.Diagnostics
 }
 
-// TestComputeConfigRead_HitsAPIV2Endpoint is the CC5b GET-migration proof:
+// TestComputeConfigRead_HitsAPIV2Endpoint is the GET-migration proof:
 // Read()'s by-id lookup must hit api/v2/compute_templates, not the deprecated
 // ext/v0/cluster_computes. The mock's catch-all failure handler on any other
 // path is what makes this load-bearing - it would fail if either the old GET
@@ -94,7 +94,7 @@ func TestComputeConfigRead_HitsAPIV2Endpoint(t *testing.T) {
 			// fetchComputeConfigVersions still runs and errors are only
 			// warned/tolerated, but serve it properly so this test proves a
 			// clean end-to-end Read, not a Read that happens to succeed despite
-			// a swallowed versions-fetch error. CC5b migrated this call from
+			// a swallowed versions-fetch error. This call was migrated from
 			// POST /ext/v0/cluster_computes/search to this endpoint (#113) -
 			// matched on path only (not the count/paging_token query string)
 			// since this test doesn't exercise pagination itself; see
@@ -162,7 +162,7 @@ func dynamicObjectAttrs(t *testing.T, d types.Dynamic) map[string]attr.Value {
 	return obj.Attributes()
 }
 
-// TestComputeConfigRead_ClusterLevelFieldParity is the DS-CC-7 proof: the five
+// TestComputeConfigRead_ClusterLevelFieldParity pins that the five
 // cluster-level fields that used to be resource-only (cloud_resource,
 // min_resources, max_resources, top-level flags, top-level
 // advanced_instance_config - see the Compute Config guide's former "Known
@@ -178,8 +178,8 @@ func dynamicObjectAttrs(t *testing.T, d types.Dynamic) map[string]attr.Value {
 // known-real, and TagSpecifications is a list of OBJECTS containing another
 // list of objects (Tags) - the exact shape that HCL/the framework infers as
 // nested types.Tuple, not types.List, and that silently null-ed out before
-// the CC15 fix. An empty or scalar-only fixture would not exercise that path
-// at all (see the CC15 memory: "An empty-list mock config proves nothing").
+// that was fixed. An empty or scalar-only fixture would not exercise that path
+// at all - an empty-list mock config proves nothing.
 func TestComputeConfigRead_ClusterLevelFieldParity(t *testing.T) {
 	const configID = "cpt_parity1"
 
@@ -261,8 +261,8 @@ func TestComputeConfigRead_ClusterLevelFieldParity(t *testing.T) {
 		tagSpecs, ok := advAttrs["TagSpecifications"].(types.Tuple)
 		if !ok {
 			t.Fatalf("advanced_instance_config.TagSpecifications = %#v (type %T), want types.Tuple - "+
-				"nil/wrong-type here means the API response's list-of-objects silently dropped, "+
-				"the CC15 failure shape", advAttrs["TagSpecifications"], advAttrs["TagSpecifications"])
+				"nil/wrong-type here means the API response's list-of-objects silently dropped",
+				advAttrs["TagSpecifications"], advAttrs["TagSpecifications"])
 		}
 		if len(tagSpecs.Elements()) != 1 {
 			t.Fatalf("len(TagSpecifications) = %d, want 1", len(tagSpecs.Elements()))
@@ -451,11 +451,12 @@ func TestFetchComputeConfigVersions_CollectsAndSortsUniqueVersions(t *testing.T)
 }
 
 // TestFetchComputeConfigVersions_RequestsAllVersionsNotJustLatest is the
-// DS-CC-1 mutation-proof regression guard. The test above proves the
-// sort/dedup logic is correct, but its mock unconditionally returns every row
-// regardless of what request was actually sent - it could not have caught
-// DS-CC-1 because a real backend would never spontaneously return more than
-// the latest version unless the request explicitly asks for all of them.
+// mutation-proof regression guard for the version sentinel. The test above
+// proves the sort/dedup logic is correct, but its mock unconditionally
+// returns every row regardless of what request was actually sent - it could
+// not have caught the sentinel being dropped, because a real backend would
+// never spontaneously return more than the latest version unless the request
+// explicitly asks for all of them.
 //
 // Per the traced backend model (ClusterComputesQuery.version,
 // backend/server/api/base/models/cluster_computes.py:244-271, confirmed
@@ -464,10 +465,7 @@ func TestFetchComputeConfigVersions_CollectsAndSortsUniqueVersions(t *testing.T)
 // "do not filter by version" sentinel needed to enumerate history. This mock
 // simulates that real behavior - it only returns all 3 versions when the
 // request body's version field is exactly -2, and returns just the latest
-// otherwise - so this currently FAILS (only 1 version comes back, since
-// today's search payload has no version field at all) which is the
-// mutation-proof evidence. Must pass once fetchComputeConfigVersions sends
-// version: -2.
+// otherwise.
 func TestFetchComputeConfigVersions_RequestsAllVersionsNotJustLatest(t *testing.T) {
 	ctx := context.Background()
 
@@ -515,9 +513,9 @@ func TestFetchComputeConfigVersions_RequestsAllVersionsNotJustLatest(t *testing.
 	}
 }
 
-// TestFetchComputeConfigVersions_FollowsPagingToken is DS-CC-1's other
-// mutation-proof half, flagged while implementing: the test above
-// proves the version=-2 sentinel is sent, but its mock returns every version
+// TestFetchComputeConfigVersions_FollowsPagingToken covers what the test
+// above cannot: it proves the version=-2 sentinel is sent, but its mock
+// returns every version
 // in a single response with no next_paging_token at all, so it cannot tell
 // apart "fetches everything in one call" from "correctly follows pagination
 // across multiple calls" - a real config with more results than one page's
@@ -525,12 +523,12 @@ func TestFetchComputeConfigVersions_RequestsAllVersionsNotJustLatest(t *testing.
 // mock instead splits the 3 versions across two pages and requires the
 // second request to carry the first response's exact next_paging_token.
 //
-// CC5b: retargeted from asserting a body-nested paging.paging_token (the old
-// ext/v0 shape) to the URL query string, since that's where api/v2's
-// required_pagination_large actually reads it from. Left unretargeted, this
-// would have kept "passing" vacuously - nothing populates that body field
-// anymore, so the old assertion would never fail no matter how broken the new
-// pagination is. See TestSearchComputeTemplatesPaged_SendsPagingAsQueryParamsNotBody
+// The token is asserted as a URL query parameter, not a body-nested
+// paging.paging_token (the old ext/v0 shape), since that's where api/v2's
+// required_pagination_large actually reads it from. A body-nested assertion
+// would pass vacuously: nothing populates that body field on api/v2, so it
+// would never fail no matter how broken the pagination is. See
+// TestSearchComputeTemplatesPaged_SendsPagingAsQueryParamsNotBody
 // for the dedicated negative-space proof that the body does NOT carry paging.
 func TestFetchComputeConfigVersions_FollowsPagingToken(t *testing.T) {
 	ctx := context.Background()
@@ -589,7 +587,7 @@ func TestFetchComputeConfigVersions_FollowsPagingToken(t *testing.T) {
 	}
 }
 
-// TestFindComputeConfigByName_ExactMatchOnPageTwo is CC5b's pagination-proof
+// TestFindComputeConfigByName_ExactMatchOnPageTwo is the pagination-proof
 // for findComputeConfigByName (fetchComputeConfigVersions already has one
 // above) - page 1 returns a decoy, page 2 returns the real match, and the
 // second request must carry the first response's exact paging_token as a URL
@@ -639,7 +637,7 @@ func TestFindComputeConfigByName_ExactMatchOnPageTwo(t *testing.T) {
 }
 
 // TestSearchComputeTemplatesPaged_SendsPagingAsQueryParamsNotBody is the
-// direct proof for the hazard CC5b exists to prevent: a naive migration could
+// direct proof for the ext/v0-to-api/v2 migration hazard: a naive migration could
 // keep nesting paging/paging_token/count inside the JSON body (the ext/v0
 // shape) - it would compile, hit /api/v2/compute_templates/search, get HTTP
 // 200 back, and silently paginate wrong (always page 1's worth of data, no
