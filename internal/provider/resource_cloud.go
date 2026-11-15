@@ -1108,18 +1108,18 @@ func (r *CloudResource) undoCreateRefusedAutoAddUser(ctx context.Context, cloudI
 // conversion instead of pointing at the replacement surface, because the
 // refusal is temporary.
 func (r *CloudResource) undoCreateRefusedAutoAddUserConverting(ctx context.Context, cloudID string, refusal error, resp *resource.CreateResponse) bool {
-	if delErr := r.deleteJustCreatedCloud(ctx, cloudID); delErr == nil {
+	delErr := r.deleteJustCreatedCloud(ctx, cloudID)
+	if delErr == nil {
 		tflog.Info(ctx, "Deleted the cloud created in this apply after auto_add_user was refused while converting", map[string]any{"id": cloudID})
 		resp.State.RemoveResource(ctx)
 		addOrgConvertingError(&resp.Diagnostics, refusal, "The cloud was not created: Terraform deleted the cloud it had just "+
 			"created because Anyscale refuses auto_add_user while its conversion to role bindings runs. Retry once the conversion finishes.")
 		return true
-	} else {
-		tflog.Error(ctx, "Failed to delete the cloud after auto_add_user was refused", map[string]any{"id": cloudID, "error": delErr.Error()})
-		addAppliedSettingWarning(&resp.Diagnostics, cloudID, "created", "auto_add_user", refusal,
-			fmt.Sprintf("Anyscale refuses auto_add_user while its conversion runs, and rolling the create back by deleting the cloud also failed (%s)", extractAPIErrorDetail(delErr)))
-		return false
 	}
+	tflog.Error(ctx, "Failed to delete the cloud after auto_add_user was refused", map[string]any{"id": cloudID, "error": delErr.Error()})
+	addAppliedSettingWarning(&resp.Diagnostics, cloudID, "created", "auto_add_user", refusal,
+		fmt.Sprintf("Anyscale refuses auto_add_user while its conversion runs, and rolling the create back by deleting the cloud also failed (%s)", extractAPIErrorDetail(delErr)))
+	return false
 }
 
 // cloudSettings holds the three cloud-level boolean settings Create

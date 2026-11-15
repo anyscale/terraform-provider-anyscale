@@ -948,10 +948,11 @@ func (r *OrganizationUserRoleResource) deleteOrganizationRole(
 					"bindings. The resource was removed from Terraform state.", email))
 		case isOrgConvertingConflict(err):
 			// An error with state KEPT, the opposite of the converted branch:
-			// the conversion is temporary and the legacy role this resource
-			// would clear is about to be migrated themselves, so dropping the
-			// resource now would surrender its management. The retry after
-			// the conversion completes lands in the converted branch above.
+			// the conversion is temporary and the conversion is about to
+			// migrate the legacy role this resource would clear, so dropping
+			// the resource now would surrender its management. The retry
+			// after the conversion completes lands in the converted branch
+			// above.
 			addOrgConvertingError(&diags, err,
 				fmt.Sprintf("For %s, nothing was cleared and the resource stays in state. Retry the destroy after the conversion finishes.", email))
 		case orgRolesFeatureDisabled(err):

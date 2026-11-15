@@ -12,7 +12,7 @@ import (
 )
 
 // A conversion to role bindings in progress refuses every legacy access write
-// with a dedicted 409: not "use role bindings instead" but "retry", because the
+// with a dedicated 409: not "use role bindings instead" but "retry", because the
 // conversion that justifies the new surface has not landed yet. On
 // anyscale_organization_user_role and anyscale_cloud.auto_add_user that
 // refusal must surface as the converting diagnostic - never the converted-org
