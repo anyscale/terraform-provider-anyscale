@@ -1,9 +1,0 @@
-```release-note:fixed
-resource/anyscale_iam_user_group: Creating a group without the rights to make the write now reports "Not Allowed to Manage Access" with what to do about it, instead of a raw failed-request error.
-```
-```release-note:fixed
-resource/anyscale_iam_role_grant: A create this identity does not manage IAM for now reports "Not Allowed to Manage Access" with the remedy, and a group the identity cannot see is no longer reported as not found.
-```
-```release-note:fixed
-resource/anyscale_iam_role_binding: Policy writes without the rights to make them report "Not Allowed to Manage Access" with the remedy, and a group the policy names that exists but this identity cannot see is no longer reported as not found; a deleted group still is.
-```

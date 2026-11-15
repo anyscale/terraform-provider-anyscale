@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.43.0] - 2026-11-15
+
+### Breaking Changes
+
+- resource/anyscale_cloud: changing `aws_config.vpc_id` without changing the subnets, removing `vpc_id`, `gcp_config.subnet_names`, `kubernetes_config.anyscale_operator_iam_identity` or a whole `kubernetes_config` or `object_storage` block, or changing any of those values on a cloud created with `anyscale cloud setup` is now an error at plan time instead of replacing the cloud. Change the VPC together with its subnets, or keep the value in the configuration (the same applies to `anyscale_cloud_resource`).
+
+### Changed
+
+- resource/anyscale_cloud: `aws_config.vpc_id`, `security_group_ids`, `dataplane_iam_role_arn` and `cluster_instance_profile_id`, `gcp_config.subnet_names`, `firewall_policy_names` and `dataplane_service_account_email`, `kubernetes_config.zones`, `anyscale_operator_iam_identity` and `redis_endpoint`, and `object_storage` now update in place instead of replacing the cloud, and the plan shows changes made to them outside Terraform (the same applies to `anyscale_cloud_resource`).
+- resource/anyscale_cloud: importing a cloud whose configuration omits one of those values now plans clearing it in place instead of replacing the cloud; set the value in the configuration to keep it (the same applies to `anyscale_cloud_resource`).
+- provider: The AWS and GCP VM cloud guides read the organization ID from `data.anyscale_organization.current.id` instead of a hand-supplied variable.
+- provider: The RBAC guide lists all three groups Anyscale manages in a converted organization (All users, Service accounts and the organization admin group) and states that new organizations start converted.
+
+### Fixed
+
+- resource/anyscale_cloud: changing `file_storage` on a Kubernetes cloud no longer clears the cloud's custom image registry setting (the same applies to `anyscale_cloud_resource`).
+- data-source/anyscale_project: read succeeds again in an organization converted to role bindings, with `collaborators` null there instead of the whole data source failing on the legacy collaborator read's 409
+- resource/anyscale_iam_user_group: destroying or renaming a group no longer treats a scoped-IAM refusal as a deleted group - a write answered with "not found" is now read back, and a group that still exists fails with "Cannot Manage User Group" instead of being dropped from state or failing with a raw error
+- resource/anyscale_iam_user_group_members: the same not-found read-back now covers removing or changing members, so a scoped-IAM refusal keeps the group and its members intact instead of silently dropping the resource from state
+- resource/anyscale_iam_role_binding: corrected the example and docs to name the project or cloud creator's Admin binding (`Organization owner`; older scopes may still show `Project owner` or `Cloud owner`) rather than a fixed `Project owner`, whose keep-entry failed at plan with "You cannot assign a role to yourself directly"
+- resource/anyscale_iam_role_grant: Writes refused for naming the organization admin group, or for trying to remove one of its bindings, now report "Organization Admin Group Is Managed by Anyscale" with the path-appropriate remedy, in place of the removed owner-lockout diagnostic.
+- resource/anyscale_iam_role_binding: A policy apply or destroy that would remove an organization admin group binding now reports "Organization Admin Group Is Managed by Anyscale" with the path-appropriate remedy, in place of the removed owner-lockout diagnostic.
+- resource/anyscale_cloud_access: a converted organization's refusals now carry the dedicated diagnostic everywhere - the refused member and project reads say to run `terraform state rm` and manage access with `anyscale_iam_role_grant` instead of surfacing a generic read error, destroy outside a refresh warns and removes the resource from state, and the first-apply disclosure names the refusal instead of a transient miss
+- resource/anyscale_cloud_access: legacy writes refused while a conversion to role bindings is running now say so - "Organization Is Converting to Role Bindings", with retry guidance - instead of a raw conflict or a converted-org diagnostic that would point at migrating before the conversion finishes; destroying during that window fails with the same retry guidance and keeps the resource and its grants under management
+- resource/anyscale_organization_user_role: writes refused while a conversion to role bindings is running now say so - "Organization Is Converting to Role Bindings", with retry guidance - on both write paths, and destroying during that window fails with the same retry guidance and keeps the resource, since the conversion is temporary; the post-conversion retry keeps the converted-org warn-and-drop behavior
+- resource/anyscale_cloud: setting auto_add_user while a conversion to role bindings is running now says to retry after the conversion (at update, with nothing changed on the cloud; at create, the just-created cloud is rolled back and removed from state, same as a converted-org refusal but with wait-not-migrate wording)
+- resource/anyscale_iam_user_group: A duplicate create now finds the existing group ignoring case and spacing, and says so, with no import command, when it is a group you cannot list.
+- resource/anyscale_iam_role_binding: terraform destroy no longer fails at plan when the policy dry-run refuses; the dry-run now runs only when the policy would change, and other refusals warn at plan ("If applied, this change fails") while the apply still refuses with the real error
+- resource/anyscale_iam_user_group: Creating a group without the rights to make the write now reports "Not Allowed to Manage Access" with what to do about it, instead of a raw failed-request error.
+- resource/anyscale_iam_role_grant: A create this identity does not manage IAM for now reports "Not Allowed to Manage Access" with the remedy, and a group the identity cannot see is no longer reported as not found.
+- resource/anyscale_iam_role_binding: Policy writes without the rights to make them report "Not Allowed to Manage Access" with the remedy, and a group the policy names that exists but this identity cannot see is no longer reported as not found; a deleted group still is.
+- resource/anyscale_scheduler_config: terraform destroy no longer fails at plan when the plan-time scheduler validation rejects the configuration - the check now runs only when the config would change and a refusal warns ("If applied, this change fails") instead of erroring; the apply itself still fails with the API's own rejection
+- resource/anyscale_service: terraform destroy no longer fails at plan when the project/compute-config cloud-match guard would reject the pair - the mismatch now warns at plan ("If applied, this change fails") and the apply refuses it before any write, with the same message
+- resource/anyscale_cloud_access: terraform destroy no longer fails at plan when a declared member became an organization admin out of band - the admin check now skips members whose declaration is unchanged, so an ordinary destroy makes no admin lookup at all. A member declaration that actually changed still errors at plan, since the apply cannot refuse one (a refused grant is recorded in ungranted_members by design)
+
 ## [0.42.0] - 2026-11-12
 
 ### Changed
@@ -1426,7 +1461,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.42.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.43.0...HEAD
+[0.43.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.43.0
 [0.42.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.42.0
 [0.41.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.41.0
 [0.40.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.40.0

@@ -1,3 +1,0 @@
-```release-note:fixed
-resource/anyscale_iam_role_binding: terraform destroy no longer fails at plan when the policy dry-run refuses; the dry-run now runs only when the policy would change, and other refusals warn at plan ("If applied, this change fails") while the apply still refuses with the real error
-```
