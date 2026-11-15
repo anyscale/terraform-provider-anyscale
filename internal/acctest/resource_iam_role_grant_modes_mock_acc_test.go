@@ -225,7 +225,7 @@ func TestAccIAMRoleGrantResource_ManageIAMOnCreate(t *testing.T) {
 			`creating\s+a\s+role\s+grant\s+on\s+organization\s+"`+orgID+`".*`+
 			`requires\s+an\s+identity\s+that\s+manages\s+IAM\s+there.*`+
 			`Apply\s+with\s+an\s+identity\s+that\s+manages\s+IAM\s+on\s+that\s+scope.*`+
-			`Admin\s+role\s+\(Organization\s+owner\).*ask\s+an\s+admin`),
+			`Admin\s+role\s+there.*ask\s+an\s+admin.*If\s+the\s+scope\s+was\s+deleted`),
 		rbImportHint, rbAlreadyExists)
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
@@ -256,7 +256,7 @@ func TestAccIAMRoleGrantResource_InvisibleGroupOnCreate(t *testing.T) {
 	check, assertCalled := rbErrorCheck(t,
 		regexp.MustCompile(`(?s)Not\s+Allowed\s+to\s+Manage\s+Access.*`+
 			`User\s+group\s+'`+invisible+`'\s+not\s+found\..*`+
-			`this\s+identity\s+cannot\s+bind\s+roles\s+for\s+that\s+group.*`+
+			`names\s+a\s+user\s+group\s+this\s+identity\s+cannot\s+bind\s+roles\s+for.*`+
 			`Apply\s+with\s+an\s+identity\s+that\s+manages\s+IAM\s+on\s+that\s+scope.*ask\s+an\s+admin`),
 		rbImportHint, rbAlreadyExists)
 	resource.Test(t, resource.TestCase{

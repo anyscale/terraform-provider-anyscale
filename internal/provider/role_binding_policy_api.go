@@ -363,7 +363,7 @@ func addPolicyWriteError(ctx context.Context, client *Client, diags *diag.Diagno
 			withOutcome(namePolicyElement(detail, index)+" Grant it to a user group this identity belongs to, or apply with a different identity.", outcome))
 	case isStatusWithSubstring(err, http.StatusForbidden, roleBindingManageIAMSubstring):
 		diags.AddError(iamManageAccessSummary,
-			withOutcome(iamManageAccessDetail(detail, policyWriteOpPhrase(op), iamScopeDesc(scopeType, scopeID)), outcome))
+			withOutcome(iamManageAccessDetail(detail, policyWriteOpPhrase(op), iamScopeDesc(scopeType, scopeID), true), outcome))
 	case isRoleBindingAdminGroupRemovalRefusal(err):
 		// A destroy's policy omits the admin group's binding because
 		// nothing is kept; an ordinary apply omits it because roles left
@@ -394,9 +394,17 @@ func addPolicyWriteError(ctx context.Context, client *Client, diags *diag.Diagno
 			addRoleBindingsDisabledError(diags, outcome)
 		default:
 			if m := roleBindingGroupNotFoundDetail.FindStringSubmatch(detail); m != nil {
-				if _, getErr := getUserGroup(ctx, client, m[1]); getErr == nil {
+				_, getErr := getUserGroup(ctx, client, m[1])
+				switch {
+				case getErr == nil:
 					diags.AddError(iamManageAccessSummary,
 						withOutcome(iamManageAccessGroupUnseenDetail(namePolicyElement(detail, index), policyWriteOpPhrase(op), iamScopeDesc(scopeType, scopeID)), outcome))
+					return
+				case !isUserGroupNotFound(getErr):
+					// The group read-back itself failed, so the two halves of
+					// this 404 - deleted, or unseen - stay unverified.
+					diags.AddError("Role or User Group Not Found",
+						withOutcome(namePolicyElement(detail, index)+" Reading the group to tell a deleted group from an unseen one failed: "+extractAPIErrorDetail(getErr), outcome))
 					return
 				}
 			}

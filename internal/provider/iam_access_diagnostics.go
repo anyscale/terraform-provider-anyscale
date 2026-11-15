@@ -19,7 +19,7 @@ const iamManageAccessSummary = "Not Allowed to Manage Access"
 
 // iamManageAccessRemedy is what to do about the refusal, appended to every
 // detail below.
-const iamManageAccessRemedy = "Apply with an identity that manages IAM on that scope - for example one holding the Admin role (Organization owner) there - or ask an admin."
+const iamManageAccessRemedy = "Apply with an identity that manages IAM on that scope - for example one holding the Admin role there - or ask an admin."
 
 // roleBindingManageIAMSubstring is the detail substring of the 403 that
 // role-grant creates and role-binding policy writes answer when the caller
@@ -40,26 +40,40 @@ func iamScopeDesc(resourceType, resourceID string) string {
 	return fmt.Sprintf("%s %q", resourceType, resourceID)
 }
 
-// iamManageAccessDetail builds the detail for a write the API refused with 403:
-// the API's own refusal, the operation and the scope it refused it on, and
-// the remedy. operation reads like a sentence subject ("creating a role
-// grant"); scopeDesc like its object ('cloud "cld_..."').
-func iamManageAccessDetail(apiDetail, operation, scopeDesc string) string {
-	return fmt.Sprintf("%s %s on %s requires an identity that manages IAM there. %s",
+// amiManageAccessDeletedScopeClause is appended for role-grant and policy
+// writes: the API answers the same 403 for a scope that was deleted or never
+// existed, so the detail says to check the scope still exists. User group
+// creates target the organization and do not need it.
+const iamManageAccessDeletedScopeClause = "If the scope was deleted, this refusal also appears; check it still exists."
+
+// iamManageAccessDetail builds the detail for a write the API refused with
+// 403: the API's own refusal, the operation and the scope it refused it on,
+// and the remedy. operation reads like a sentence subject ("creating a role
+// grant"); scopeDesc like its object ('cloud "cld_..."'). The scope here is a
+// named resource, so the detail keeps the deleted-scope clause.
+func iamManageAccessDetail(apiDetail, operation, scopeDesc string, deletedScopePossible bool) string {
+	detail := fmt.Sprintf("%s %s on %s requires an identity that manages IAM there. %s",
 		apiDetail, operation, scopeDesc, iamManageAccessRemedy)
+	if deletedScopePossible {
+		detail += " " + iamManageAccessDeletedScopeClause
+	}
+	return detail
 }
 
 // addIAMManageAccessError reports a write refused with 403 because the
-// identity does not manage IAM on the scope it targets.
-func addIAMManageAccessError(diags *diag.Diagnostics, apiDetail, operation, scopeDesc string) {
-	diags.AddError(iamManageAccessSummary, iamManageAccessDetail(apiDetail, operation, scopeDesc))
+// identity does not manage IAM on the scope it targets. deletedScopePossible
+// says whether the API answers this same 403 for a scope that no longer
+// exists: true for the named-scope resources (grant, policy), false for the
+// organization-scoped user group create, whose target cannot vanish.
+func addIAMManageAccessError(diags *diag.Diagnostics, apiDetail, operation, scopeDesc string, deletedScopePossible bool) {
+	diags.AddError(iamManageAccessSummary, iamManageAccessDetail(apiDetail, operation, scopeDesc, deletedScopePossible))
 }
 
 // iamManageAccessGroupUnseenDetail builds the detail for a grant refused with
 // the group-not-found 404 while the group itself still reads back fine: the
 // group exists, but this identity cannot see it for this write.
 func iamManageAccessGroupUnseenDetail(apiDetail, operation, scopeDesc string) string {
-	return fmt.Sprintf("%s %s on %s names a user group that exists but that this identity cannot see: this identity cannot bind roles for that group. %s",
+	return fmt.Sprintf("%s %s on %s names a user group this identity cannot bind roles for. %s",
 		apiDetail, operation, scopeDesc, iamManageAccessRemedy)
 }
 

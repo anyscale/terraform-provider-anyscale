@@ -978,7 +978,7 @@ func TestAccIAMRoleBindingResource_InvisibleGroupOnWrite(t *testing.T) {
 		regexp.MustCompile(`(?s)Not\s+Allowed\s+to\s+Manage\s+Access.*`+
 			`roles\[1\]\.principals\[0\]:\s+User\s+group\s+'`+invisible+`'\s+not\s+found\.`+
 			`\s+\(role\s+"`+pmReader+`",\s+user_group\s+"`+invisible+`"\).*`+
-			`this\s+identity\s+cannot\s+bind\s+roles\s+for\s+that\s+group.*ask\s+an\s+admin`),
+			`names\s+a\s+user\s+group\s+this\s+identity\s+cannot\s+bind\s+roles\s+for.*ask\s+an\s+admin`),
 	)
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
