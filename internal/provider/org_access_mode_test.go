@@ -26,23 +26,36 @@ const (
 	testNotConvertedDetail = "Switch this organization to role bindings to change role bindings."
 	testDuplicateDetail    = "The principal already holds this role on this resource."
 	testArchivedDetail     = "This role is archived and cannot be newly assigned."
-	testLockoutDetail      = "This change would leave the organization without an Organization owner."
-	testConcurrentDetail   = "A role binding was revoked concurrently. Retry the request."
-	testAutoAddUserDetail  = "Users cannot be removed from clouds which have auto add users enabled."
+	// The two admin-group role-binding 409s, verbatim, plus two other
+	// admin-group refusals that are NOT role-binding writes and must not
+	// classify as them (product 5c6ce328ab8: converted_organizations.py:501
+	// and :253, role_bindings_service.py:~1784,
+	// iam_migration_service.py:3375). The two real texts also start with
+	// "The organization admin group", but classification matches the exact
+	// substrings, not the shared prefix, so the other two stay outside.
+	testAdminGroupRemovalDetail    = "The organization admin group's role bindings cannot be removed."
+	testAdminGroupRolesDetail      = "The organization admin group holds only the roles the platform binds it to."
+	testAdminGroupMemberKeepDetail = "The organization admin group must keep at least one member."
+	testAdminGroupRenameDetail     = "The organization admin group protects your organization against lockout and cannot be renamed."
+	testConcurrentDetail           = "A role binding was revoked concurrently. Retry the request."
+	testAutoAddUserDetail          = "Users cannot be removed from clouds which have auto add users enabled."
+	testConvertingDetail           = "This organization is converting to role bindings. Try again when the conversion finishes, or retry it in the migration wizard if it stopped."
 )
 
 func TestOrgAccessModeClassifiers(t *testing.T) {
 	classifiers := map[string]func(error) bool{
 		"converted":     isOrgConvertedConflict,
 		"not_converted": isOrgNotConvertedConflict,
+		"converting":    isOrgConvertingConflict,
 		"duplicate": func(err error) bool {
 			return isStatusWithSubstring(err, http.StatusConflict, roleBindingDuplicateSubstring)
 		},
 		"archived_role": func(err error) bool {
 			return isStatusWithSubstring(err, http.StatusConflict, roleBindingArchivedRoleSubstring)
 		},
-		"lockout": func(err error) bool {
-			return isStatusWithSubstring(err, http.StatusConflict, roleBindingLockoutSubstring)
+		"admin_group_removal": isRoleBindingAdminGroupRemovalRefusal,
+		"admin_group_extra_role": func(err error) bool {
+			return isStatusWithSubstring(err, http.StatusConflict, roleBindingAdminGroupExtraRoleSubstring)
 		},
 	}
 	cases := []struct {
@@ -55,12 +68,19 @@ func TestOrgAccessModeClassifiers(t *testing.T) {
 		{"not converted", http.StatusConflict, testNotConvertedDetail, "not_converted"},
 		{"duplicate", http.StatusConflict, testDuplicateDetail, "duplicate"},
 		{"archived role", http.StatusConflict, testArchivedDetail, "archived_role"},
-		{"lockout", http.StatusConflict, testLockoutDetail, "lockout"},
+		{"admin group removal", http.StatusConflict, testAdminGroupRemovalDetail, "admin_group_removal"},
+		{"admin group extra role", http.StatusConflict, testAdminGroupRolesDetail, "admin_group_extra_role"},
+		{"admin group member guard", http.StatusConflict, testAdminGroupMemberKeepDetail, ""},
+		{"admin group rename refusal", http.StatusConflict, testAdminGroupRenameDetail, ""},
 		{"concurrent revoke", http.StatusConflict, testConcurrentDetail, ""},
 		{"auto add user", http.StatusConflict, testAutoAddUserDetail, ""},
 		// The status must match as well as the text.
 		{"converted text on a 403", http.StatusForbidden, testConvertedDetail, ""},
 		{"duplicate text on a 400", http.StatusBadRequest, testDuplicateDetail, ""},
+		// A conversion in flight refuses the legacy writes until it commits; the
+		// converted and converting details must never cross-match.
+		{"converting", http.StatusConflict, testConvertingDetail, "converting"},
+		{"converting text on a 500", http.StatusInternalServerError, testConvertingDetail, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -78,6 +98,34 @@ func TestOrgAccessModeClassifiersIgnoreNonStatusErrors(t *testing.T) {
 	err := fmt.Errorf("transport: %s", testConvertedDetail)
 	if isOrgConvertedConflict(err) {
 		t.Error("a non-HTTP error carrying the converted text must not classify as converted")
+	}
+}
+
+func TestOrgConvertingDetailNamesRetryNotMigration(t *testing.T) {
+	detail := orgConvertingDetail(apiStatusError(t, http.StatusConflict, testConvertingDetail))
+	for _, want := range []string{testConvertingDetail, "Retry once the conversion completes", "migration wizard", "#organization-access-mode"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("detail %q does not contain %q", detail, want)
+		}
+	}
+	// The one thing the converting guidance must not do is route to the
+	// converted-org replacement surface: the conversion has not happened yet.
+	for _, banned := range []string{"anyscale_iam_role_grant"} {
+		if strings.Contains(detail, banned) {
+			t.Errorf("converting guidance %q must not migrate to the replacement surface yet: contains %q", detail, banned)
+		}
+	}
+}
+
+func TestOrgConvertedReadDetailRoutesToStateRm(t *testing.T) {
+	detail := orgConvertedReadDetail(apiStatusError(t, http.StatusConflict, testConvertedDetail))
+	for _, want := range []string{"terraform state rm", "anyscale_iam_role_grant", "#organization-access-mode"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("read detail %q does not contain %q", detail, want)
+		}
+	}
+	if strings.Contains(detail, "refuses legacy access writes") {
+		t.Errorf("read detail %q must not reuse the write wording", detail)
 	}
 }
 

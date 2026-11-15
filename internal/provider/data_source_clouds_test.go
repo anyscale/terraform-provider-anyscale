@@ -19,8 +19,8 @@ import (
 // data_source_projects_test.go. Replaces the old TestCloudsFilterParameterBuilding,
 // which reimplemented Read()'s param-building logic inline in the test instead
 // of calling Read() - it could never catch a bug in the real function because
-// it was only ever comparing its own copy against itself, and it hardcoded the
-// pre-fix "name_contains" key as the expected/correct value.
+// it was only ever comparing its own copy against itself, and it enshrined
+// "name_contains" - the key the old implementation used - as the correct value.
 func runCloudsDataSourceRead(t *testing.T, d *CloudsDataSource, model CloudsDataSourceModel) (CloudsDataSourceModel, diag.Diagnostics) {
 	t.Helper()
 	ctx := context.Background()
@@ -55,7 +55,7 @@ func runCloudsDataSourceRead(t *testing.T, d *CloudsDataSource, model CloudsData
 	return result, readResp.Diagnostics
 }
 
-// TestCloudsDataSourceRead_NameFilterSendsCorrectQueryKey is the DS-CLOUD-1
+// TestCloudsDataSourceRead_NameFilterSendsCorrectQueryKey is the
 // mutation-proof guard for the server-side substring filter. The real backend
 // list_clouds handler (product/routers/clouds_router.py) only recognizes
 // "name" (TextQuery contains); it silently drops an unrecognized "name_contains"
@@ -88,7 +88,7 @@ func TestCloudsDataSourceRead_NameFilterSendsCorrectQueryKey(t *testing.T) {
 	}
 }
 
-// TestCloudsDataSourceRead_ProviderNarrowsClientSide is the DS-CLOUD-1
+// TestCloudsDataSourceRead_ProviderNarrowsClientSide is the
 // mutation-proof guard for the cloud_provider filter. The real list_clouds
 // endpoint has no provider param at all (confirmed by two independent
 // traces), so filtering must happen client-side over the

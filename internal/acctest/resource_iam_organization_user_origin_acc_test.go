@@ -456,13 +456,14 @@ func TestAccIAMOrganizationUserResourceImportRoundTripPreservesCasing(t *testing
 					return nil
 				},
 				ImportStateVerify: true,
-				// Nothing is ignored on purpose. reinvite_if_expired has no backend
-				// representation and would normally need the R8 exemption, but
-				// ImportState sets it explicitly to false rather than leaving it
-				// null, so it round-trips honestly and does not need silencing. If
-				// this ever starts failing on that attribute, add the entry WITH a
-				// comment - an unexplained entry here is indistinguishable from
-				// someone hiding a real failure.
+				// Nothing is ignored on purpose. reinvite_if_expired has no
+				// backend representation, so it would normally need an
+				// ImportStateVerifyIgnore exemption, but ImportState sets it
+				// explicitly to false rather than leaving it null, so it
+				// round-trips honestly and does not need silencing. If this
+				// ever starts failing on that attribute, add the entry WITH a
+				// comment - an unexplained entry here is indistinguishable
+				// from someone hiding a real failure.
 			},
 			{
 				// 3. Does NOT prove import-recovery correctness - see the

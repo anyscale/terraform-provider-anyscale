@@ -137,10 +137,10 @@ func TestAccIAMRoleGrantResource_ArchivedRoleCreate(t *testing.T) {
 	assertCalled()
 }
 
-// A revoke that would leave the organization without an Organization owner
-// is refused; the diagnostic carries the API detail and the remedy, and the
-// binding stays.
-func TestAccIAMRoleGrantResource_LockoutDelete(t *testing.T) {
+// A revoke of an organization admin group binding is refused; the
+// diagnostic carries the API detail, says the platform owns the group's
+// bindings, and the binding stays.
+func TestAccIAMRoleGrantResource_AdminGroupDelete(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	resource.Test(t, resource.TestCase{
@@ -149,10 +149,11 @@ func TestAccIAMRoleGrantResource_LockoutDelete(t *testing.T) {
 		Steps: []resource.TestStep{
 			{Config: rbConfig(m, rbRole)},
 			{
-				PreConfig: func() { m.setDeleteMode("lockout") },
+				PreConfig: func() { m.setDeleteMode("admin_group") },
 				Config:    m.providerBlock(),
-				ExpectError: regexp.MustCompile(`(?s)Change Would Leave Organization Without an Owner.*` +
-					`without\s+an\s+Organization\s+owner.*keep\s+at\s+least\s+one\s+Organization\s+owner\s+binding`),
+				ExpectError: regexp.MustCompile(`(?s)Organization Admin Group Is Managed by Anyscale.*` +
+					`The\s+organization\s+admin\s+group's\s+role\s+bindings\s+cannot\s+be\s+removed.*` +
+					`platform-owned\s+and\s+cannot\s+be\s+revoked.*stays\s+in\s+Terraform\s+state.*terraform\s+state\s+rm`),
 			},
 			{
 				PreConfig: func() {
@@ -166,6 +167,27 @@ func TestAccIAMRoleGrantResource_LockoutDelete(t *testing.T) {
 			},
 		},
 	})
+}
+
+// A create that names the organization admin group is refused with the
+// holds-only-platform-roles 409 and the admin-group diagnostic; it is never
+// reported as a duplicate.
+func TestAccIAMRoleGrantResource_AdminGroupCreateRefused(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newRBMock(t)
+	m.setCreateConflict(roleBindingMockAdminGroupRolesDetail)
+	check, assertCalled := rbErrorCheck(t,
+		regexp.MustCompile(`(?s)Organization Admin Group Is Managed by Anyscale.*`+
+			`holds\s+only\s+the\s+roles\s+the\s+platform\s+binds\s+it\s+to.*`+
+			`Remove\s+the\s+group\s+from\s+the\s+grant`),
+		rbImportHint, rbAlreadyExists)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		ErrorCheck:               check,
+		CheckDestroy:             rbDestroyed(m),
+		Steps:                    []resource.TestStep{{Config: rbConfig(m, rbRole)}},
+	})
+	assertCalled()
 }
 
 // A 409 the provider does not recognize passes through with the API detail

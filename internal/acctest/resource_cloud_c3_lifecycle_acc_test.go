@@ -11,7 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// This file closes the framework-level half of C3's acceptance gates that
+// This file closes the framework-level half of the acceptance gates that
 // resource_cloud_c3_test.go (function-level, calls readCloudState/
 // readCloudResource directly) cannot: plan-emptiness is a terraform-FRAMEWORK
 // property, not just a mapping-function property. A plan modifier or attr
@@ -23,7 +23,7 @@ import (
 // this runs in ordinary CI.
 //
 // The mock deliberately returns REALISTIC (not idealized-echo) shapes for the
-// three C3 round-trip hazards: subnet_ids_to_az is derived from parallel
+// three round-trip hazards: subnet_ids_to_az is derived from parallel
 // subnet_ids+zones arrays (the API never returns subnet_ids_to_az itself);
 // object_storage.bucket_name comes back WITH its provider prefix even though
 // the schema stores it bare; GCP is analogous. An echo-mock that just replays
@@ -106,7 +106,7 @@ func newC3MockCloudServer(t *testing.T, cloudID, cloudJSON, resourcesJSON, cloud
 		fmt.Sprintf(`{"cloud_deployment_id": "cldrsrc_mock_default", "cloud_resource_id": %q}`, cloudResourceID))
 }
 
-// TestAccCloudResource_Lifecycle_AWS_MockServer proves C3's headline gates for the AWS
+// TestAccCloudResource_Lifecycle_AWS_MockServer proves the headline gates for the AWS
 // all-in-one pattern against a mock backend: fresh create -> apply -> plan
 // empty; import recovers every block, including object_storage, to exactly
 // Create's state (ImportStateVerify ignores only credentials/is_empty_cloud).
@@ -133,7 +133,7 @@ func TestAccCloudResource_Lifecycle_AWS_MockServer(t *testing.T) {
 	}`, cloudID)
 	// Realistic hazard shapes: parallel subnet_ids+zones (never subnet_ids_to_az),
 	// bucket_name WITH its s3:// prefix even though the schema stores it bare.
-	// cluster_instance_profile_id (C6) is included to prove it round-trips
+	// cluster_instance_profile_id is included to prove it round-trips
 	// through the same import-only recovery path as the pre-existing fields.
 	resourcesJSON := `[{
 		"name": "default", "is_default": true, "cloud_resource_id": "cldrsrc_mock_default",
@@ -189,7 +189,7 @@ resource "anyscale_cloud" "test" {
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "object_storage.bucket_name", "real-bucket-name"),
 					resource.TestCheckNoResourceAttr("anyscale_cloud.test", "is_default"),
 				),
-				// Headline C3 gate: a config populated at create against a
+				// Headline gate: a config populated at create against a
 				// realistically-shaped (hazard-laden) API response must not
 				// diff on the very next plan.
 				ExpectNonEmptyPlan: false,
@@ -287,7 +287,7 @@ func TestAccCloudResource_K8S_NoRegion_ClearError(t *testing.T) {
 
 	const cloudID = "cld_c13_noregion_mock"
 	// region is intentionally absent/empty here - this is what a create
-	// request looks like right before the C13 guard would otherwise let
+	// request looks like right before the region guard would otherwise let
 	// region="" flow through to add_resource.
 	cloudJSON := fmt.Sprintf(`{
 		"id": %[1]q, "name": "c13-noregion-mock", "provider": "AWS", "region": "",
@@ -406,7 +406,7 @@ resource "anyscale_cloud" "test" {
 // analogue of TestAccCloudResource_Lifecycle_K8S_MockServer above. It
 // exercises file_storage.csi_ephemeral_volume_driver instead of
 // persistent_volume_claim - the backend rejects setting both on the same
-// file_storage block (see cloud_helpers_test.go / K10).
+// file_storage block (see cloud_helpers_test.go).
 //
 // file_storage is recovered at import and not in ImportStateVerifyIgnore, so
 // a regression in flattenFileStorage's csi_ephemeral_volume_driver mapping, or
@@ -481,7 +481,7 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
-// This section is the MOCK-LEVEL regression guard for BUG C, the
+// This section is the MOCK-LEVEL regression guard for the
 // user-reported cold-import compute_stack issue: a K8S cloud created OUTSIDE
 // Terraform (via the Anyscale CLI) then imported cold showed compute_stack =
 // VM instead of K8S. The fix (resource_cloud.go's readCloudState) sources
@@ -503,8 +503,8 @@ resource "anyscale_cloud" "test" {
 // be a shape the real backend ever produces - and the user's real cause could
 // instead be the resource-level ComputeStack field itself being empty/wrong
 // for some clouds (e.g. older or CLI-registered ones), which no mock here
-// can rule in or out. THE ARBITER for whether BUG C is actually fixed for the
-// user is a real CLI-create-then-cold-import repro against the
+// can rule in or out. THE ARBITER for whether the reported issue is actually
+// fixed for the user is a real CLI-create-then-cold-import repro against the
 // integrated binary, not these tests. Treat these as "the hardening works as
 // designed," not "the user's bug is closed."
 
@@ -614,13 +614,12 @@ resource "anyscale_cloud" "test" {
 
 // TestAccCloudResource_ColdImport_ComputeStack_IsDefaultFalse is variant 2:
 // the sole resource is NOT flagged default (is_default: false). Confirmed via
-// mutation test (see the sibling True variant's history in git-log if this
-// comment predates it) that WITHOUT the "exactly one resource is
+// mutation test that WITHOUT the "exactly one resource is
 // unambiguous" hardening, this variant fails (reports VM) while the
 // IsDefaultTrue variant alone would still pass - proving the hardening, not
-// just the base fix, is what this specific case needs. Passes now that the
-// hardening has landed. See the file-section comment above for why this
-// still isn't proof the user's real case is resolved.
+// just the base fix, is what this specific case needs. See the file-section
+// comment above for why this still isn't proof the user's real case is
+// resolved.
 func TestAccCloudResource_ColdImport_ComputeStack_IsDefaultFalse(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -658,9 +657,9 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
-// TestAccCloudResource_CloudResourceIDPopulated_MockServer proves the new
-// cloud_resource_id attribute's full lifecycle (CLOUD-RESOURCE-ID-SPEC.md
-// T1/T2): populated and matching immediately after create; a second,
+// TestAccCloudResource_CloudResourceIDPopulated_MockServer proves the
+// cloud_resource_id attribute's full lifecycle:
+// populated and matching immediately after create; a second,
 // independent plan against already-applied state reproduces the identical
 // value (Create's add_resource capture and Read's resources-list backfill
 // genuinely agree, not just a one-time coincidence); and import populates it

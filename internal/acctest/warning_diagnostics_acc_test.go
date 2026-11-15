@@ -11,12 +11,12 @@ import (
 )
 
 // This file verifies WARNING-level diagnostics actually reach the user -
-// schema.DeprecationMessage (C5) and resp.Diagnostics.AddWarning (C9) both
-// looked correct at the source level but that doesn't guarantee Terraform
+// schema.DeprecationMessage and resp.Diagnostics.AddWarning both can
+// look correct at the source level but that doesn't guarantee Terraform
 // ever shows them. resource.Test's ProtoV6ProviderFactories path (used
 // everywhere else in this package) runs terraform via a reattach mechanism
 // that does not surface warning-level diagnostics at all, even on a passing
-// step (confirmed empirically 2026-07-07) - so it cannot verify either one
+// step - so it cannot verify either one
 // reached the user regardless of the underlying implementation. This drives a real
 // `terraform validate`/`plan -json` against a freshly-built provider binary
 // instead, which is the only way to observe actually-served warning text.
@@ -95,17 +95,13 @@ provider "anyscale" {
 	return result
 }
 
-// TestAccCloudResource_KubernetesConfigRemovedFieldsRejected replaces
-// TestAccCloudResource_KubernetesConfigDeprecatedFields_WarningActuallyFires:
-// task #8 removed the 5 fields entirely rather than just deprecating them
-// (see TestFlattenKubernetesConfig_APIBackedFieldsPopulate for why), which
+// TestAccCloudResource_KubernetesConfigRemovedFieldsRejected asserts the
+// contract after the 5 kubernetes_config fields were removed entirely
+// rather than just deprecated (see TestFlattenKubernetesConfig_APIBackedFieldsPopulate
+// for why), which
 // changes the diagnostic shape completely - a removed schema attribute is a
 // config-vs-schema mismatch Terraform Core itself rejects at validate time
-// ("Unsupported argument"), not a provider-served warning. Leaving the old
-// warning-count assertion running would either fail confusingly (0
-// warnings, since the fields no longer exist to warn about) or, worse,
-// quietly stop proving anything if some
-// unrelated diagnostic happened to match its loose Contains check. This
+// ("Unsupported argument"), not a provider-served warning. This
 // asserts the actual post-removal contract: validate fails, and every one
 // of the 5 removed names is named in its own "Unsupported argument" error.
 func TestAccCloudResource_KubernetesConfigRemovedFieldsRejected(t *testing.T) {
@@ -182,8 +178,8 @@ type tfApplyJSONLine struct {
 	} `json:"diagnostic"`
 }
 
-// runTerraformApplyJSON is runTerraformValidate's apply-time analogue: C9's
-// warning is emitted from inside Create() (getOrGenerateCredentials), which
+// runTerraformApplyJSON is runTerraformValidate's apply-time analogue: the
+// credential-placeholder warning is emitted from inside Create() (getOrGenerateCredentials), which
 // only ever runs during apply, never during plan/validate. apiURL points the
 // provider at a mock backend (see newC3MockCloudServer) so this needs no
 // real credentials or infra. Returns every diagnostic line from the
@@ -208,7 +204,7 @@ provider "anyscale" {
 }
 
 // TestAccCloudResource_CredentialPlaceholder_WarningActuallyFires proves the
-// corrected C9 behavior: an all-in-one cloud whose aws_config is present but
+// corrected behavior: an all-in-one cloud whose aws_config is present but
 // has no way to derive a credential must produce a real, served warning
 // during apply - not just a struct-level "wasPlaceholder" assertion.
 func TestAccCloudResource_CredentialPlaceholder_WarningActuallyFires(t *testing.T) {

@@ -204,7 +204,7 @@ resource "anyscale_iam_role_binding" "test" {
 `, pmProject, strings.Join(pmBase(), "")))
 
 	lines := pmRunOK(t, run, "plan", "-json")
-	pmExpectWarning(t, lines, "Role Binding Not Checked at Plan", "owner role", "HTTP 403")
+	pmExpectWarning(t, lines, "Role Binding Not Checked at Plan", "Admin role", "stored as Organization owner", "HTTP 403")
 	if w := pmProviderWarnings(lines); len(w) != 1 {
 		t.Errorf("want exactly one warning, got %d: %v", len(w), w)
 	}

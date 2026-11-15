@@ -23,8 +23,9 @@ import (
 // themselves -- none of them called the resource's real Create(), so none could
 // catch a regression in it. Two had gone further than merely untested: they
 // hand-asserted `id == build_id` ("Resource ID should be build ID for registry
-// resources"), which F3 made false -- id has keyed on the application template
-// (cluster environment) id since then, precisely so a superseded/failed build
+// resources"), which is false -- id keys on
+// the application template
+// (cluster environment) id, precisely so a superseded/failed build
 // never orphans the resource's identity (see the comment on Create(), around the
 // early resp.State.Set call, and on ContainerImageRegistryResourceModel.ID).
 //
@@ -196,8 +197,7 @@ func TestContainerImageRegistryCreate_MapsFieldsAndKeysIDOnTemplate(t *testing.T
 			}
 
 			// The money assertion: id must be the TEMPLATE id, never the build id --
-			// this is what F3 changed and what TestContainerImageRegistryModelMapping /
-			// TestBuildResultToBuildIDMapping got backwards. templateID and buildID are
+			// templateID and buildID are
 			// deliberately distinct fixture values above so this assertion can actually
 			// fail on a regression instead of passing by coincidence.
 			if state.ID.ValueString() != templateID {

@@ -109,8 +109,8 @@ func TestReadCloudState_NeverTouchesAlreadyPopulatedConfigBlock(t *testing.T) {
 	}
 }
 
-// TestReadCloudState_NeverInjectsIntoNullConfigBlock is the literal
-// regression test for C3-v2: this is the exact shape of a K8S-only create
+// TestReadCloudState_NeverInjectsIntoNullConfigBlock covers the exact
+// shape of a K8S-only create
 // (kubernetes_config set, aws_config/gcp_config genuinely never configured -
 // optional for K8S) whose first post-create Read used to inject aws_config
 // from the default resource, which Terraform then hard-errors on
@@ -191,7 +191,7 @@ func TestReadCloudState_ComputedFieldsStillBackfillOnImport(t *testing.T) {
 
 	r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
 	// A fresh terraform import only ever sets id via ImportState - the
-	// Computed fields start null/unknown, same as before C3-v2.
+	// Computed fields start null/unknown.
 	state := &CloudResourceModel{
 		ID:              types.StringValue("cloud-2"),
 		IsEmptyCloud:    types.BoolNull(),
@@ -212,7 +212,7 @@ func TestReadCloudState_ComputedFieldsStillBackfillOnImport(t *testing.T) {
 	// The Computed fields backfill, but config blocks still do not - that's
 	// ImportState's job now, tested separately below.
 	if !state.AWSConfig.IsNull() {
-		t.Errorf("AWSConfig = %v, want still null - readCloudState never populates config blocks under C3-v2", state.AWSConfig)
+		t.Errorf("AWSConfig = %v, want still null - readCloudState never populates config blocks", state.AWSConfig)
 	}
 }
 
@@ -332,7 +332,7 @@ func TestReadCloudResource_NeverInjectsIntoNullConfigBlock(t *testing.T) {
 	}
 
 	if !state.GCPConfig.IsNull() {
-		t.Errorf("GCPConfig = %v, want still null - readCloudResource never populates config blocks under C3-v2 (same regression class as anyscale_cloud)", state.GCPConfig)
+		t.Errorf("GCPConfig = %v, want still null - readCloudResource never populates config blocks (same regression class as anyscale_cloud)", state.GCPConfig)
 	}
 }
 
@@ -390,7 +390,7 @@ func TestRequiredImportConfigBlocks_VMPopulatesProviderBlockPlusStorage(t *testi
 		}
 	})
 
-	t.Run("AWS: object_storage.region equal to the cloud region is now recovered verbatim (Computed self-heal, supersedes the old L1 masking)", func(t *testing.T) {
+	t.Run("AWS: object_storage.region equal to the cloud region is now recovered verbatim (Computed self-heal, superseding the old masking)", func(t *testing.T) {
 		// region is now Optional+Computed with UseStateForUnknown ordered
 		// before RequiresReplace (see the schema) - recovering the real
 		// value at import is correct now, unlike the old null-when-equal
@@ -416,7 +416,7 @@ func TestRequiredImportConfigBlocks_VMPopulatesProviderBlockPlusStorage(t *testi
 		}
 	})
 
-	t.Run("AWS: file_storage.mount_path empty from the API resolves to null, not a fabricated default (D1)", func(t *testing.T) {
+	t.Run("AWS: file_storage.mount_path empty from the API resolves to null, not a fabricated default", func(t *testing.T) {
 		defaultResource := &CloudDeploymentResult{
 			ComputeStack: "VM",
 			AWSConfig:    &AWSConfig{VPCID: "vpc-real"},
@@ -432,7 +432,7 @@ func TestRequiredImportConfigBlocks_VMPopulatesProviderBlockPlusStorage(t *testi
 		var fsModel FileStorageModel
 		blocks["file_storage"].As(ctx, &fsModel, basetypes.ObjectAsOptions{})
 		if !fsModel.MountPath.IsNull() {
-			t.Errorf("file_storage.MountPath = %q, want null - AWS has no real backend field for it, and D1 stopped fabricating fileStorageDefaultMountPath", fsModel.MountPath.ValueString())
+			t.Errorf("file_storage.MountPath = %q, want null - AWS has no real backend field for it, and the provider no longer fabricates fileStorageDefaultMountPath", fsModel.MountPath.ValueString())
 		}
 	})
 
@@ -440,7 +440,7 @@ func TestRequiredImportConfigBlocks_VMPopulatesProviderBlockPlusStorage(t *testi
 		// mount_targets is now Optional+Computed (see
 		// mount_targets_state_compat_test.go for the Block-to-Attribute
 		// rationale) - recovering the real value at import is correct now,
-		// unlike the old Option C (PR #189) never-recover fix.
+		// unlike the old never-recover fix (PR #189).
 		defaultResource := &CloudDeploymentResult{
 			ComputeStack: "VM",
 			AWSConfig:    &AWSConfig{VPCID: "vpc-real"},
@@ -497,7 +497,7 @@ func TestRequiredImportConfigBlocks_VMPopulatesProviderBlockPlusStorage(t *testi
 		var fsModel FileStorageModel
 		blocks["file_storage"].As(ctx, &fsModel, basetypes.ObjectAsOptions{})
 		if fsModel.MountPath.ValueString() != "/mnt/gcp-real" {
-			t.Errorf("file_storage.MountPath = %q, want /mnt/gcp-real - GCP has a real backend field and must round-trip it verbatim (L2)", fsModel.MountPath.ValueString())
+			t.Errorf("file_storage.MountPath = %q, want /mnt/gcp-real - GCP has a real backend field and must round-trip it verbatim", fsModel.MountPath.ValueString())
 		}
 	})
 }
@@ -655,7 +655,7 @@ func TestCloudResourceImportState_RecoversRequiredBlockEndToEnd(t *testing.T) {
 	}
 }
 
-// --- readCloudState: file_storage drift warning (D3) ---
+// --- readCloudState: file_storage drift warning ---
 //
 // checkFileStorageDrift is diagnostics-only (see its doc comment) - these
 // tests assert both the warning content and, separately, that state.FileStorage
@@ -723,7 +723,7 @@ func TestReadCloudState_FileStorageDriftWarning(t *testing.T) {
 			}
 		}
 		if !state.FileStorage.Equal(originalFileStorage) {
-			t.Errorf("state.FileStorage was modified by the drift check - D3 must be diagnostics-only.\nbefore: %#v\nafter:  %#v", originalFileStorage, state.FileStorage)
+			t.Errorf("state.FileStorage was modified by the drift check - the drift check must be diagnostics-only.\nbefore: %#v\nafter:  %#v", originalFileStorage, state.FileStorage)
 		}
 	})
 
@@ -769,11 +769,11 @@ func TestReadCloudState_FileStorageDriftWarning(t *testing.T) {
 			}
 		}
 		if !state.FileStorage.IsNull() {
-			t.Error("state.FileStorage was populated by the drift check - D3 must be diagnostics-only, config blocks stay recover-only-on-import")
+			t.Error("state.FileStorage was populated by the drift check - the drift check must be diagnostics-only, config blocks stay recover-only-on-import")
 		}
 	})
 
-	t.Run("suppressed: pre-D1 default mount_path residue against AWS's real empty value - no warning", func(t *testing.T) {
+	t.Run("suppressed: fabricated default mount_path residue against AWS's real empty value - no warning", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			switch r.URL.Path {
@@ -781,7 +781,7 @@ func TestReadCloudState_FileStorageDriftWarning(t *testing.T) {
 				_, _ = fmt.Fprint(w, `{"result": {"id": "cloud-fs-3", "name": "prod", "provider": "AWS", "region": "us-east-2"}}`)
 			case "/api/v2/clouds/cloud-fs-3/resources":
 				// AWS has no backend field for mount_path at all - live comes
-				// back empty; everything else matches what pre-D1 state
+				// back empty; everything else matches what state
 				// already has, so nothing here is real drift.
 				_, _ = fmt.Fprint(w, `{
 					"results": [{"name": "default", "is_default": true, "provider": "AWS", "file_storage": {"file_storage_id": "fs_same"}}],
@@ -802,7 +802,7 @@ func TestReadCloudState_FileStorageDriftWarning(t *testing.T) {
 			GCPConfig:     types.ObjectNull(gcpConfigAttrTypes()),
 			FileStorage: buildFileStorageState(t, &FileStorage{
 				FileStorageID: "fs_same",
-				MountPath:     fileStorageDefaultMountPath, // pre-D1 fabricated residue
+				MountPath:     fileStorageDefaultMountPath, // residue fabricated by an older provider version
 			}),
 		}
 
@@ -812,7 +812,7 @@ func TestReadCloudState_FileStorageDriftWarning(t *testing.T) {
 		}
 
 		if diags.WarningsCount() != 0 {
-			t.Errorf("expected no warning for pre-D1 mount_path residue against AWS's real empty value, got: %v", diags.Warnings())
+			t.Errorf("expected no warning for fabricated mount_path residue against AWS's real empty value, got: %v", diags.Warnings())
 		}
 	})
 

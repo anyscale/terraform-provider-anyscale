@@ -14,7 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
 
-// TestAccServiceResource_RealInfra_CanaryPercentProbe is a Gate 1 probe for the canary_percent
+// TestAccServiceResource_RealInfra_CanaryPercentProbe is a real-API probe for the canary_percent
 // design (docs/decisions/service-canary-percent). The provider never sends canary_percent, so the
 // probe drives the held rollout with raw PUT /api/v2/services-v2/apply calls against a service
 // that Terraform created, and logs every response and GET snapshot (ids, version names, weights,
@@ -27,7 +27,7 @@ import (
 //
 // Between A and B, and after D, a step logs the action the current provider plans (while a canary
 // is held, and after an out-of-band completion) and then applies it. Assertions are deliberately loose: the probe
-// exists to record behavior, and the design doc cites its log.
+// exists to record real behavior.
 //
 // Run (one real service, ~20-40 min):
 //
@@ -155,7 +155,7 @@ resource "anyscale_service" "test" {
 	})
 }
 
-// TestAccServiceResource_RealInfra_CanaryPercentProbeCompletion is the second Gate 1 probe for
+// TestAccServiceResource_RealInfra_CanaryPercentProbeCompletion is the second real-API probe for
 // the canary_percent design. It records two things the first probe does not:
 //
 //	E. a canary held at 0, then canary_percent = 100: does the rollout complete on its own?
@@ -351,18 +351,18 @@ func (p *canaryProbe) apply(label string, extra map[string]any) {
 	if err != nil {
 		var se *provider.UnexpectedStatusError
 		if errors.As(err, &se) {
-			p.t.Logf("GATE1 %s: PUT status=%d body=%s", label, se.StatusCode, se.Body)
+			p.t.Logf("probe%s: PUT status=%d body=%s", label, se.StatusCode, se.Body)
 		} else {
-			p.t.Logf("GATE1 %s: PUT error: %v", label, err)
+			p.t.Logf("probe%s: PUT error: %v", label, err)
 		}
 		return
 	}
 	var parsed provider.ServiceResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		p.t.Logf("GATE1 %s: PUT 202, unparsable response: %v", label, err)
+		p.t.Logf("probe%s: PUT 202, unparsable response: %v", label, err)
 		return
 	}
-	p.t.Logf("GATE1 %s: PUT 202 response %s", label, canarySnapshotLine(&parsed.Result))
+	p.t.Logf("probe%s: PUT 202 response %s", label, canarySnapshotLine(&parsed.Result))
 }
 
 // rollback POSTs the service's rollback endpoint, as `anyscale service rollback` does, and logs
@@ -373,18 +373,18 @@ func (p *canaryProbe) rollback(label string) {
 	if err != nil {
 		var se *provider.UnexpectedStatusError
 		if errors.As(err, &se) {
-			p.t.Logf("GATE1 %s: POST status=%d body=%s", label, se.StatusCode, se.Body)
+			p.t.Logf("probe%s: POST status=%d body=%s", label, se.StatusCode, se.Body)
 		} else {
-			p.t.Logf("GATE1 %s: POST error: %v", label, err)
+			p.t.Logf("probe%s: POST error: %v", label, err)
 		}
 		return
 	}
 	var parsed provider.ServiceResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		p.t.Logf("GATE1 %s: POST 202, unparsable response: %v", label, err)
+		p.t.Logf("probe%s: POST 202, unparsable response: %v", label, err)
 		return
 	}
-	p.t.Logf("GATE1 %s: POST 202 response %s", label, canarySnapshotLine(&parsed.Result))
+	p.t.Logf("probe%s: POST 202 response %s", label, canarySnapshotLine(&parsed.Result))
 }
 
 func (p *canaryProbe) get() (*provider.ServiceResult, error) {
@@ -399,10 +399,10 @@ func (p *canaryProbe) get() (*provider.ServiceResult, error) {
 func (p *canaryProbe) snapshot(label string) {
 	r, err := p.get()
 	if err != nil {
-		p.t.Logf("GATE1 %s: GET error: %v", label, err)
+		p.t.Logf("probe%s: GET error: %v", label, err)
 		return
 	}
-	p.t.Logf("GATE1 %s: GET %s", label, canarySnapshotLine(r))
+	p.t.Logf("probe%s: GET %s", label, canarySnapshotLine(r))
 }
 
 // waitFor polls every 10s, logging each distinct snapshot, until done reports true. Timing out is
@@ -414,7 +414,7 @@ func (p *canaryProbe) waitFor(label string, timeout time.Duration, done func(*pr
 		if err == nil {
 			line := canarySnapshotLine(r)
 			if line != p.last {
-				p.t.Logf("GATE1 %s %s %s", label, time.Now().UTC().Format(time.RFC3339), line)
+				p.t.Logf("probe%s %s %s", label, time.Now().UTC().Format(time.RFC3339), line)
 				p.last = line
 			}
 			if done(r) {
@@ -423,7 +423,7 @@ func (p *canaryProbe) waitFor(label string, timeout time.Duration, done func(*pr
 		}
 		time.Sleep(10 * time.Second)
 	}
-	p.t.Logf("GATE1 %s: timed out after %s", label, timeout)
+	p.t.Logf("probe%s: timed out after %s", label, timeout)
 }
 
 func (p *canaryProbe) logEvents(label string) {
@@ -436,7 +436,7 @@ func (p *canaryProbe) logEvents(label string) {
 		Results []event `json:"results"`
 	}](context.Background(), p.client, "GET", fmt.Sprintf("/api/v2/services-v2/%s/events?count=20", p.serviceID), nil, 200)
 	if err != nil {
-		p.t.Logf("GATE1 %s: events fetch failed: %v", label, err)
+		p.t.Logf("probe%s: events fetch failed: %v", label, err)
 		return
 	}
 	deref := func(s *string) string {
@@ -446,7 +446,7 @@ func (p *canaryProbe) logEvents(label string) {
 		return *s
 	}
 	for _, e := range resp.Results {
-		p.t.Logf("GATE1 %s event type=%s current_state=%s message=%s", label, deref(e.EventType), deref(e.CurrentState), deref(e.Message))
+		p.t.Logf("probe%s event type=%s current_state=%s message=%s", label, deref(e.EventType), deref(e.CurrentState), deref(e.Message))
 	}
 }
 
@@ -495,6 +495,6 @@ type logPlanActions struct {
 
 func (l logPlanActions) CheckPlan(_ context.Context, req plancheck.CheckPlanRequest, _ *plancheck.CheckPlanResponse) {
 	for _, rc := range req.Plan.ResourceChanges {
-		l.t.Logf("GATE1 %s: %s actions=%v", l.label, rc.Address, rc.Change.Actions)
+		l.t.Logf("probe%s: %s actions=%v", l.label, rc.Address, rc.Change.Actions)
 	}
 }

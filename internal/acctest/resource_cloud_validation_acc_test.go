@@ -8,18 +8,16 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
-// TestAccCloudResource_AzureVM_NotSupported is the AKS-era successor to the
-// original task-a7b8a48d regression test (formerly TestAccCloudResource_Azure_NotSupported).
+// TestAccCloudResource_AzureVM_NotSupported pins that
 // Azure itself is now a supported provider (AKS - see the mock-server lifecycle
 // tests in resource_cloud_azure_acc_test.go), so "Azure is not supported" is no
-// longer the right claim; what remains true, and what this test now pins, is
+// longer the right claim; what remains true, and what this test pins, is
 // narrower: Anyscale does not support Azure VM clouds, only Azure Kubernetes
-// (compute_stack = K8S). That rejection also moved from an apply-time
-// buildProviderConfig error to a plan-time ValidateConfig error
-// (validateAzureK8SOnly) - a real behavior improvement the team flagged during
-// this effort: the old version let a real (broken) cloud shell get created via
-// POST /clouds before failing inside add_resource, which is exactly why the old
-// test needed CheckDestroy to clean up after itself. The new plan-time error
+// (compute_stack = K8S). That rejection is a plan-time ValidateConfig error
+// (validateAzureK8SOnly), not an apply-time
+// buildProviderConfig error: the old apply-time version let a real (broken)
+// cloud shell get created via POST /clouds before failing inside add_resource.
+// The plan-time error
 // means Create() is never reached at all, so nothing is ever created - keeping
 // CheckDestroy here is now a belt-and-suspenders no-op (RootModule().Resources
 // will be empty), not a required cleanup step.
@@ -41,7 +39,7 @@ func TestAccCloudResource_AzureVM_NotSupported(t *testing.T) {
 	})
 }
 
-// TestAccCloudResource_PVCCSIConflict (K10) pins the plan-time rejection of
+// TestAccCloudResource_PVCCSIConflict pins the plan-time rejection of
 // setting both file_storage.persistent_volume_claim and
 // file_storage.csi_ephemeral_volume_driver: the backend accepts only one
 // Kubernetes shared-storage mechanism, and the schema wires a
@@ -67,7 +65,7 @@ func TestAccCloudResource_PVCCSIConflict(t *testing.T) {
 	})
 }
 
-// TestAccCloudResource_RedisMemoryDBConflict (K11) pins the plan-time
+// TestAccCloudResource_RedisMemoryDBConflict pins the plan-time
 // rejection of setting kubernetes_config.redis_endpoint together with
 // aws_config.memorydb_cluster_endpoint - the backend rejects more than one
 // GCS fault-tolerance backing store on the same cloud. The ConflictsWith
@@ -93,7 +91,7 @@ func TestAccCloudResource_RedisMemoryDBConflict(t *testing.T) {
 	})
 }
 
-// TestAccCloudResource_InvalidComputeStack (K12) pins the plan-time
+// TestAccCloudResource_InvalidComputeStack pins the plan-time
 // rejection of any compute_stack value outside the OneOf("VM", "K8S")
 // allow-list. Plan-time only, no real infra needed.
 func TestAccCloudResource_InvalidComputeStack(t *testing.T) {
@@ -116,8 +114,7 @@ func TestAccCloudResource_InvalidComputeStack(t *testing.T) {
 
 // TestAccCloudResource_MountPathAWSRejected pins the plan-time rejection of
 // file_storage.mount_path when cloud_provider is AWS: the backend's
-// AWSNFSResources proto has no field for it (confirmed live, see
-// MOUNT-PATH-BUG-TRACE.md), so a configured value would silently do nothing
+// AWSNFSResources proto has no field for it, so a configured value would silently do nothing
 // rather than error - this ValidateConfig check catches it instead. Keys off
 // the explicit cloud_provider attribute (not aws_config presence), so an
 // AWS+K8S cloud that omits aws_config entirely is still caught. Plan-time
@@ -204,7 +201,7 @@ func TestAccCloudResource_MountPathPVCConflict(t *testing.T) {
 // a plain Go unit test can exercise), so this runs against a mock server
 // rather than real infra - see newC3MockCloudServer/testAccProviderBlock in
 // resource_cloud_c3_lifecycle_acc_test.go. mount_path itself resolves to
-// null (D1 - no schema Default, and the mock backend returns no file_storage
+// null (no schema Default, and the mock backend returns no file_storage
 // at all here), not the old fabricated "/mnt/shared".
 func TestAccCloudResource_MountPathPVCDefaultNoMisfire(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -256,7 +253,7 @@ resource "anyscale_cloud" "test" {
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "file_storage.persistent_volume_claim", "ray-shared-pvc"),
 					// mount_path stays null - proves the new ConflictsWith
 					// evaluated the raw (mount_path-omitted) config, not a
-					// resolved plan value, exactly as the review required.
+					// resolved plan value.
 					resource.TestCheckNoResourceAttr("anyscale_cloud.test", "file_storage.mount_path"),
 				),
 				ExpectNonEmptyPlan: false,

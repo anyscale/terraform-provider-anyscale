@@ -8,10 +8,10 @@ import (
 	"testing"
 )
 
-// TestGetApplicationTemplateByName_ExactMatchOnPageTwo is the GATE-A3 proof.
+// TestGetApplicationTemplateByName_ExactMatchOnPageTwo:
 // getApplicationTemplateByName searches via a name_contains substring filter,
-// so an exact match can legitimately sit on any page. Before A3, this call
-// site did not follow next_paging_token at all, so an exact match that only
+// so an exact match can legitimately sit on any page. This call
+// site previously did not follow next_paging_token at all, so an exact match that only
 // existed on page 2+ was silently missed -- a false negative ("no cluster
 // environment found") even though the environment genuinely existed. This
 // engineers page 1 to contain ONLY non-exact substring hits and puts the
@@ -24,8 +24,8 @@ import (
 // data_source_container_images_pagination_test.go, and the sweeper's
 // TestSearchContainerImagesByContains_MultiPage in
 // internal/acctest/sweeper_container_image_pagination_test.go. Unlike those
-// two (F2 behavior-neutrality proofs), this one proves A3's fix: a real bug,
-// not a migration-neutrality guard.
+// two, which guard migration behavior-neutrality, this one guards a real
+// bug fix.
 func TestGetApplicationTemplateByName_ExactMatchOnPageTwo(t *testing.T) {
 	const searchName = "tfacc-buildenv"
 	const token = "buildenv-page-2-token"
@@ -51,7 +51,7 @@ func TestGetApplicationTemplateByName_ExactMatchOnPageTwo(t *testing.T) {
 
 		if requestCount == 1 {
 			// Page 1: substring hits only -- NEITHER name is an exact match
-			// for "tfacc-buildenv". If the loop stops here (the A3 bug),
+			// for "tfacc-buildenv". If the loop stops here,
 			// filterExactApplicationTemplateMatches finds nothing and the
 			// call must fail.
 			resp := ApplicationTemplatesListResponse{
@@ -164,7 +164,7 @@ func TestGetApplicationTemplateByName_NoExactMatchAcrossAllPages(t *testing.T) {
 	}
 }
 
-// TestGetApplicationTemplateByName_PicksLastModifiedAtWinner is the X-2 guard test for the
+// TestGetApplicationTemplateByName_PicksLastModifiedAtWinner is the guard test for the
 // container_image duplicate-name tiebreak. getApplicationTemplateByName keys
 // PickMostRecentMatch on LastModifiedAt, not CreatedAt like the other three call sites, to
 // preserve the pre-refactor matches[0] behavior (see the comment on that call in
