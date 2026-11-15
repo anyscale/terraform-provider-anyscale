@@ -402,6 +402,13 @@ func addPolicyWritePlanWarning(ctx context.Context, client *Client, diags *diag.
 	var scratch diag.Diagnostics
 	addPolicyWriteError(ctx, client, &scratch, op, index, err, "")
 	for _, d := range scratch {
+		if d.Severity() == diag.SeverityWarning {
+			// A warning from the check stays as it is: only errors are
+			// downgrades here, and re-wording a warning into a forecast of
+			// itself would just nest prefixes.
+			diags.AddWarning(d.Summary(), d.Detail())
+			continue
+		}
 		diags.AddWarning(d.Summary(),
 			"If applied, this change fails: "+d.Detail()+
 				"\n\nA terraform destroy also plans the configuration first and may show this warning; the destroy itself is not affected.")
