@@ -668,6 +668,42 @@ func refuseInPlaceChangesOnKnownValues(ctx context.Context, b inPlaceBlocks, dia
 	refuseSubnetSetChangeWhenKnown(ctx, b.planAWS, b.stateAWS, diags)
 }
 
+// decideSubnetListForm is the one decision about a subnet_ids list-form
+// change that both the plan-time modifier and the Update-time re-check
+// make, so the two can never disagree: a config that passed at plan time
+// must not fail at apply, and the opposite. An undecided value (the value
+// itself, an element, or an unreadable state map) never refuses - the
+// plan-time caller defers to the Update re-check.
+//
+// Against a known state list, a set-equal comparison keeps the state's
+// element order (keepStateOrder; the plan-time caller rewrites the plan
+// with it) and a different set is refused. Against state with no list
+// (the map form, or nothing yet), the map's keys are the comparison set;
+// an empty plan list names no subnets and is not a set change.
+func decideSubnetListForm(ctx context.Context, planList, stateList types.List, stateMap map[string]string, stateMapKnown bool) (refuse, keepStateOrder bool) {
+	if planList.IsUnknown() || planList.IsNull() {
+		return false, false
+	}
+	var planIDs []string
+	if planList.ElementsAs(ctx, &planIDs, false).HasError() {
+		return false, false // an unknown element: undecided
+	}
+	if !stateList.IsNull() && !stateList.IsUnknown() {
+		var stateIDs []string
+		if stateList.ElementsAs(ctx, &stateIDs, false).HasError() {
+			return false, false
+		}
+		if stringSetsEqual(planIDs, stateIDs) {
+			return false, true
+		}
+		return true, false
+	}
+	if stateMapKnown && len(planIDs) > 0 && !stringSetsEqual(planIDs, mapKeys(stateMap)) {
+		return true, false
+	}
+	return false, false
+}
+
 // refuseSubnetSetChangeWhenKnown raises the subnet list-form set-change
 // refusal on fully decided values. awsSubnetIDsPlanModifier raises it at
 // plan time when the list is known there; an unknown element defers, and
@@ -685,31 +721,10 @@ func refuseSubnetSetChangeWhenKnown(ctx context.Context, planAWS, stateAWS types
 		diags.Append(d...)
 		return
 	}
-	if pm.SubnetIDs.IsNull() || !listElementsKnown(pm.SubnetIDs) {
-		return
-	}
-	var planIDs []string
-	if d2 := pm.SubnetIDs.ElementsAs(ctx, &planIDs, false); d2.HasError() {
-		return
-	}
-	if !sm.SubnetIDs.IsNull() && !sm.SubnetIDs.IsUnknown() {
-		var stateIDs []string
-		if d2 := sm.SubnetIDs.ElementsAs(ctx, &stateIDs, false); d2.HasError() {
-			return
-		}
-		if !stringSetsEqual(planIDs, stateIDs) {
-			diags.AddAttributeError(path.Root("aws_config").AtName("subnet_ids"), awsSubnetSetChangeSummary, awsSubnetSetChangeDetail)
-			return
-		}
-		return
-	}
-	if !sm.SubnetIDsToAZ.IsNull() && !sm.SubnetIDsToAZ.IsUnknown() {
-		var stateMap map[string]string
-		if d2 := sm.SubnetIDsToAZ.ElementsAs(ctx, &stateMap, false); d2.HasError() {
-			return
-		}
-		if !stringSetsEqual(planIDs, mapKeys(stateMap)) {
-			diags.AddAttributeError(path.Root("aws_config").AtName("subnet_ids"), awsSubnetSetChangeSummary, awsSubnetSetChangeDetail)
-		}
+	var stateMap map[string]string
+	stateMapKnown := !sm.SubnetIDsToAZ.IsNull() && !sm.SubnetIDsToAZ.IsUnknown() &&
+		!sm.SubnetIDsToAZ.ElementsAs(ctx, &stateMap, false).HasError()
+	if refuse, _ := decideSubnetListForm(ctx, pm.SubnetIDs, sm.SubnetIDs, stateMap, stateMapKnown); refuse {
+		diags.AddAttributeError(path.Root("aws_config").AtName("subnet_ids"), awsSubnetSetChangeSummary, awsSubnetSetChangeDetail)
 	}
 }

@@ -468,3 +468,151 @@ func TestAccCloudResource_DestroyWithUnknownConfigReferral_MockServerCLI(t *test
 		t.Errorf("state not empty after destroy: err=%v\n%s", err, raw)
 	}
 }
+
+// ─── the split pattern and the deferred subnet list-form refusal ──────────
+
+// TestAccCloudResourceResource_InPlaceUnknownSecurityGroupElement_MockServer:
+// anyscale_cloud_resource walks the same plan-time path from its own
+// ModifyPlan, so the unknown element must plan and apply there too, with
+// the same one-PUT, config-order PUT.
+func TestAccCloudResourceResource_InPlaceUnknownSecurityGroupElement_MockServer(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	server, mock := newSubnetsInPlaceServer(t)
+	mock.resourceName = "primary-resource-mock"
+	base := inPlaceCloudResourceConfig(server.URL, mock.cloudID, "sg-realct1")
+	change := strings.Replace(base,
+		`security_group_ids          = ["sg-realct1"]`,
+		`security_group_ids          = ["sg-realct1", terraform_data.probe.output]`, 1) +
+		unknownReferral(`"sg-newgroup99"`)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: base},
+			{
+				Config: change,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_cloud_resource.test", plancheck.ResourceActionUpdate),
+					},
+				},
+			},
+			{
+				Config: change,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_cloud_resource.test", plancheck.ResourceActionNoop),
+					},
+				},
+			},
+		},
+	})
+	if got := mock.putCount(); got != 1 {
+		t.Fatalf("resources PUTs = %d, want exactly 1 (the security-group change)", got)
+	}
+	aws := putAWSConfig(mock.lastPutBody())
+	if aws == nil {
+		t.Fatal("PUT carried no aws_config")
+	}
+	sgs := fmt.Sprint(aws["security_group_ids"])
+	if !strings.Contains(sgs, "sg-realct1") || !strings.Contains(sgs, "sg-newgroup99") {
+		t.Errorf("PUT security_group_ids = %v, want both groups", sgs)
+	}
+	if strings.Index(sgs, "sg-realct1") > strings.Index(sgs, "sg-newgroup99") {
+		t.Errorf("PUT security_group_ids = %v, want config order [sg-realct1, sg-newgroup99]", sgs)
+	}
+}
+
+// TestAccCloudResource_UnknownSubnetListSetChangeDeferredToApply_MockServer:
+// an unknown subnet_ids element defers the list-form set-change refusal;
+// resolving to a different set, the APPLY raises the plan-time diagnostic -
+// "Changing subnets in place requires aws_config.subnet_ids_to_az" - and the
+// mock records zero PUTs.
+func TestAccCloudResource_UnknownSubnetListSetChangeDeferredToApply_MockServer(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	server, mock := newSubnetsInPlaceServer(t)
+	base := inPlaceCloudConfig(server.URL, "sg-realct1", "", "")
+	listForm := strings.Replace(base,
+		`subnet_ids_to_az = {
+      "subnet-realct1" = "us-east-2a"
+      "subnet-realct2" = "us-east-2b"
+    }`,
+		`subnet_ids        = ["subnet-realct1", "subnet-realct2"]`, 1)
+	change := strings.Replace(listForm,
+		`subnet_ids        = ["subnet-realct1", "subnet-realct2"]`,
+		`subnet_ids        = ["subnet-realct1", terraform_data.probe.output]`, 1) +
+		unknownReferral(`"subnet-other999"`)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: listForm},
+			{
+				// The plan must succeed: the refusal defers.
+				Config:             change,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+			{
+				// The apply, on the resolved set, raises the deferred
+				// refusal before the first write.
+				Config:      change,
+				ExpectError: regexp.MustCompile(`(?s)Changing subnets in place requires aws_config.subnet_ids_to_az`),
+			},
+		},
+	})
+	if got := mock.putCount(); got != 0 {
+		t.Errorf("resources PUTs = %d, want 0 (the refusal must precede the first write)", got)
+	}
+}
+
+// ─── object_storage scalars follow the same rule ───────────────────────────
+
+// TestAccCloudResource_InPlaceUnknownObjectStorageEndpoint_MockServer: an
+// unknown object_storage.endpoint plans an in-place update and the apply
+// PUTs the resolved value, with the lossless object_storage echo intact.
+func TestAccCloudResource_InPlaceUnknownObjectStorageEndpoint_MockServer(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	server, mock := newSubnetsInPlaceServer(t)
+	base := inPlaceCloudConfig(server.URL, "sg-realct1", "", "")
+	change := strings.Replace(base,
+		`object_storage {
+    bucket_name = "real-ct-bucket"`,
+		`object_storage {
+    bucket_name = "real-ct-bucket"
+    endpoint    = terraform_data.probe.output`, 1) +
+		unknownReferral(`"https://os-endpoint.example"`)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: base},
+			{
+				Config: change,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_cloud.test", plancheck.ResourceActionUpdate),
+					},
+				},
+			},
+			{
+				Config: change,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_cloud.test", plancheck.ResourceActionNoop),
+					},
+				},
+			},
+		},
+	})
+	if got := mock.putCount(); got != 1 {
+		t.Fatalf("resources PUTs = %d, want exactly 1 (the endpoint change)", got)
+	}
+	os := putObjectStorage(mock.lastPutBody())
+	if os == nil {
+		t.Fatal("PUT carried no object_storage despite the endpoint change")
+	}
+	if os["endpoint"] != "https://os-endpoint.example" {
+		t.Errorf("PUT object_storage.endpoint = %v, want the resolved value", os["endpoint"])
+	}
+	if os["bucket_name"] != "s3://real-ct-bucket" {
+		t.Errorf("PUT bucket_name = %v, want the live value carried back", os["bucket_name"])
+	}
+}
