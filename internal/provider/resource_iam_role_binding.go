@@ -273,7 +273,7 @@ func (r *IAMRoleBindingResource) ModifyPlan(ctx context.Context, req resource.Mo
 	policy, index := grants.wire()
 	result, err := applyRoleBindingPolicy(ctx, r.client, scopeType, scopeID.ValueString(), policy, true)
 	if err != nil {
-		addPolicyWriteError(ctx, r.client, &resp.Diagnostics, "check role binding policy", index, err, "")
+		addPolicyWriteError(ctx, r.client, &resp.Diagnostics, "check role binding policy", scopeType, scopeID.ValueString(), index, err, "")
 		return
 	}
 	if !creating {
@@ -368,7 +368,7 @@ func (r *IAMRoleBindingResource) applyDestroyPolicy(ctx context.Context, diags *
 			return kept, frozenKept, result, true
 		}
 		if !isStatusWithSubstring(err, http.StatusConflict, policyFrozenBindingSubstring) {
-			addPolicyWriteError(ctx, r.client, diags, op, index, err, outcome)
+			addPolicyWriteError(ctx, r.client, diags, op, scopeType, scopeID, index, err, outcome)
 			return nil, nil, nil, false
 		}
 		if attempt == roleBindingPolicyMaxFrozenRetries {
@@ -379,7 +379,7 @@ func (r *IAMRoleBindingResource) applyDestroyPolicy(ctx context.Context, diags *
 		}
 		m := policyRefusedBindingID.FindStringSubmatch(extractAPIErrorDetail(err))
 		if m == nil {
-			addPolicyWriteError(ctx, r.client, diags, op, index, err, outcome)
+			addPolicyWriteError(ctx, r.client, diags, op, scopeType, scopeID, index, err, outcome)
 			return nil, nil, nil, false
 		}
 		frozen, getErr := getRoleBindingWithRetry(ctx, r.client, m[1])
@@ -413,7 +413,7 @@ func (r *IAMRoleBindingResource) writePolicy(ctx context.Context, plan *RoleBind
 	policy, index := grants.wire()
 	result, err := applyRoleBindingPolicy(ctx, r.client, scopeType, scopeID, policy, false)
 	if err != nil {
-		addPolicyWriteError(ctx, r.client, diags, op, index, err, "")
+		addPolicyWriteError(ctx, r.client, diags, op, scopeType, scopeID, index, err, "")
 		return false, false
 	}
 	plan.ID = types.StringValue(roleBindingPolicyID(scopeType, scopeID))

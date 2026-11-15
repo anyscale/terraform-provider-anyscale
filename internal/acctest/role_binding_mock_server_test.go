@@ -64,6 +64,15 @@ type roleBindingMockServer struct {
 	// createConflict, when set, is the detail of a 409 every create answers
 	// with: a refusal the provider does not recognize.
 	createConflict string
+	// createForbidden, when set, is the detail of a 403 every create answers
+	// with: the manage-IAM refusal on the grant's scope, measured on the real
+	// API as "You do not manage IAM on <type> '<id>'."
+	createForbidden string
+	// invisibleGroups are group IDs that exist but that this identity cannot
+	// see for a grant: create answers 404 "User group '<id>' not found."
+	// while GET /api/v2/user_groups/<id> still reads them, so only the
+	// read-back can tell that refusal from a deleted group.
+	invisibleGroups map[string]bool
 	// groupGone404 makes the principal listings answer 404 for a group that
 	// does not exist, instead of the empty page the service documents. Both
 	// readings of the source are plausible, so the provider must remove state
@@ -120,11 +129,12 @@ const (
 func newRoleBindingMockServer(t *testing.T) *roleBindingMockServer {
 	t.Helper()
 	m := &roleBindingMockServer{
-		t:          t,
-		bindings:   map[string]*roleBindingMockBinding{},
-		roles:      map[string]*roleBindingMockRole{},
-		groups:     map[string]bool{},
-		goneScopes: map[string]bool{},
+		t:               t,
+		bindings:        map[string]*roleBindingMockBinding{},
+		roles:           map[string]*roleBindingMockRole{},
+		groups:          map[string]bool{},
+		goneScopes:      map[string]bool{},
+		invisibleGroups: map[string]bool{},
 	}
 	m.Server = httptest.NewServer(http.HandlerFunc(m.serve))
 	t.Cleanup(m.Close)
@@ -217,6 +227,20 @@ func (m *roleBindingMockServer) setCreateConflict(detail string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.createConflict = detail
+}
+
+func (m *roleBindingMockServer) setCreateForbidden(detail string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.createForbidden = detail
+}
+
+// addInvisibleGroup registers a group ID that exists but that grant writes
+// refuse with the group-not-found 404 while GET still reads it.
+func (m *roleBindingMockServer) addInvisibleGroup(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.invisibleGroups[id] = true
 }
 
 func (m *roleBindingMockServer) addRole(r roleBindingMockRole) {
@@ -380,6 +404,10 @@ func (m *roleBindingMockServer) serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	path := strings.TrimSuffix(r.URL.Path, "/")
+	if strings.HasPrefix(path, "/api/v2/user_groups/") && r.Method == http.MethodGet {
+		m.serveUserGroupRead(w, strings.TrimPrefix(path, "/api/v2/user_groups/"))
+		return
+	}
 	const rbBase, rolesBase = "/api/v2/role_bindings", "/api/v2/roles"
 	if !strings.HasPrefix(path, rbBase) && !strings.HasPrefix(path, rolesBase) {
 		m.t.Errorf("mock: unexpected route %s %s", r.Method, r.URL.Path)
@@ -484,6 +512,18 @@ func (m *roleBindingMockServer) listingOverride(w http.ResponseWriter, principal
 	return true
 }
 
+// serveUserGroupRead answers GET /api/v2/user_groups/{id}: the read-back a
+// refused grant write does to tell a deleted group from an invisible one. A
+// registered or invisible group reads back 200; anything else 404s with the
+// same detail the write routes use.
+func (m *roleBindingMockServer) serveUserGroupRead(w http.ResponseWriter, id string) {
+	if m.groups[id] || m.invisibleGroups[id] {
+		m.reply(w, http.StatusOK, map[string]any{"result": map[string]any{"id": id, "name": "group_" + id}})
+		return
+	}
+	m.fail(w, http.StatusNotFound, fmt.Sprintf("User group '%s' not found.", id))
+}
+
 func validResourceType(s string) bool {
 	return s == "organization" || s == "cloud" || s == "project"
 }
@@ -506,6 +546,10 @@ func (m *roleBindingMockServer) serveCreate(w http.ResponseWriter, body []byte) 
 	}
 	if m.goneScopes[req.ResourceType+"/"+req.ResourceID] {
 		m.fail(w, http.StatusForbidden, fmt.Sprintf("You do not manage IAM on %s '%s'.", req.ResourceType, req.ResourceID))
+		return
+	}
+	if m.createForbidden != "" {
+		m.fail(w, http.StatusForbidden, m.createForbidden)
 		return
 	}
 	if req.PrincipalType == "user_group" && !m.groups[req.PrincipalID] {

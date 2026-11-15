@@ -256,10 +256,12 @@ func (r *IAMRoleGrantResource) Create(ctx context.Context, req resource.CreateRe
 		case isStatusWithSubstring(err, http.StatusForbidden, roleBindingSelfGrantSubstring):
 			resp.Diagnostics.AddError("Cannot Grant a Role to the Provider's Own Identity",
 				fmt.Sprintf("%s Bind a user group that this identity belongs to, or apply with a different identity.", extractAPIErrorDetail(err)))
+		case isStatusWithSubstring(err, http.StatusForbidden, roleBindingManageIAMSubstring):
+			addIAMManageAccessError(&resp.Diagnostics, extractAPIErrorDetail(err), "creating a role grant", iamScopeDesc(resourceType, resourceID))
 		case isRoleBindingsDisabled(err):
 			// Create also answers 404 for an unknown principal or role, so ask
 			// whether the feature is on before calling it off.
-			r.addCreateNotFoundError(ctx, &resp.Diagnostics, err)
+			r.addCreateNotFoundError(ctx, &resp.Diagnostics, err, resourceType, resourceID)
 		default:
 			AddAPIError(&resp.Diagnostics, "create role binding", err)
 		}
@@ -272,9 +274,26 @@ func (r *IAMRoleGrantResource) Create(ctx context.Context, req resource.CreateRe
 }
 
 // addCreateNotFoundError reports a 404 from create: the feature is off, or
-// the principal or role does not exist, in which case the API's own detail says
-// which.
-func (r *IAMRoleGrantResource) addCreateNotFoundError(ctx context.Context, diags *diag.Diagnostics, createErr error) {
+// the principal or role does not exist, in which case the API's own detail
+// says which. When the detail names a user group, the group is read back
+// before being reported missing: the write routes refuse a group the caller
+// cannot see for them with the same "not found" the API gives for a deleted
+// group, while GET still reads it - that refusal reports lost IAM, not a
+// missing group.
+func (r *IAMRoleGrantResource) addCreateNotFoundError(ctx context.Context, diags *diag.Diagnostics, createErr error, resourceType, resourceID string) {
+	detail := extractAPIErrorDetail(createErr)
+	if m := roleBindingGroupNotFoundDetail.FindStringSubmatch(detail); m != nil {
+		if !r.roleBindingsOnAfterNotFound(ctx, diags, "create role binding", createErr, "") {
+			return // The probe failed or the feature is off; the diagnostic says so.
+		}
+		if _, getErr := getUserGroup(ctx, r.client, m[1]); getErr == nil {
+			addIAMManageAccessGroupUnseenError(diags, detail, "creating a role grant", iamScopeDesc(resourceType, resourceID))
+			return
+		}
+		// The group does not read back either: report the 404 as it stands.
+		AddAPIError(diags, "create role binding", createErr)
+		return
+	}
 	if r.roleBindingsOnAfterNotFound(ctx, diags, "create role binding", createErr, "") {
 		AddAPIError(diags, "create role binding", createErr)
 	}

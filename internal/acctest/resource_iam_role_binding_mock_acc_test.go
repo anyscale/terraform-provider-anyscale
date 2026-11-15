@@ -755,8 +755,8 @@ func TestAccIAMRoleBindingResource_ReadForbidden(t *testing.T) {
 				RefreshState: true,
 				Check:        inState(false),
 				// The follow-up plan creates the policy anew, and its dry run
-				// is refused on the deleted project.
-				ExpectError: regexp.MustCompile(`Cannot Manage IAM on Scope`),
+				// is refused on the deleted project with the manage-IAM 403.
+				ExpectError: regexp.MustCompile(`Not\s+Allowed\s+to\s+Manage\s+Access`),
 			},
 			{Config: m.providerBlock()},
 		},
@@ -933,4 +933,63 @@ func TestAccIAMRoleBindingResource_ReadBackFailureKeepsTaintedState(t *testing.T
 			},
 		},
 	})
+}
+
+// A policy write refused with the manage-IAM 403 (measured on the real API
+// as "You do not manage IAM on <type> '<id>'.") reports lost IAM: the
+// diagnostic names the operation and scope and says what identity to apply
+// with. The dry run at plan time already fails this way.
+func TestAccIAMRoleBindingResource_ManageIAMOnWrite(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newPolicyMock(t)
+	m.setNoIAM("project", pmProject, true)
+	check, assertCalled := rbErrorCheck(t,
+		regexp.MustCompile(`(?s)Not\s+Allowed\s+to\s+Manage\s+Access.*`+
+			`You\s+do\s+not\s+manage\s+IAM\s+on\s+project\s+'`+pmProject+`'.*`+
+			`checking\s+the\s+role\s+binding\s+policy\s+on\s+project\s+"`+pmProject+`".*`+
+			`requires\s+an\s+identity\s+that\s+manages\s+IAM\s+there.*ask\s+an\s+admin`),
+		rbImportHint, rbAlreadyExists)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		ErrorCheck:               check,
+		Steps: []resource.TestStep{{
+			Config:   pmConfig(m, "project_id", pmProject, pmBase()...),
+			PlanOnly: true,
+		}},
+	})
+	assertCalled()
+	if real, _ := pmApplyBodies(t, m.takeRequests()); len(real) != 0 {
+		t.Errorf("a refused plan applied a policy: %v", real)
+	}
+}
+
+// A policy write that names a group the apply refuses as not found
+// ("roles[i].principals[j]: User group 'ug_...' not found.", measured) while
+// the group itself still reads back with GET: lost IAM on the group, so the
+// manage-access diagnostic names the group and says this identity cannot
+// bind roles for it. The read-back-404 half of the pair is the existing
+// DryRunRefusals step for a group that does not exist.
+func TestAccIAMRoleBindingResource_InvisibleGroupOnWrite(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newPolicyMock(t)
+	invisible := "ug_policyinvisible000000001"
+	m.addInvisibleGroup(invisible)
+	check, assertCalled := rbErrorCheck(t,
+		regexp.MustCompile(`(?s)Not\s+Allowed\s+to\s+Manage\s+Access.*`+
+			`roles\[1\]\.principals\[0\]:\s+User\s+group\s+'`+invisible+`'\s+not\s+found\.`+
+			`\s+\(role\s+"`+pmReader+`",\s+user_group\s+"`+invisible+`"\).*`+
+			`this\s+identity\s+cannot\s+bind\s+roles\s+for\s+that\s+group.*ask\s+an\s+admin`),
+	)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		ErrorCheck:               check,
+		Steps: []resource.TestStep{{
+			Config:   pmConfig(m, "project_id", pmProject, append(pmBase(), pmRole(pmReader, nil, []string{invisible}))...),
+			PlanOnly: true,
+		}},
+	})
+	assertCalled()
+	if real, _ := pmApplyBodies(t, m.takeRequests()); len(real) != 0 {
+		t.Errorf("a refused plan applied a policy: %v", real)
+	}
 }

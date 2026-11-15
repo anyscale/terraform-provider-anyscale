@@ -54,6 +54,11 @@ type policyMockServer struct {
 	getCounts  map[string]int
 	// requests records every request as "METHOD path?query body".
 	requests []string
+	// invisibleGroups are group IDs that exist but that policy writes refuse
+	// with the group-not-found 404 while GET /api/v2/user_groups/{id} still
+	// reads them, so only the read-back can tell that refusal from a deleted
+	// group.
+	invisibleGroups map[string]bool
 }
 
 type policyMockBinding struct {
@@ -72,11 +77,12 @@ const policyMockCaller = "usr_policycaller00000000000000"
 func newPolicyMockServer(t *testing.T) *policyMockServer {
 	t.Helper()
 	m := &policyMockServer{
-		t:      t,
-		roles:  map[string]bool{},
-		groups: map[string]bool{},
-		scopes: map[string]bool{},
-		noIAM:  map[string]bool{},
+		t:               t,
+		roles:           map[string]bool{},
+		groups:          map[string]bool{},
+		scopes:          map[string]bool{},
+		noIAM:           map[string]bool{},
+		invisibleGroups: map[string]bool{},
 	}
 	m.Server = httptest.NewServer(http.HandlerFunc(m.serve))
 	t.Cleanup(m.Close)
@@ -100,6 +106,12 @@ func (m *policyMockServer) with(f func()) {
 
 func (m *policyMockServer) addRole(id string)  { m.with(func() { m.roles[id] = true }) }
 func (m *policyMockServer) addGroup(id string) { m.with(func() { m.groups[id] = true }) }
+
+// addInvisibleGroup registers a group ID that exists but that policy writes
+// refuse with the group-not-found 404 while GET still reads it.
+func (m *policyMockServer) addInvisibleGroup(id string) {
+	m.with(func() { m.invisibleGroups[id] = true })
+}
 func (m *policyMockServer) addScope(scopeType, id string) {
 	m.with(func() { m.scopes[scopeType+"/"+id] = true })
 }
@@ -263,6 +275,9 @@ func (m *policyMockServer) serve(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "/api/v2/clouds/") && r.Method == http.MethodGet:
 		m.serveScopeRead(w, "cloud", strings.TrimPrefix(path, "/api/v2/clouds/"))
 		return
+	case strings.HasPrefix(path, "/api/v2/user_groups/") && r.Method == http.MethodGet:
+		m.serveUserGroupRead(w, strings.TrimPrefix(path, "/api/v2/user_groups/"))
+		return
 	}
 
 	const rbBase, rolesBase = "/api/v2/role_bindings", "/api/v2/roles"
@@ -324,6 +339,18 @@ func (m *policyMockServer) serve(w http.ResponseWriter, r *http.Request) {
 		m.t.Errorf("mock: unhandled role_bindings route %s %s", r.Method, r.URL.Path)
 		m.fail(w, http.StatusNotFound, "unhandled route")
 	}
+}
+
+// serveUserGroupRead answers GET /api/v2/user_groups/{id}: the read-back a
+// refused policy write does to tell a deleted group from an invisible one. A
+// registered or invisible group reads back 200; anything else 404s with the
+// same detail the apply route gives.
+func (m *policyMockServer) serveUserGroupRead(w http.ResponseWriter, id string) {
+	if m.groups[id] || m.invisibleGroups[id] {
+		m.reply(w, http.StatusOK, map[string]any{"result": map[string]any{"id": id, "name": "group_" + id}})
+		return
+	}
+	m.fail(w, http.StatusNotFound, fmt.Sprintf("User group '%s' not found.", id))
 }
 
 func (m *policyMockServer) serveScopeRead(w http.ResponseWriter, scopeType, id string) {

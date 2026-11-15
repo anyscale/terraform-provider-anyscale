@@ -59,6 +59,10 @@ type userGroupMockServer struct {
 	// 404 with the same detail, so the read-back GET finds nothing: the
 	// "the group really is gone" half of the 404 pair.
 	vanishOnWrite bool
+	// createForbidden, when set, is the detail of the 403 every create
+	// answers with, measured on the real API as "Permission denied." for an
+	// identity that does not manage IAM on the organization.
+	createForbidden string
 }
 
 type userGroupMockGroup struct {
@@ -188,6 +192,12 @@ func (m *userGroupMockServer) setVanishOnWrite(v bool) {
 	m.vanishOnWrite = v
 }
 
+func (m *userGroupMockServer) setCreateForbidden(detail string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.createForbidden = detail
+}
+
 func (m *userGroupMockServer) takeWrites() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -271,6 +281,10 @@ func (m *userGroupMockServer) serve(w http.ResponseWriter, r *http.Request) {
 	case path == base+"/" && r.Method == http.MethodGet:
 		m.serveList(w, r)
 	case path == base+"/" && r.Method == http.MethodPost:
+		if m.createForbidden != "" {
+			m.fail(w, http.StatusForbidden, m.createForbidden)
+			return
+		}
 		var req struct {
 			Name string `json:"name"`
 		}

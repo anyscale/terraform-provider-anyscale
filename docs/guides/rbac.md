@@ -423,6 +423,7 @@ Whether the roles you bind are enforced depends on Anyscale's rollout of them.
 | "Role Grant Already Exists" | The principal already holds that role on that scope; the message names the existing binding's import ID. |
 | "Organization Not Converted to Role Bindings" | The organization is not converted. See [Organization access mode](#organization-access-mode). |
 | "Role Is Archived" | The role cannot be newly assigned; pick another role. |
+| "Not Allowed to Manage Access" | This identity does not manage IAM on the scope the write targeted. Apply with an identity that does - for example one holding the Admin role there - or ask an admin. |
 | "Organization Admin Group Is Managed by Anyscale" | The platform owns the organization admin group's bindings; the error says which change to make. |
 | "Cannot Grant a Role to the Provider's Own Identity" | Bind a user group the identity belongs to, or apply with a different identity. |
 | "Cannot Revoke the Provider's Own Role Binding" | Revoke it in the console or with a different identity, or run `terraform state rm`. |
