@@ -1,0 +1,3 @@
+```release-note:fixed
+resource/anyscale_iam_user_group: A duplicate create now finds the existing group ignoring case and spacing, and says so, with no import command, when it is a group you cannot list.
+```

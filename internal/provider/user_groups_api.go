@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"golang.org/x/text/cases"
 )
 
 // userGroupsBetaBanner opens the MarkdownDescription of every user group
@@ -203,9 +204,20 @@ func listUserGroups(ctx context.Context, client *Client) ([]userGroupResult, err
 	return unique, nil
 }
 
+// normalizeUserGroupName mirrors the uniqueness normalization the backend
+// applies to group names (product ab183de91af): runs of whitespace collapse
+// to single spaces, and case folds away - "All Users", "all  users" and
+// "ALL USERS" are one name as far as uniqueness goes. Groups this identity
+// cannot list count too, so "Anyscale support" is never free.
+func normalizeUserGroupName(name string) string {
+	return cases.Fold().String(strings.Join(strings.Fields(name), " "))
+}
+
 // findUserGroupByName returns the live group with exactly this name, or nil.
-// Names are unique among an organization's live groups, so there is at most
-// one.
+// The data sources' name argument is matched exactly, which is also the safe
+// lookup: the backend lets pre-existing look-alike groups (names that differ
+// only by case or spacing) coexist, so a normalized match could be the wrong
+// group.
 func findUserGroupByName(ctx context.Context, client *Client, name string) (*userGroupResult, error) {
 	groups, err := listUserGroups(ctx, client)
 	if err != nil {
@@ -217,6 +229,30 @@ func findUserGroupByName(ctx context.Context, client *Client, name string) (*use
 		}
 	}
 	return nil, nil
+}
+
+// findUserGroupByNormalizedName looks the group up the way the backend
+// adjudicates name collisions: names are unique ignoring case and spacing,
+// so a differently spelled create collides with it. An exact-name hit wins
+// over a merely normalized one, so an import hint names the right group
+// when look-alike names coexist. No match means the collision is with a
+// group this identity cannot list - nil, not an error.
+func findUserGroupByNormalizedName(ctx context.Context, client *Client, name string) (*userGroupResult, error) {
+	groups, err := listUserGroups(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	want := normalizeUserGroupName(name)
+	var normalized *userGroupResult
+	for i := range groups {
+		if groups[i].Name == name {
+			return &groups[i], nil
+		}
+		if normalized == nil && normalizeUserGroupName(groups[i].Name) == want {
+			normalized = &groups[i]
+		}
+	}
+	return normalized, nil
 }
 
 func createUserGroup(ctx context.Context, client *Client, name string) (*userGroupResult, error) {

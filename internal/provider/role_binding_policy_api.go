@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -205,6 +206,16 @@ func (g policyGrants) wire() (roleBindingPolicy, [][]policyElement) {
 		index = append(index, elems)
 	}
 	return policy, index
+}
+
+// equivalentPolicy reports whether two grant sets describe the same policy -
+// the same (role, principal) pairs - independent of map and list order. wire()
+// produces the canonical sorted form of each, so comparing those is comparing
+// the policies themselves.
+func equivalentPolicy(a, b policyGrants) bool {
+	aw, _ := a.wire()
+	bw, _ := b.wire()
+	return reflect.DeepEqual(aw, bw)
 }
 
 // add grants roleID to one principal, ignoring a grant already present.
@@ -412,6 +423,31 @@ func addPolicyWriteError(ctx context.Context, client *Client, diags *diag.Diagno
 		}
 	default:
 		AddAPIError(diags, op, err)
+	}
+}
+
+// addPolicyWritePlanWarning is addPolicyWriteError's plan-time form. Every
+// error addPolicyWriteError reports is derived from the API's own answer to
+// the dry-run, and a plan must not fail on it: 'terraform destroy' plans the
+// configuration first, and that pass must not be blocked by what an ordinary
+// apply of the same config could still be rescued from. The refusal becomes
+// a warning whose detail says exactly that the apply would fail; the apply
+// itself still refuses - the real PUT answers with the same refusal the
+// dry-run saw.
+func addPolicyWritePlanWarning(ctx context.Context, client *Client, diags *diag.Diagnostics, op, scopeType, scopeID string, index [][]policyElement, err error) {
+	var scratch diag.Diagnostics
+	addPolicyWriteError(ctx, client, &scratch, op, scopeType, scopeID, index, err, "")
+	for _, d := range scratch {
+		if d.Severity() == diag.SeverityWarning {
+			// A warning from the check stays as it is: only errors are
+			// downgrades here, and re-wording a warning into a forecast of
+			// itself would just nest prefixes.
+			diags.AddWarning(d.Summary(), d.Detail())
+			continue
+		}
+		diags.AddWarning(d.Summary(),
+			"If applied, this change fails: "+d.Detail()+
+				"\n\nA terraform destroy also plans the configuration first and may show this warning; the destroy itself is not affected.")
 	}
 }
 

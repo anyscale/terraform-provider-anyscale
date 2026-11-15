@@ -534,6 +534,86 @@ func TestAccIAMUserGroupResource_MockDuplicateName(t *testing.T) {
 	}
 }
 
+// TestAccIAMUserGroupResource_MockDuplicateNameVariant: uniqueness ignores
+// case and spacing, so a differently-spelled create hits the same 409 and
+// the import hint finds the existing group under the normalization.
+func TestAccIAMUserGroupResource_MockDuplicateNameVariant(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newUserGroupMockServer(t)
+	user := "user"
+	// The seeded name carries internal spaces, so the colliding create
+	// differs by case AND by collapsed whitespace - both halves of the
+	// normalization must hold for the import hint to find the group.
+	existing := m.seedGroup("tfacc-ug mock dup", &user)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      ugMockConfig(m, "TFACC-ug   MOCK  dup", nil...),
+				ExpectError: regexp.MustCompile(`(?s)already exists.*terraform import <resource address> ` + regexp.QuoteMeta(existing)),
+			},
+		},
+	})
+}
+
+// TestAccIAMUserGroupResource_MockDuplicateNameHidden: a 409 whose collision is
+// a group this identity cannot list offers no import command - it cannot be
+// imported - and says why, naming the hidden-group case.
+func TestAccIAMUserGroupResource_MockDuplicateNameHidden(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newUserGroupMockServer(t)
+	m.setHiddenNameTaken("tfacc-ug platform clone")
+	check, assertCalled := rbErrorCheck(t,
+		regexp.MustCompile(`(?s)User Group Name Already Exists.*already exists.*`+
+			`a group this identity cannot list.*cannot be imported.*Choose a different name`),
+		regexp.MustCompile(`terraform import`))
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		ErrorCheck:               check,
+		Steps: []resource.TestStep{
+			{
+				// The hidden group's normalized name, differently cased with
+				// extra internal spacing to prove both halves of the fold.
+				// No step-level ExpectError: a satisfied ExpectError short
+				// the ErrorCheck, and the whole assertion lives in the
+				// check above (full message, no import command).
+				Config: ugMockConfig(m, "TFACC-ug   platform   CLONE", nil...),
+			},
+		},
+	})
+	assertCalled()
+}
+
+// TestAccIAMUserGroupResource_MockDataSourceNameMatchedExactly: the user
+// group data source's name argument is matched exactly, even though group
+// names are only UNIQUE ignoring case and spacing - a case variant must not
+// resolve to the look-alike group.
+func TestAccIAMUserGroupResource_MockDataSourceNameMatchedExactly(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newUserGroupMockServer(t)
+	user := "user"
+	m.seedGroup("tfacc-ug exact pin", &user)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		ErrorCheck: func(err error) error {
+			if err == nil {
+				return fmt.Errorf("the case-variant lookup resolved; the data source name argument must be matched exactly")
+			}
+			if matched, _ := regexp.MatchString(`not found|Not Found`, err.Error()); !matched {
+				return fmt.Errorf("expected a not-found diagnostic, got: %w", err)
+			}
+			return nil
+		},
+		Steps: []resource.TestStep{{
+			Config: m.providerBlock() + `
+data "anyscale_iam_user_group" "case_variant" {
+  name = "TFACC-UG EXACT pin"
+}
+`,
+		}},
+	})
+}
+
 // TestAccIAMUserGroupResource_MockNameValidation: the server strips surrounding
 // whitespace, so a padded name would never converge; it is rejected at plan
 // time along with an empty or over-long name. A clean name is the positive
