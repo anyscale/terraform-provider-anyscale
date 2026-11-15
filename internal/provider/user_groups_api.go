@@ -247,9 +247,10 @@ func getUserGroupMembers(ctx context.Context, client *Client, groupID string) (m
 	return nil, false, nil
 }
 
-// removeAllUserGroupMembers empties a group. Per the backend source, group
-// delete does not revoke access members derived from the group, while member
-// removal does, so the group is emptied before it is deleted.
+// removeAllUserGroupMembers empties a group. The group resource calls it
+// before deleting the group and the members resource calls it on destroy.
+// Deleting a group retires the role bindings it holds, so the access the group
+// grants ends with the delete.
 //
 // A member who leaves the organization between the listing and the removal
 // makes the backend reject the whole request with 404 "User IDs not found".
