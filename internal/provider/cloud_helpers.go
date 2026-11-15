@@ -746,42 +746,25 @@ func (awsSubnetIDsPlanModifier) PlanModifyList(ctx context.Context, req planmodi
 		// in-place Update records the planned form, nothing to refuse.
 		return
 	}
-	if !req.StateValue.IsNull() && !req.StateValue.IsUnknown() {
-		// Same attribute in state: compare as sets (order is irrelevant).
-		var planIDs, stateIDs []string
-		if !req.PlanValue.ElementsAs(ctx, &planIDs, false).HasError() &&
-			!req.StateValue.ElementsAs(ctx, &stateIDs, false).HasError() {
-			if stringSetsEqual(planIDs, stateIDs) {
-				// Reorder of the same set: keep the state's order.
-				resp.PlanValue = req.StateValue
-				return
-			}
-			awsRefuseSubnetSetChange(&resp.Diagnostics, req.Path)
-			return
-		}
+	// State's list is null when state holds the map form, or nothing yet:
+	// read the map for the comparison set. Every decision about the list
+	// form goes through decideSubnetListForm, shared with the Update-time
+	// re-check, so the two can never disagree.
+	var stateSubnetToAZ map[string]string
+	stateMapKnown := !req.State.GetAttribute(ctx, path.Root("aws_config").AtName("subnet_ids_to_az"), &stateSubnetToAZ).HasError()
+	refuse, keepStateOrder := decideSubnetListForm(ctx, req.PlanValue, req.StateValue, stateSubnetToAZ, stateMapKnown)
+	if refuse {
+		awsRefuseSubnetSetChange(&resp.Diagnostics, req.Path)
 		return
 	}
-	// State's list is null (state holds the map form, or nothing yet):
-	// compare against the map's keys when one is recorded.
-	var stateSubnetToAZ map[string]string
-	if !req.State.GetAttribute(ctx, path.Root("aws_config").AtName("subnet_ids_to_az"), &stateSubnetToAZ).HasError() {
-		var planIDs []string
-		if !req.PlanValue.ElementsAs(ctx, &planIDs, false).HasError() && len(planIDs) > 0 {
-			if stringSetsEqual(planIDs, mapKeys(stateSubnetToAZ)) {
-				// Same subnets through the list form: records the configured
-				// form in place; no zones are written either way.
-				return
-			}
-			awsRefuseSubnetSetChange(&resp.Diagnostics, req.Path)
-			return
-		}
+	if keepStateOrder {
+		// Reorder of the same set: keep the state's order.
+		resp.PlanValue = req.StateValue
 	}
 }
 
 func awsRefuseSubnetSetChange(diags *diag.Diagnostics, p path.Path) {
-	diags.AddAttributeError(p, "Changing subnets in place requires aws_config.subnet_ids_to_az",
-		"With subnet_ids, Anyscale derives availability zones itself and can pair them with the wrong subnets. "+
-			"Rewrite the setting as subnet_ids_to_az with each subnet's zone; the change then applies in place.")
+	diags.AddAttributeError(p, awsSubnetSetChangeSummary, awsSubnetSetChangeDetail)
 }
 
 func mapKeys(m map[string]string) []string {

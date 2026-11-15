@@ -60,8 +60,22 @@ func plannedSubnetUpdate(ctx context.Context, planAWS, stateAWS types.Object) (u
 		return nil, false, d
 	}
 	var planMap map[string]string
-	d.Append(planModel.SubnetIDsToAZ.ElementsAs(ctx, &planMap, false)...)
-	if d.HasError() || len(planMap) == 0 {
+	pd := planModel.SubnetIDsToAZ.ElementsAs(ctx, &planMap, false)
+	if pd.HasError() {
+		if !mapElementsKnown(planModel.SubnetIDsToAZ) {
+			// A zone (or the whole map) is not decided yet - the
+			// configuration references a resource the same apply creates.
+			// Report the subnet change without PUT values: plan-time
+			// callers only ask WHETHER subnets changed; Update re-runs on
+			// the now-known plan, and never converts an unknown into
+			// map[string]string - that error would fail every later plan,
+			// destroy included.
+			return nil, true, d
+		}
+		d.Append(pd...)
+		return nil, false, d
+	}
+	if len(planMap) == 0 {
 		return nil, false, d
 	}
 
@@ -207,12 +221,32 @@ func updateCloudResourceIfChanged(
 	isPrivateCloud bool,
 	wantProvider, wantComputeStack, wantRegion string,
 ) (updated bool, live *FileStorage) {
+	// The deferred plan-time refusals land here: plan-time refusals fire
+	// only on known values, so an unknown defers to this re-check on the
+	// now-known plan, before the first write, with the same diagnostics.
+	refuseInPlaceChangesOnKnownValues(ctx, blocks, diags)
+	if diags.HasError() {
+		return false, nil
+	}
 	subnets, subnetsNeeded, d := plannedSubnetUpdate(ctx, blocks.planAWS, blocks.stateAWS)
 	diags.Append(d...)
 	changes, cd := plannedInPlaceChanges(ctx, blocks)
 	diags.Append(cd...)
 	fileStorageChanged := !planFileStorage.Equal(stateFileStorage)
 	if diags.HasError() || (!subnetsNeeded && !fileStorageChanged && !changes.any()) {
+		return false, nil
+	}
+	// Plan values are known at apply time, so these guards are
+	// unreachable in a normal run; they stand so a future path can never
+	// send (or delete) values on a not-decided plan.
+	if subnetsNeeded && subnets == nil {
+		diags.AddError("Update Error",
+			"aws_config.subnet_ids_to_az carries a value that is not known at apply time; refusing to update rather than send arbitrary subnet pairs")
+		return false, nil
+	}
+	if changes.hasUnknown() {
+		diags.AddError("Update Error",
+			"an in-place attribute carries a value that is not known at apply time; refusing to update rather than send an arbitrary value")
 		return false, nil
 	}
 
