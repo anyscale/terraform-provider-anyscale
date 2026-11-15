@@ -287,6 +287,10 @@ attribute, Terraform 1.15 prints the provider's message and Terraform 1.10 a gen
 ... is deprecated". To move a converted organization off them, follow the steps in
 [Organization access mode](#organization-access-mode).
 
+`terraform destroy` also plans the configuration first, and that plan reads every data source in
+it under the identity running the destroy - so destroy with an identity that can read each data
+source the configuration uses, such as role lookups.
+
 ## Role bindings (Beta)
 
 ~> **Beta, behind a feature flag.** Role bindings are a Beta feature. Beta resources can change

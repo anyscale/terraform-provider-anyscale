@@ -30,10 +30,12 @@ func serviceCloudMatchProjectJSON(id string, parentCloudID *string) string {
 }
 
 // TestAccServiceResource_CloudMatchRejectsMismatch: project_id and compute_config_id resolve
-// to DIFFERENT clouds, so the validator must reject at PLAN TIME, before any apply fires.
-// Without the guard this mismatch reaches the backend and comes back as an opaque UNHEALTHY with
-// a misleading "user removed from organization" 403 (resource_service_realinfra_acc_test.go's
-// cloud-scoped project is the real-infra side of the same root cause).
+// to DIFFERENT clouds. The guard forecasts the failure at plan (a warning, so a
+// 'terraform destroy”s plan pass cannot be blocked) and refuses at APPLY, before
+// any write fires. Without the guard this mismatch reaches the backend and comes back
+// as an opaque UNHEALTHY with a misleading "user removed from organization" 403
+// (resource_service_realinfra_acc_test.go's cloud-scoped project is the real-infra side
+// of the same root cause). The apply endpoint below is only reached under mutation.
 func TestAccServiceResource_CloudMatchRejectsMismatch(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -92,10 +94,12 @@ resource "anyscale_service" "test" {
 		},
 	})
 
-	// The whole point: rejected at PLAN, so apply must never have been reached at all.
+	// The whole point: the forecast guarded nothing at the write level, so the
+	// APPLY must have refused before any write - only mutation reaches the
+	// backend with the mismatched pair.
 	if got := atomic.LoadInt32(&applyCallCount); got != 0 {
-		t.Errorf("apply was called %d time(s), want 0 - a cloud mismatch must be rejected at plan "+
-			"time, before any apply is attempted", got)
+		t.Errorf("apply was called %d time(s), want 0 - a cloud mismatch must be refused "+
+			"on the apply path, before any write is attempted", got)
 	}
 }
 
