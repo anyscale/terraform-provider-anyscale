@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
-	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -220,32 +219,33 @@ func TestAccSchedulerConfigResourceRejectsEmptyNestedValueAtPlan(t *testing.T) {
 // call proceeds.
 //
 // This is an assert-absence claim ("validate ran"), so it needs a positive
-// control on the same path or a vacuous pass is indistinguishable from a
-// real one - the same reasoning as the empty-plan checks above. The control
-// here is the mock's validate endpoint answering 400, the status this
-// provider treats as "the server evaluated the document and rejected it"
-// (schedulerServerEvaluatedDocument). A build where the gate never fires
-// cannot surface that rejection: nothing ever POSTs to /validate, so the
-// 400 is never seen, and Create proceeds to write the (mock-)invalid
-// document and succeeds. A build where the gate fires calls validate,
-// receives the 400, and fails the plan before any write happens.
+// control on the same path or a vacuous pass is indistinguishable from a real
+// one - the same reasoning as the empty-plan checks above. The control here is
+// the mock's validate endpoint answering 400, the status this provider
+// treats as "the server evaluated the document and rejected it"
+// (schedulerServerEvaluatedDocument). That refusal is API-derived live data,
+// so under the destroy-gate contract it now WARNS at plan instead of erroring;
+// the evidence is asserted from `terraform plan -json`, the only surface that
+// shows plan warnings, together with the mock's own call counter. A build
+// where the gate never fires POSTs nothing to /validate, so both the warning
+// and the nonzero ValidateHits are unreachable, and the plan proceeds without
+// a word about the (mock-)invalid document.
 //
 // Mutation-proof: reverting ModifyPlan's gate and expand calls from
 // req.Config back to req.Plan (the shape this resource was merged with) turns
-// this test red - the plan step itself succeeds with no error, so the
-// ExpectError assertion is what fails, and the test ends there. That regexp is
-// the whole of the coverage: it pins both the summary and the server's own
-// detail sentence, which cannot appear unless the POST to /validate happened.
+// this test red on both assertions - the validate POST never happens, so
+// ValidateHits stays zero and no warning can name the server's own detail
+// sentence, which cannot appear unless the POST to /validate happened.
 func TestAccSchedulerConfigResourceCrossReferenceValidationRunsOnCreate(t *testing.T) {
 	const rejectDetail = "Scheduling rule #1 references unknown resource queue 'ghost-queue'."
 
-	server, _ := newSchedulerConfigServer(t, schedulerConfigServerOpts{
+	server, mock := newSchedulerConfigServer(t, schedulerConfigServerOpts{
 		ValidateStatus: 400,
 		ValidateBody:   fmt.Sprintf(`{"error":{"detail":%q}}`, rejectDetail),
 	})
 	defer server.Close()
 
-	const config = `
+	config := testAccProviderBlock(server.URL) + `
 resource "anyscale_scheduler_config" "test" {
   resource_flavors = [
     { name = "cpu-standard" },
@@ -256,23 +256,19 @@ resource "anyscale_scheduler_config" "test" {
 }
 `
 
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{
-				Config:   testAccProviderBlock(server.URL) + config,
-				PlanOnly: true,
-				// The CLI's own diagnostic renderer word-wraps long lines, so a
-				// literal match on the server's detail sentence would break on
-				// whichever space happens to fall at the wrap column. Every
-				// run-of-spaces in the expected text becomes \s+ instead of a
-				// literal match, tolerating the wrap without weakening the
-				// assertion to "some error happened."
-				ExpectError: regexp.MustCompile(`(?s)Invalid Anyscale Scheduler Configuration.*` +
-					strings.Join(strings.Fields(regexp.QuoteMeta(rejectDetail)), `\s+`)),
-			},
-		},
-	})
+	run := cliDevWorkspace(t, config)
+	planLines := pmRunOK(t, run, "plan", "-json")
+	pmExpectWarning(t, planLines, "Invalid Anyscale Scheduler Configuration",
+		"If applied, this change fails.",
+		"The Anyscale API rejected this scheduler config",
+		rejectDetail,
+		"the destroy itself is not affected")
+	if got := mock.ValidateHits(); got == 0 {
+		t.Error("the plan never called /config/validate: the Create-path gate did not fire")
+	}
+	if got := mock.WriteCount(); got != 0 {
+		t.Errorf("the plan wrote the (mock-)invalid document before any apply: %d writes", got)
+	}
 }
 
 // The declared order of list sections round-trips exactly, and a read-back

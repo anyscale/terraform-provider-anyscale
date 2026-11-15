@@ -599,7 +599,9 @@ func (r *ServiceResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 			addServiceCreateStoppedError(&resp.Diagnostics)
 			return
 		}
-		r.validateProjectComputeConfigCloudMatch(ctx, &plan, &resp.Diagnostics)
+		if detail, mismatch := r.projectComputeConfigCloudMismatch(ctx, &plan); mismatch {
+			addServiceCloudMatchWarning(&resp.Diagnostics, detail)
+		}
 		return
 	}
 
@@ -613,7 +615,9 @@ func (r *ServiceResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 	// plan (e.g. only ray_serve_config changed) gets neither the cost nor the check, since the
 	// combination already passed this same check whenever it was last set.
 	if !plan.ProjectID.Equal(state.ProjectID) || !plan.ComputeConfigID.Equal(state.ComputeConfigID) {
-		r.validateProjectComputeConfigCloudMatch(ctx, &plan, &resp.Diagnostics)
+		if detail, mismatch := r.projectComputeConfigCloudMismatch(ctx, &plan); mismatch {
+			addServiceCloudMatchWarning(&resp.Diagnostics, detail)
+		}
 	}
 
 	if r.planServiceBuildID(ctx, req.Config, &plan, &state) {
@@ -802,10 +806,14 @@ func markServiceRolloutAttributesUnknown(ctx context.Context, resp *resource.Mod
 // output (e.g. anyscale_compute_config.x.id). In either case this validator silently skips -
 // the same opaque runtime failure as today, not a regression, just not yet closable at plan time
 // for those specific shapes.
-func (r *ServiceResource) validateProjectComputeConfigCloudMatch(ctx context.Context, plan *ServiceResourceModel, diags *diag.Diagnostics) {
+// projectComputeConfigCloudMismatch reports the cloud-match detail when the
+// planned compute_config_id and project_id belong to different clouds, and
+// whether the check determined an answer at all. Unreadable ids fail open:
+// a real problem with either id still surfaces from Create/Update.
+func (r *ServiceResource) projectComputeConfigCloudMismatch(ctx context.Context, plan *ServiceResourceModel) (detail string, determined bool) {
 	if plan.ProjectID.IsNull() || plan.ProjectID.IsUnknown() ||
 		plan.ComputeConfigID.IsNull() || plan.ComputeConfigID.IsUnknown() {
-		return
+		return "", false
 	}
 
 	computeConfigID := plan.ComputeConfigID.ValueString()
@@ -832,31 +840,61 @@ func (r *ServiceResource) validateProjectComputeConfigCloudMatch(ctx context.Con
 		tflog.Warn(ctx, "Could not fetch project for plan-time cloud-match check, skipping", map[string]any{
 			"project_id": projectID, "error": err.Error(),
 		})
-		return
+		return "", false
 	}
 	// ParentCloudID is genuinely nullable server-side - a project with no cloud
 	// association has nothing to compare against, so skip rather than treat nil as a mismatch.
 	if projectResp.Result.ParentCloudID == nil || *projectResp.Result.ParentCloudID == "" {
-		return
+		return "", false
 	}
 	projectCloudID := *projectResp.Result.ParentCloudID
 
 	if computeConfigCloudID == "" || computeConfigCloudID == projectCloudID {
-		return
+		return "", false
 	}
 
+	return fmt.Sprintf(
+		"compute_config_id %q targets cloud %q, but project_id %q belongs to cloud %q. "+
+			"A service's cluster can only be created in a project whose own cloud matches the compute config's "+
+			"cloud - the backend rejects this combination with an opaque failure at apply time (the service "+
+			"reaches UNHEALTHY with a misleading, identity-flavored error) rather than a clear message. "+
+			"Point project_id at a project on cloud %[2]s, or use a compute_config_id on cloud %[4]s.",
+		computeConfigID, computeConfigCloudID, projectID, projectCloudID,
+	), true
+}
+
+// addServiceCloudMatchWarning reports the mismatch at plan: a forecast of the
+// apply's refusal, never a reason the plan cannot exist - erroring here also
+// blocked 'terraform destroy', which plans the configuration first in a pass
+// indistinguishable from an ordinary plan. The apply itself refuses with the
+// same text (addServiceCloudMatchError).
+func addServiceCloudMatchWarning(diags *diag.Diagnostics, detail string) {
+	diags.AddAttributeWarning(
+		path.Root("project_id"),
+		"Project/Compute Config Cloud Mismatch",
+		"If applied, this change fails. "+detail+
+			"\n\nA terraform destroy also plans the configuration first and may show this warning; the destroy itself is not affected.",
+	)
+}
+
+// addServiceCloudMatchError is the apply-side refusal: the backend fails a
+// mismatched pair opaquely, so the provider refuses here, before any write,
+// with the clear message the plan-time forecast already showed.
+func addServiceCloudMatchError(diags *diag.Diagnostics, detail string) {
 	diags.AddAttributeError(
 		path.Root("project_id"),
 		"Project/Compute Config Cloud Mismatch",
-		fmt.Sprintf(
-			"compute_config_id %q targets cloud %q, but project_id %q belongs to cloud %q. "+
-				"A service's cluster can only be created in a project whose own cloud matches the compute config's "+
-				"cloud - the backend rejects this combination with an opaque failure at apply time (the service "+
-				"reaches UNHEALTHY with a misleading, identity-flavored error) rather than a clear message. "+
-				"Point project_id at a project on cloud %[2]s, or use a compute_config_id on cloud %[4]s.",
-			computeConfigID, computeConfigCloudID, projectID, projectCloudID,
-		),
+		detail,
 	)
+}
+
+// checkServiceCloudMatchAtApply fails an apply whose project_id and
+// compute_config_id belong to different clouds, before any write: the
+// roles write would otherwise fail opaque and late.
+func (r *ServiceResource) checkServiceCloudMatchAtApply(ctx context.Context, plan *ServiceResourceModel, diags *diag.Diagnostics) {
+	if detail, mismatch := r.projectComputeConfigCloudMismatch(ctx, plan); mismatch {
+		addServiceCloudMatchError(diags, detail)
+	}
 }
 
 // Create creates the service and sets the initial Terraform state.
@@ -870,6 +908,13 @@ func (r *ServiceResource) Create(ctx context.Context, req resource.CreateRequest
 	// ModifyPlan rejects this unless stopped was unknown at plan time.
 	if plan.Stopped.ValueBool() {
 		addServiceCreateStoppedError(&resp.Diagnostics)
+		return
+	}
+
+	// The cloud-match pair refused at plan (as a forecast) refuses here, as an
+	// error, before any write.
+	r.checkServiceCloudMatchAtApply(ctx, &plan, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
@@ -1306,6 +1351,13 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 
 	serviceID := state.ID.ValueString()
 	plan.ID = state.ID
+
+	// The cloud-match pair refused at plan (as a forecast) refuses here, as an
+	// error, before any write.
+	r.checkServiceCloudMatchAtApply(ctx, &plan, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	// Resolve first: whether anything deploys depends on the build image_uri resolves to.
 	if !r.resolvePlannedServiceBuild(ctx, &plan, &resp.Diagnostics) {

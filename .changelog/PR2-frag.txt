@@ -1,0 +1,11 @@
+```release-note:fixed
+resource/anyscale_scheduler_config: terraform destroy no longer fails at plan when the plan-time scheduler validation rejects the configuration - the check now runs only when the config would change and a refusal warns ("If applied, this change fails") instead of erroring; the apply itself still fails with the API's own rejection
+```
+
+```release-note:fixed
+resource/anyscale_service: terraform destroy no longer fails at plan when the project/compute-config cloud-match guard would reject the pair - the mismatch now warns at plan ("If applied, this change fails") and the apply refuses it before any write, with the same message
+```
+
+```release-note:fixed
+resource/anyscale_cloud_access: terraform destroy no longer fails at plan when an unchanged member map includes someone who appears to be an organization admin - an admin declaration that actually changed still warns at plan ("If applied, this change fails") and the apply still records the API's refusal in ungranted_members rather than granting
+```

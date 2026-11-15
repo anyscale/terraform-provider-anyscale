@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -791,6 +792,26 @@ func (r *SchedulerConfigResource) ModifyPlan(ctx context.Context, req resource.M
 		return
 	}
 
+	// Run the check only when the document it validates would change: an
+	// update whose four input sections equal the refreshed state's re-sends
+	// the same document the backend already answered, so plan-time makes no
+	// API call for it. 'terraform destroy' plans the configuration first, and
+	// that pass sees an unchanged resource here exactly as an ordinary
+	// re-plan does; a drifted one still refreshes into a difference and gets
+	// checked.
+	if !req.State.Raw.IsNull() {
+		var state SchedulerConfigResourceModel
+		resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		var stateEncodeErrs []string
+		stateDoc := expandSchedulerConfig(&state, &stateEncodeErrs)
+		if reflect.DeepEqual(config, stateDoc) {
+			return
+		}
+	}
+
 	if err := validateSchedulerConfig(ctx, r.client, config); err != nil {
 		if errors.Is(err, ErrSchedulerValidationUnavailable) {
 			// The check could not run. Failing the plan here would make
@@ -813,9 +834,16 @@ func (r *SchedulerConfigResource) ModifyPlan(ctx context.Context, req resource.M
 			)
 			return
 		}
-		resp.Diagnostics.AddError(
+		// A refusal from the validate endpoint is a forecast of what the
+		// apply would answer, not a reason the plan cannot exist: erroring
+		// here also blocked 'terraform destroy', which plans the
+		// configuration first in a pass indistinguishable from an ordinary
+		// plan. Warn; the apply still PUTs and refuses with the server's own
+		// message.
+		resp.Diagnostics.AddWarning(
 			"Invalid Anyscale Scheduler Configuration",
-			fmt.Sprintf("The Anyscale API rejected this scheduler config: %s", err),
+			fmt.Sprintf("If applied, this change fails. The Anyscale API rejected this scheduler config: %s\n\n"+
+				"A terraform destroy also plans the configuration first and may show this warning; the destroy itself is not affected.", err),
 		)
 	}
 }

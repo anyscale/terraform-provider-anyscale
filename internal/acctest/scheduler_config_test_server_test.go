@@ -57,6 +57,8 @@ type schedulerConfigServer struct {
 	// stand-in) vs. "the server evaluated and rejected it" (400/422) vs. the
 	// capability-gate 403.
 	validateStatus int
+	applyStatus    int
+	applyBody      string
 	validateBody   string
 	getStatus      int
 	getBody        string
@@ -154,6 +156,13 @@ func newSchedulerConfigServer(t *testing.T, opts schedulerConfigServerOpts) (*ht
 
 		switch r.Method {
 		case http.MethodPost:
+			if s.applyStatus != 0 {
+				w.WriteHeader(s.applyStatus)
+				if s.applyBody != "" {
+					_, _ = w.Write([]byte(s.applyBody))
+				}
+				return
+			}
 			raw, err := io.ReadAll(r.Body)
 			if err != nil {
 				t.Errorf("failed to read apply body: %v", err)
@@ -258,6 +267,16 @@ func (s *schedulerConfigServer) SetValidateResponse(status int, body string) {
 	defer s.mu.Unlock()
 	s.validateStatus = status
 	s.validateBody = body
+}
+
+// SetApplyResponse changes what the apply (POST /config) answers for
+// subsequent requests. Used to prove that a document the plan-time check
+// rejected is refused by the apply too, server-side.
+func (s *schedulerConfigServer) SetApplyResponse(status int, body string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.applyStatus = status
+	s.applyBody = body
 }
 
 // SetGetResponse changes what GET /config answers for subsequent requests.

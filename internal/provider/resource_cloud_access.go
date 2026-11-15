@@ -1212,7 +1212,11 @@ func (r *CloudAccessResource) ModifyPlan(ctx context.Context, req resource.Modif
 	// the thing that only makes sense with prior state, not this.
 	if !req.Plan.Raw.IsNull() {
 		r.refuseDeclaringTheCaller(ctx, req.Plan, caller, callerErr, &resp.Diagnostics)
-		r.refuseDeclaringOrgAdmins(ctx, req.Plan, &resp.Diagnostics)
+		// Null state member (a create, or a read that failed) leaves nothing
+		// to skip against, and the check runs.
+		var stateMember types.Map
+		_ = req.State.GetAttribute(ctx, path.Root("member"), &stateMember)
+		r.refuseDeclaringOrgAdmins(ctx, req.Plan, stateMember, &resp.Diagnostics)
 	}
 
 	// State null + Plan non-null is specifically a create: the one case where
@@ -1369,7 +1373,7 @@ func (r *CloudAccessResource) refuseDeclaringTheCaller(
 // unlike the caller, every offending member is reported, not just the first.
 // No mirror guard needed on Read: org admins are filtered out of
 // member-search entirely, so they're already invisible and never revoked.
-func (r *CloudAccessResource) refuseDeclaringOrgAdmins(ctx context.Context, plan tfsdk.Plan, diags *diag.Diagnostics) {
+func (r *CloudAccessResource) refuseDeclaringOrgAdmins(ctx context.Context, plan tfsdk.Plan, stateMember types.Map, diags *diag.Diagnostics) {
 	if r.client == nil {
 		return
 	}
@@ -1383,6 +1387,16 @@ func (r *CloudAccessResource) refuseDeclaringOrgAdmins(ctx context.Context, plan
 	}
 
 	for email := range member.Elements() {
+		// Run the check only when this declaration would change: an entry
+		// identical to the refreshed state's is re-applying what the backend
+		// already answered, so plan-time makes no API call for it. This is
+		// what keeps 'terraform destroy' - which plans the configuration
+		// first - off this read for an unchanged resource entirely.
+		if !stateMember.IsNull() && !stateMember.IsUnknown() {
+			if prior, ok := stateMember.Elements()[email]; ok && prior.Equal(member.Elements()[email]) {
+				continue
+			}
+		}
 		isAdmin, err := cloudAccessLikelyOrgAdmin(ctx, r.client, email)
 		if err != nil {
 			// Unresolvable for THIS member only - every other declared member is
@@ -1394,17 +1408,25 @@ func (r *CloudAccessResource) refuseDeclaringOrgAdmins(ctx context.Context, plan
 		if !isAdmin {
 			continue
 		}
-		diags.AddAttributeError(
+		// The admin signal is read out of the API, so it warns at plan - a
+		// forecast of what the apply would answer - instead of erroring: an
+		// error here also blocked 'terraform destroy', which plans the
+		// configuration first in a pass indistinguishable from an ordinary
+		// plan. The apply still refuses: the roles write rejects an org
+		// admin outright, in the reconcile, with no acceptable mid-apply
+		// recovery - and that refusal is an error then.
+		diags.AddAttributeWarning(
 			path.Root("member").AtMapKey(email),
 			"This Member Appears To Be An Organization Admin",
-			fmt.Sprintf("%q appears to be an organization admin, based on the best available signal this resource can "+
+			"If applied, this change fails. "+fmt.Sprintf("%q appears to be an organization admin, based on the best available signal this resource can "+
 				"read - not a guarantee. If they are, the cloud roles API refuses to change an organization admin's role, "+
 				"and this resource has no way to recover from that failure mid-apply. Remove that entry from member.\n\n"+
 				"Organization admins are outside this resource's scope in both directions: the member-search endpoint "+
 				"this resource reads never reports them, so a real admin is already invisible on refresh and never "+
 				"revoked. Declaring one here would only ever fail the write - and discovering that after another "+
 				"member's grant already succeeded is exactly the situation this early check exists to catch, even "+
-				"though it cannot catch every case.", email),
+				"though it cannot catch every case.", email)+
+				"\n\nA terraform destroy also plans the configuration first and may show this warning; the destroy itself is not affected.",
 		)
 	}
 }
