@@ -1,9 +1,6 @@
 # --- anyscale_project: one per cloud ------------------------------------------------------------
-# Project access (collaborators/roles) is NOT managed here. The `collaborator` block was removed
-# from this resource in v0.25.0 - project roles cannot be granted independently of a cloud role.
-# There is currently NO in-provider replacement; see examples/resources/anyscale_project/resource.tf
-# for the full explanation. The anyscale_project data source (data_sources.tf) still reads existing
-# collaborators without managing them.
+# Project access is managed with role bindings, not on this resource: organization.tf grants roles
+# on project.b and manages every binding on project.a (gated by enable_role_binding).
 
 resource "anyscale_project" "a" {
   name        = "${var.name_prefix}-project-a"

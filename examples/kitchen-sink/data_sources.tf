@@ -103,10 +103,40 @@ data "anyscale_cloud_iam_mapping" "b" {
 }
 
 # --- anyscale_iam_role (gated by enable_role_binding) --------------------------------------------
-# A built-in role by exact name, for organization.tf's role binding. Gated with it because the
-# roles API only answers in organizations with role bindings enabled.
-data "anyscale_iam_role" "project_viewer" {
+# Built-in roles by exact, case-sensitive name, for organization.tf's role grants and role binding.
+# Gated with them because the roles API only answers in organizations with role bindings enabled.
+data "anyscale_iam_role" "project_reader" {
   count = var.enable_role_binding ? 1 : 0
 
-  name = "project_viewer"
+  name = "Project reader"
+}
+
+data "anyscale_iam_role" "project_writer" {
+  count = var.enable_role_binding ? 1 : 0
+
+  name = "Project writer"
+}
+
+data "anyscale_iam_role" "cloud_collaborator" {
+  count = var.enable_role_binding ? 1 : 0
+
+  name = "Cloud collaborator"
+}
+
+# The Admin role a project's creator holds on it. The API stores it under this name.
+data "anyscale_iam_role" "admin" {
+  count = var.enable_role_binding ? 1 : 0
+
+  name = "Organization owner"
+}
+
+# --- anyscale_iam_role_binding data source (gated by enable_role_binding) ------------------------
+# Reads every direct binding on Cloud B's project, including the grants organization.tf adds.
+# Reading needs IAM management on the project, which its creator has.
+data "anyscale_iam_role_binding" "project_b" {
+  count = var.enable_role_binding ? 1 : 0
+
+  project_id = anyscale_iam_role_grant.team_project_reader[0].project_id
+
+  depends_on = [anyscale_iam_role_grant.member_project_reader]
 }

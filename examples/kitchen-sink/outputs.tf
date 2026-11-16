@@ -150,9 +150,14 @@ output "iam_mapping_rules" {
   description = "Cloud B's IAM mapping rules, read back by the data source."
 }
 
-output "project_viewer_role_id" {
-  value       = var.enable_role_binding ? data.anyscale_iam_role.project_viewer[0].id : null
-  description = "ID of the built-in project_viewer role. Null unless enable_role_binding is set."
+output "project_reader_role_id" {
+  value       = var.enable_role_binding ? data.anyscale_iam_role.project_reader[0].id : null
+  description = "ID of the built-in Project reader role. Null unless enable_role_binding is set."
+}
+
+output "project_b_role_ids" {
+  value       = var.enable_role_binding ? keys(data.anyscale_iam_role_binding.project_b[0].roles) : null
+  description = "Roles held directly on Cloud B's project. Null unless enable_role_binding is set."
 }
 
 output "user_group_member_count" {
