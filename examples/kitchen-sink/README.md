@@ -107,6 +107,9 @@ implicit extra one.
 | `user_group_member_emails` | Group membership | Each email must be an accepted org member |
 | `enable_role_binding` | `anyscale_iam_role_grant` (the group on Cloud B and on its project; `org_user_email`'s member on that project, when set), `anyscale_iam_role_binding` (every binding on Cloud A's project), and the `anyscale_iam_role` / `anyscale_iam_role_binding` data sources | `enable_user_groups`, and an org on role bindings (converted); legacy orgs answer `409`. `org_user_email` must not be the identity running Terraform, which cannot grant itself a role |
 
+For a step-by-step introduction to the role-binding types `enable_role_binding` turns on, see
+[`role_binding_workflow`](../resources/role_binding_workflow/).
+
 **Excluded (never declared here):**
 
 - `anyscale_scheduler_config` - an org-wide singleton with no delete; destroy cannot undo it.

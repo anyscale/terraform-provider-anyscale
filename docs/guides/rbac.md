@@ -321,6 +321,9 @@ resource "anyscale_iam_role_grant" "analysts_project_reader" {
 Prefer groups: bind the role to the group once, then add or remove people by editing `members`; every
 member gets the role.
 
+New to role bindings? [`examples/resources/role_binding_workflow`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/resources/role_binding_workflow) is a runnable, step-by-step
+walkthrough of every role-binding resource and data source, with the expected output.
+
 ### Granting a user, not a group
 
 Binding a user takes the user's `usr_...` ID, not their email. Look it up with the

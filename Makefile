@@ -568,6 +568,14 @@ test-container-image-compute-config: build ## Test container image + compute con
 	  export SCENARIO_NO_CLOUD=1 TF_VAR_image_name=tfacc-cicc-$$SUFFIX TF_VAR_compute_config_name=tfacc-cicc-$$SUFFIX; \
 	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/container-image-compute-config $(BUILD_DIR)/container-image-compute-config-$$SUFFIX.tfstate
 
+.PHONY: test-role-binding-workflow
+test-role-binding-workflow: build ## Test the role-binding walkthrough on an existing cloud (TF_VAR_cloud_name required; converted org)
+	@echo "==> Testing role_binding_workflow scenario..."
+	@test -n "$$TF_VAR_cloud_name" || { echo "TF_VAR_cloud_name must name an existing cloud for this scenario" >&2; exit 2; }
+	@SUFFIX=$(SCENARIO_SUFFIX); \
+	  export SCENARIO_NO_CLOUD=1 TF_VAR_name_prefix=tfacc-rbw-$$SUFFIX; \
+	  .github/scripts/scenario-test.sh $(BINARY_NAME) examples/resources/role_binding_workflow $(BUILD_DIR)/role-binding-workflow-$$SUFFIX.tfstate
+
 .PHONY: test-azure-aks-basic
 test-azure-aks-basic: build ## Test Azure AKS basic (K8S). Creates real Azure infra; refuses to run without ANYSCALE_TEST_AZURE_APPROVED=1
 	@echo "==> Testing azure-aks-basic scenario..."
