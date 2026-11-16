@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.43.1] - 2026-11-16
+
+### Changed
+
+- provider: The RBAC guide's diagnostics table now names the frozen-binding, own-binding, user-group, conversion, not-found and duplicate-name errors and fixes two wrong titles.
+- resource/anyscale_iam_role_binding: The example says to apply as the project's creator, because its keep entry follows whoever applies.
+
 ## [0.43.0] - 2026-11-15
 
 ### Breaking Changes
@@ -1461,7 +1468,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.43.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.43.1...HEAD
+[0.43.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.43.1
 [0.43.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.43.0
 [0.42.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.42.0
 [0.41.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.41.0
