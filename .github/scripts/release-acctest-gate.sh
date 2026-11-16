@@ -18,7 +18,16 @@
 # Resources" to success (step conclusions, not job conclusions: a skipped step
 # makes its job succeed) is the tested baseline. Every file changed between C
 # and the tag commit must be docs-only per .github/docs-only-filter.yml.
-# No baseline in range, an API error, or a non-docs change after C => exit 1.
+#
+# A range can contain no such commit: a release whose changes since the previous
+# release are all docs-only has every commit skipped by the same filter. In that
+# case the previous release is the baseline -- it passed this gate when it was
+# cut, so if nothing outside the docs-only paths has changed since it, its
+# coverage is the coverage of this tag's tree. That fallback decides nothing on
+# its own: the identical per-file docs-only diff below still runs, so a non-docs
+# change anywhere in the range fails exactly as it would after a tested commit.
+#
+# An API error, or a non-docs change after the baseline => exit 1.
 # There is no override and no path that falls through to success.
 set -euo pipefail
 
@@ -111,7 +120,11 @@ while read -r c; do
   echo "  $(git log -1 --format='%h %s' "$c"): no run with both acceptance steps green"
 done < <(git rev-list --first-parent "${PREV}..${TAG_SHA}")
 
-[ -n "$baseline" ] || fail "no commit in ${PREV}..${TAG_SHA} has a CI run whose acceptance steps (Data Sources and Resources) both ran green. Checked ${#checked[@]} commit(s): ${checked[*]:-none}. Re-run CI on the newest code-changing commit (gh run rerun), wait for it to complete green, then re-run the Release workflow against the EXISTING tag; do not delete or re-create the tag."
+if [ -z "$baseline" ]; then
+  echo "  no tested commit in range (checked ${#checked[@]}); falling back to previous release ${PREV}"
+  baseline="$PREV"
+  run_note="previous release: no commit in range has both acceptance steps green"
+fi
 
 echo "Tested baseline: $(git log -1 --format='%h %s' "$baseline") ($run_note)"
 bad=()
@@ -122,6 +135,6 @@ done < <(git diff --name-only "$baseline" "$TAG_SHA")
 
 if [ "${#bad[@]}" -gt 0 ]; then
   printf '  changed after baseline, not docs-only: %s\n' "${bad[@]}"
-  fail "non-docs files changed between tested baseline ${baseline:0:7} and ${TAG_SHA:0:7}; no acceptance run covers them."
+  fail "non-docs files changed between tested baseline ${baseline:0:7} and ${TAG_SHA:0:7}; no acceptance run covers them. Re-run CI on the newest code-changing commit (gh run rerun), wait for it to complete green, then re-run the Release workflow against the EXISTING tag; do not delete or re-create the tag."
 fi
 echo "Gate passed: ${TAG_SHA:0:7} differs from tested ${baseline:0:7} only in docs-only paths."
