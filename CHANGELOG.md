@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.43.2] - 2026-11-16
+
+### Changed
+
+- provider: The RBAC guide and the `anyscale_cloud_access`, `anyscale_organization_user_role` and `anyscale_iam_role_grant` pages are shortened to the facts that affect configuration, and the guide names the `anyscale_iam_role_binding` data source as the replacement for the deprecated collaborator and permission attributes.
+
+### Fixed
+
+- resource/anyscale_iam_role_grant: The example and the RBAC guide look up the `Project reader` role instead of `project_viewer`, which the `anyscale_iam_role` data source never finds.
+
 ## [0.43.1] - 2026-11-16
 
 ### Changed
@@ -1468,7 +1478,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.43.1...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.43.2...HEAD
+[0.43.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.43.2
 [0.43.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.43.1
 [0.43.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.43.0
 [0.42.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.42.0
