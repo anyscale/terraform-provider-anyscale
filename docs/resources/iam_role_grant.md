@@ -24,6 +24,9 @@ Grants one role to one user group or user on an organization, cloud or project. 
 #
 # To manage a whole team, grant the role to the group once and change
 # who has access by editing the group's members.
+#
+# Step-by-step walkthrough of every role-binding type:
+# examples/resources/role_binding_workflow
 variable "project_id" {
   description = "ID of an existing Anyscale project (prj_...)"
   type        = string
