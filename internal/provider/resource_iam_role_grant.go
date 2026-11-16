@@ -140,7 +140,7 @@ func (r *IAMRoleGrantResource) Schema(ctx context.Context, req resource.SchemaRe
 	resp.Schema = schema.Schema{
 		MarkdownDescription: roleBindingsBetaBanner +
 			"Grants one role to one user group or user on an organization, cloud or project. " +
-			"Access granted this way is not visible to `anyscale_cloud_access`; see the [RBAC guide](../guides/rbac.md). " +
+			"Access granted this way is not visible to `anyscale_cloud_access`. " +
 			"A binding cannot be edited, so changing any argument replaces it. " +
 			"Don't manage one scope with both this resource and `anyscale_iam_role_binding` or `anyscale role-binding policy apply`: the binding resource and a policy apply revoke this resource's grants, and the next apply re-creates them. " +
 			"Requires an organization [converted to role bindings](../guides/rbac.md#organization-access-mode).",

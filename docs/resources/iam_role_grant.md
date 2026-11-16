@@ -4,14 +4,14 @@ page_title: "anyscale_iam_role_grant Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
   ~> Beta. Role bindings are enabled per organization by Anyscale while customers migrate; contact support@anyscale.com mailto:support@anyscale.com to enable them. Beta resources may change incompatibly; every breaking change is listed in the changelog. See the RBAC guide ../guides/rbac.md#role-bindings-beta.
-  Grants one role to one user group or user on an organization, cloud or project. Access granted this way is not visible to anyscale_cloud_access; see the RBAC guide ../guides/rbac.md. A binding cannot be edited, so changing any argument replaces it. Don't manage one scope with both this resource and anyscale_iam_role_binding or anyscale role-binding policy apply: the binding resource and a policy apply revoke this resource's grants, and the next apply re-creates them. Requires an organization converted to role bindings ../guides/rbac.md#organization-access-mode.
+  Grants one role to one user group or user on an organization, cloud or project. Access granted this way is not visible to anyscale_cloud_access. A binding cannot be edited, so changing any argument replaces it. Don't manage one scope with both this resource and anyscale_iam_role_binding or anyscale role-binding policy apply: the binding resource and a policy apply revoke this resource's grants, and the next apply re-creates them. Requires an organization converted to role bindings ../guides/rbac.md#organization-access-mode.
 ---
 
 # anyscale_iam_role_grant (Resource)
 
 ~> **Beta.** Role bindings are enabled per organization by Anyscale while customers migrate; contact [support@anyscale.com](mailto:support@anyscale.com) to enable them. Beta resources may change incompatibly; every breaking change is listed in the changelog. See the [RBAC guide](../guides/rbac.md#role-bindings-beta).
 
-Grants one role to one user group or user on an organization, cloud or project. Access granted this way is not visible to `anyscale_cloud_access`; see the [RBAC guide](../guides/rbac.md). A binding cannot be edited, so changing any argument replaces it. Don't manage one scope with both this resource and `anyscale_iam_role_binding` or `anyscale role-binding policy apply`: the binding resource and a policy apply revoke this resource's grants, and the next apply re-creates them. Requires an organization [converted to role bindings](../guides/rbac.md#organization-access-mode).
+Grants one role to one user group or user on an organization, cloud or project. Access granted this way is not visible to `anyscale_cloud_access`. A binding cannot be edited, so changing any argument replaces it. Don't manage one scope with both this resource and `anyscale_iam_role_binding` or `anyscale role-binding policy apply`: the binding resource and a policy apply revoke this resource's grants, and the next apply re-creates them. Requires an organization [converted to role bindings](../guides/rbac.md#organization-access-mode).
 
 ## Example Usage
 
@@ -22,8 +22,8 @@ Grants one role to one user group or user on an organization, cloud or project. 
 # user on exactly one of a cloud, a project, or the organization. A
 # binding cannot be edited: changing any argument replaces it.
 #
-# Prefer groups: grant a role to a group once, then change who has
-# access by editing the group's members.
+# To manage a whole team, grant the role to the group once and change
+# who has access by editing the group's members.
 variable "project_id" {
   description = "ID of an existing Anyscale project (prj_...)"
   type        = string
@@ -34,8 +34,8 @@ variable "org_role_name" {
   type        = string
 }
 
-data "anyscale_iam_role" "project_viewer" {
-  name = "project_viewer" # exact, case-sensitive
+data "anyscale_iam_role" "project_reader" {
+  name = "Project reader" # exact, case-sensitive
 }
 
 resource "anyscale_iam_user_group" "analysts" {
@@ -52,11 +52,11 @@ resource "anyscale_iam_user_group_members" "analysts" {
   ]
 }
 
-# What the group may do: every member gets project_viewer on this
+# What the group may do: every member gets Project reader on this
 # project.
-resource "anyscale_iam_role_grant" "analysts_project_viewer" {
+resource "anyscale_iam_role_grant" "analysts_project_reader" {
   user_group_id = anyscale_iam_user_group.analysts.id
-  role_id       = data.anyscale_iam_role.project_viewer.id
+  role_id       = data.anyscale_iam_role.project_reader.id
   # exactly one of cloud_id, project_id, organization_id
   project_id = var.project_id
 
@@ -92,9 +92,9 @@ data "anyscale_iam_organization_user" "carol" {
   email = "carol@example.com"
 }
 
-resource "anyscale_iam_role_grant" "carol_project_viewer" {
+resource "anyscale_iam_role_grant" "carol_project_reader" {
   user_id    = data.anyscale_iam_organization_user.carol.user_id
-  role_id    = data.anyscale_iam_role.project_viewer.id
+  role_id    = data.anyscale_iam_role.project_reader.id
   project_id = var.project_id
 }
 ```
@@ -133,9 +133,9 @@ The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/c
 #   scope_type is organization, cloud or project; principal_type is user
 #   or user_group. Fails, and creates nothing, if no such binding
 #   exists.
-terraform import anyscale_iam_role_grant.analysts_project_viewer project/prj_abc123/user_group/ug_abc123/rol_abc123
+terraform import anyscale_iam_role_grant.analysts_project_reader project/prj_abc123/user_group/ug_abc123/rol_abc123
 
 # Or by the role binding ID (rb_...), for a binding held by a user group
 # or by a user.
-terraform import anyscale_iam_role_grant.analysts_project_viewer rb_abc123
+terraform import anyscale_iam_role_grant.analysts_project_reader rb_abc123
 ```

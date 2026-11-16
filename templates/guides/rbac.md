@@ -2,17 +2,13 @@
 page_title: "RBAC: Roles Across Organizations, Clouds, and Projects"
 subcategory: "Concepts & Reference"
 description: |-
-  How access control is split across anyscale_iam_organization_user and anyscale_organization_user_role - which resource manages what, what "authoritative" means for a role resource, and why destroying anyscale_organization_user_role does not revert a person's role.
+  Managing access with this provider: organization membership and invitations, user groups, role grants and role bindings, organization access mode, legacy RBAC deprecation, and organization roles - which resource manages what.
 ---
 
 # RBAC: Roles Across Organizations, Clouds, and Projects
 
-Anyscale access control spans three scopes - organization, cloud, and project - and this provider
-manages them through more than one resource because the backend itself treats them as genuinely
-different concepts, not just different levels of the same one. This guide is the one place that
-explains the whole picture: which resource manages what, and what "authoritative" means for each.
-
-Read this before writing configuration that spans more than one scope.
+Anyscale access control spans three scopes: organization, cloud, and project. This guide covers the
+resources that manage membership, roles, and role bindings, and what each one is authoritative over.
 
 ## Which resource manages what
 
@@ -21,11 +17,7 @@ Read this before writing configuration that spans more than one scope.
 | Organization membership | [`anyscale_iam_organization_user`](../resources/iam_organization_user.md) | Whether the user is under Terraform management. It cannot create a member - people join by invitation - but declaring it adopts an existing member with no API call. Destroying it removes nobody: it cancels only a still-pending invitation this resource itself sent. |
 | Organization role | [`anyscale_organization_user_role`](../resources/organization_user_role.md) | One user's `base_role` and `deny_roles` in the organization. Authoritative over that one user's role - not over who is a member. |
 | User groups (Beta) | [`anyscale_iam_user_group`](../resources/iam_user_group.md), [`anyscale_iam_user_group_members`](../resources/iam_user_group_members.md) | A group's name, and its **entire** member list. Not what the group may access - see role bindings, next row. See [User groups (Beta)](#user-groups-beta). |
-| Role grants (Beta) | [`anyscale_iam_role_grant`](../resources/iam_role_grant.md), [`anyscale_iam_role_binding`](../resources/iam_role_binding.md), [`anyscale_iam_role`](../data-sources/iam_role.md) data source | One role held by one user group or one user on one cloud, project, or the organization (`anyscale_iam_role_grant`), or every direct role binding on a scope (`anyscale_iam_role_binding`). **Converted organizations only** - see [Organization access mode](#organization-access-mode). See [Role bindings (Beta)](#role-bindings-beta). |
-
-`anyscale_organization_user_role` uses the word "authoritative" to mean: authoritative over the one row
-it manages, never over a whole population - see
-[Authority](#authority-what-terraform-manages-here-actually-means), below.
+| Role grants (Beta) | [`anyscale_iam_role_grant`](../resources/iam_role_grant.md), [`anyscale_iam_role_binding`](../resources/iam_role_binding.md), [`anyscale_iam_role`](../data-sources/iam_role.md) and [`anyscale_iam_role_binding`](../data-sources/iam_role_binding.md) data sources | One role held by one user group or one user on one cloud, project, or the organization (`anyscale_iam_role_grant`), or every direct role binding on a scope (`anyscale_iam_role_binding`). **Converted organizations only** - see [Organization access mode](#organization-access-mode). See [Role bindings (Beta)](#role-bindings-beta). |
 
 ## Inviting people: limits, single sign-on, directory sync
 
@@ -54,7 +46,7 @@ are subject to the same constraints.
 - **Destroying never removes a member.** Destroying `anyscale_iam_organization_user` cancels only a
   still-pending invitation it sent, and never evicts anyone who had joined or was adopted. Destroying
   `anyscale_iam_organization_invitation` revokes a pending invitation and has no effect on an accepted
-  one. Removing someone's access is a deliberate act neither resource can do.
+  one. Neither resource can remove someone's access.
 
 ## User groups (Beta)
 
@@ -124,15 +116,13 @@ managed and can be imported.
 ### Destroying
 
 Destroying `anyscale_iam_user_group_members` removes every member and leaves the group. Destroying
-`anyscale_iam_user_group` removes the members first, then deletes the group. The members are removed
-first deliberately: deleting a group does not, on its own, revoke everything that was derived from
-its membership.
+`anyscale_iam_user_group` removes the members first, then deletes the group; deleting a group alone
+does not revoke access that was derived from its membership.
 
 ### Cost of a refresh
 
 Reading membership fetches the whole organization's group memberships once per
-`anyscale_iam_user_group_members`. That is fine for typical organizations; if you manage many groups,
-expect refreshes to scale with the number of groups.
+`anyscale_iam_user_group_members`, so refreshes scale with the number of groups you manage.
 
 ### Example
 
@@ -156,7 +146,8 @@ for a runnable configuration.
 
 Groups are one way to model a team. When you only need each person's *organization role*, which
 groups do not manage, a `locals` map keyed by email can drive both the invitation loop and the role
-loop:
+loop. `anyscale_organization_user_role` works in
+[unconverted organizations](#organization-access-mode) only:
 
 ```hcl
 locals {
@@ -179,15 +170,10 @@ resource "anyscale_organization_user_role" "team_member_roles" {
 }
 ```
 
-One map is the single source of truth for the whole team: adding a teammate is one line, in one
-place, and every resource that reads the map follows. This is the idiomatic Terraform answer for
-this shape. See the full staged workflow - invitation,
-then role, once the invitation is accepted - in
-[`examples/resources/organization_user_workflow`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/resources/organization_user_workflow).
-
 `anyscale_organization_user_role` requires an already-accepted member, so the role loop above
-cannot apply in the same run as the invitation loop for someone who has not yet accepted - stage
-it as a second `apply` once invitations are accepted, not a sign anything here is incomplete.
+cannot apply in the same run as the invitation loop for someone who has not yet accepted - apply
+it in a second run once invitations are accepted. See the full staged workflow in
+[`examples/resources/organization_user_workflow`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/resources/organization_user_workflow).
 
 ## Organization access mode
 
@@ -244,11 +230,14 @@ Role-binding writes are refused until the organization converts, so the move hap
 ```hcl
 locals {
   grants = {
-    analysts = { group = anyscale_iam_user_group.analysts.id, role = data.anyscale_iam_role.viewer.id }
+    analysts = {
+      group = anyscale_iam_user_group.analysts.id
+      role  = data.anyscale_iam_role.project_reader.id
+    }
   }
 }
 
-resource "anyscale_iam_role_grant" "viewer" {
+resource "anyscale_iam_role_grant" "project_reader" {
   for_each      = local.grants
   user_group_id = each.value.group
   role_id       = each.value.role
@@ -257,7 +246,7 @@ resource "anyscale_iam_role_grant" "viewer" {
 
 import {
   for_each = local.grants
-  to       = anyscale_iam_role_grant.viewer[each.key]
+  to       = anyscale_iam_role_grant.project_reader[each.key]
   id       = "project/${var.project_id}/user_group/${each.value.group}/${each.value.role}"
 }
 ```
@@ -279,8 +268,8 @@ None is available on an Azure control plane (see [Organization access mode](#org
 | `anyscale_organization_user_role` | Writes fail with "Organization Uses Role Bindings" | `anyscale_iam_role_grant` |
 | `anyscale_cloud.auto_add_user` | Setting it fails | An `anyscale_iam_role_grant` on the cloud for the All users group |
 | `auto_add_user` on the `anyscale_cloud` and `anyscale_clouds` data sources | No longer applies | Same |
-| `collaborators` on the `anyscale_project` data source | Null | No replacement yet |
-| `permission_level`, `base_role` and `additional_roles` on the `anyscale_iam_organization_user(s)` data sources; `organization_permission_level` on the `anyscale_user` data source | A snapshot from before conversion | No replacement yet |
+| `collaborators` on the `anyscale_project` data source | Null | [`anyscale_iam_role_binding`](../data-sources/iam_role_binding.md) data source with `project_id`; reading needs IAM management on the project |
+| `permission_level`, `base_role` and `additional_roles` on the `anyscale_iam_organization_user(s)` data sources; `organization_permission_level` on the `anyscale_user` data source | A snapshot from before conversion | [`anyscale_iam_role_binding`](../data-sources/iam_role_binding.md) data source with `organization_id`; reading needs IAM management on the organization |
 
 Terraform warns when a configuration uses one: setting a deprecated resource or attribute, or
 referencing a deprecated read-only attribute, for example in an output. For a referenced read-only
@@ -288,36 +277,29 @@ attribute, Terraform 1.15 prints the provider's message and Terraform 1.10 a gen
 ... is deprecated". To move a converted organization off them, follow the steps in
 [Organization access mode](#organization-access-mode).
 
-`terraform destroy` also plans the configuration first, and that plan reads every data source in
-it under the identity running the destroy - so destroy with an identity that can read each data
-source the configuration uses, such as role lookups.
-
 ## Role bindings (Beta)
 
 ~> **Beta, behind a feature flag.** Role bindings are a Beta feature. Beta resources can change
-incompatibly between provider versions - 0.37.0 renamed both of them, with no alias for the old
-names - so pin the provider version, and read the changelog before upgrading; every breaking
-change is listed there. Anyscale enables them per organization while customers migrate: contact
-support@anyscale.com for access. Without it, every call fails with "Role bindings are not enabled".
-The organization must also be [converted](#organization-access-mode).
+incompatibly between provider versions, so pin the provider version, and read the changelog before
+upgrading; every breaking change is listed there. Anyscale enables them per organization while
+customers migrate: contact support@anyscale.com for access. Without the flag, every call fails with
+"Role bindings are not enabled". The organization must also be [converted](#organization-access-mode).
 
-Vocabulary, if you know other IAM systems: these names follow the Anyscale CLI, not anybody
-else's. `anyscale_iam_role_grant` is **additive** and non-authoritative, like
-`google_project_iam_member` - it grants only what you declare and never removes other grants.
-`anyscale_iam_role_binding` owns **every** grant on one scope: more than `google_project_iam_binding`
-(which owns one role), and unlike a Kubernetes `RoleBinding`, which is additive. Each API object
-is still a "role binding" with an `rb_` ID - one `anyscale_iam_role_grant` creates exactly one,
-so someone tracing an `rb_` ID from the console or API lands on the grant resource.
+`anyscale_iam_role_grant` is additive: it grants only what you declare and never removes other
+grants. `anyscale_iam_role_binding` is authoritative over every direct grant on one scope. Each API
+object is a role binding with an `rb_` ID, and one `anyscale_iam_role_grant` creates exactly one, so
+an `rb_` ID traced from the console or API corresponds to one grant resource.
 
 `anyscale_iam_role_grant` grants **one role to one user group or one user on one scope** - exactly one of
 `user_group_id` or `user_id`, and exactly one of `cloud_id`,
 `project_id`, or `organization_id`. Look up the role with the [`anyscale_iam_role`](../data-sources/iam_role.md)
-data source, which resolves a role by its exact, case-sensitive `name`. Which role names exist depends on
-your organization; ask support@anyscale.com which built-in roles are enabled.
+data source, which resolves a role by its exact, case-sensitive `name`. Built-in role names include,
+for example, `Project reader`, `Project writer`, `Project owner`, `Cloud writer`, `Cloud owner`,
+`Organization owner` and `Organization collaborator`.
 
 ```hcl
-data "anyscale_iam_role" "viewer" {
-  name = "project_viewer" # exact, case-sensitive; archived roles are not found
+data "anyscale_iam_role" "project_reader" {
+  name = "Project reader" # exact, case-sensitive; archived roles are not found
 }
 
 resource "anyscale_iam_user_group" "analysts" {
@@ -329,9 +311,9 @@ resource "anyscale_iam_user_group_members" "analysts" {
   members       = ["alice@example.com", "bob@example.com"] # must already be organization members
 }
 
-resource "anyscale_iam_role_grant" "analysts_viewer" {
+resource "anyscale_iam_role_grant" "analysts_project_reader" {
   user_group_id = anyscale_iam_user_group.analysts.id
-  role_id       = data.anyscale_iam_role.viewer.id
+  role_id       = data.anyscale_iam_role.project_reader.id
   project_id    = var.project_id # exactly one of cloud_id / project_id / organization_id
 }
 ```
@@ -350,9 +332,9 @@ data "anyscale_iam_organization_user" "alice" {
   email = "alice@example.com"
 }
 
-resource "anyscale_iam_role_grant" "alice_viewer" {
+resource "anyscale_iam_role_grant" "alice_project_reader" {
   user_id    = data.anyscale_iam_organization_user.alice.user_id
-  role_id    = data.anyscale_iam_role.viewer.id
+  role_id    = data.anyscale_iam_role.project_reader.id
   project_id = var.project_id
 }
 ```
@@ -369,6 +351,10 @@ group is never briefly without access.
 Bindings are **not authoritative**: Terraform manages only the bindings you declare, never the full set
 on a cloud, project, or organization. Declaring a binding that already exists fails with a conflict;
 `terraform import anyscale_iam_role_grant.<name> <binding id>` to adopt it.
+
+`terraform destroy` plans the configuration first, and that plan reads every data source in it under
+the identity running the destroy - so destroy with an identity that can read each data source the
+configuration uses, such as role lookups.
 
 ### Managing every grant on a scope: `anyscale_iam_role_binding`
 
@@ -402,25 +388,25 @@ access to a scope; use `anyscale_iam_role_grant` when several owners share it.
 
 ### Directory-synced groups
 
-Directory-synced (SCIM) groups can be bound; unlike membership, nothing here fights the identity
-provider.
+Directory-synced (SCIM) groups can be named in grants and `anyscale_iam_role_binding` policies. The
+identity provider keeps owning the group's membership.
+
+### Keeping your own access
 
 ~> **Do not revoke your own way in.** Anyscale refuses adding a role to the organization admin
-group and refuses revoking any of its bindings. A converted organization freezes those bindings, so
-an authoritative `anyscale_iam_role_binding` apply that would revoke one fails with "Policy Would
-Revoke a Frozen Role Binding" (name the binding in `roles` to keep it), while a destroy keeps the
-binding; the destroy plan ("Destroy Revokes Role Bindings") lists what it keeps. It also refuses revoking
-the provider's own direct binding. It does **not** stop a
-configuration from removing a *group* binding that gives the Terraform identity its permission to manage
-access. If the identity depends on a group binding you destroy, later applies fail until someone restores
-it in the console. Keep the grant that the Terraform identity relies on out of any configuration you might
-destroy, or bind that identity directly.
+group and refuses revoking any of its bindings. A converted organization freezes those bindings: an
+`anyscale_iam_role_binding` apply that would revoke one fails with "Policy Would Revoke a Frozen
+Role Binding" (name the binding in `roles` to keep it), and a destroy keeps it; the destroy plan
+lists what it keeps. Revoking the provider's own direct binding is refused too. Removing a *group*
+binding that gives the Terraform identity its permission to manage access is not refused: if the
+identity depends on a group binding you destroy, later applies fail until someone restores it in the
+console. Keep the grant the Terraform identity relies on out of any configuration you might destroy,
+or bind that identity directly.
 
 ### Role and scope must make sense together
 
 The API does not check that a role suits the scope: binding an organization-only role to a cloud is
 accepted and has no effect. Roles are referenced by ID, so renaming a role never replaces a binding.
-Whether the roles you bind are enforced depends on Anyscale's rollout of them.
 
 ### Diagnostics
 
@@ -443,84 +429,17 @@ Whether the roles you bind are enforced depends on Anyscale's rollout of them.
 | Binding disappears from state | It was revoked outside Terraform, or its group was deleted; the next plan recreates it. |
 | "Role Binding Not Readable" | The cloud or project was deleted outside Terraform, access to it was lost, or this identity does not manage IAM on it (run the destroy as one that does). State is kept; run `terraform state rm` for the binding if the scope is gone. |
 
-## Authority: what "Terraform manages here" actually means
+## `anyscale_organization_user_role`: authority and destroy
 
-`anyscale_organization_user_role` uses the word "authoritative" to mean: authoritative over the one
-row it manages, never over a whole population. It is authoritative over one user's organization role -
-`base_role` and `deny_roles` for that person - and has no opinion about anyone else. It does not
-discover or revoke anyone Terraform was not explicitly told to manage - a person nobody wrote a
-resource for is invisible to it, not evicted by it.
+`anyscale_organization_user_role` manages one member's `base_role` and `deny_roles` and no other
+member's. `base_role` is required, with no default. A `terraform destroy` of this resource does not
+revert the role:
 
-This resource makes a deliberate design choice: `base_role` is **required**, with no default value. A
-default would need to pick some role for a bare first `apply` against a person who already holds real
-access - and if that default were ever lower than what someone actually holds, adopting them under
-Terraform would silently demote them on the very first `apply`, with nothing unusual in the plan to
-catch it. Stating the role explicitly every time trades a small amount of config brevity for making
-sure a demotion, if it ever happens, is a value you typed and can see in the diff - never a fallback
-you didn't choose.
-
-**One sharp edge is worth flagging before the details below:** `anyscale_organization_user_role`'s
-destroy can **leave a privilege behind** - an owner stays an owner - and can even **grant new
-capability**, by lifting a declared `deny_roles` restriction. Neither is a bug; both follow from the
-same rule explained next.
-
-This resource's `destroy` can also fail to fully complete - see
-["Destroying `anyscale_organization_user_role`"](#destroying-anyscale_organization_user_role-what-actually-happens)
-below for the details.
-
-## Destroying `anyscale_organization_user_role`: what actually happens
-
-`terraform destroy` on this resource does **not** revert or remove the person's role the way destroying
-most resources removes the thing they manage. Read this before your first `destroy` - the behavior is
-asymmetric between the resource's two fields, and it is easy to assume wrong in either direction.
-
-**`base_role` is left exactly as it is.** Every organization member always has some `base_role` - there
-is no absent state for it to revert to, so this resource manages a value, not a grant, and destroy has
-nothing to remove, only something it could change. Reverting to a fresh-member default on destroy was
-considered and rejected: demoting an organization owner to collaborator strips their access to every
-cloud in the organization, and every organization must have at least one owner - so a destroy that
-silently reverted `base_role` could, on an org's last owner, either fail outright or leave the
-organization with nobody able to administer it. A `destroy` whose plan says "destroy 1 resource" must
-never be able to do that, so this resource does not attempt it. The person keeps whatever role they held
-at the moment of destroy, indefinitely, until someone writes a different value some other way.
-
-**`deny_roles` is different, because it genuinely has an absent state.** If your configuration declared
-`deny_roles`, destroy clears them back to empty - this resource took authority over that value, so
-destroying it releases that authority cleanly. If your configuration never declared `deny_roles`
-(leaving it at its `Optional`+`Computed` default), destroy leaves it untouched too, the same as
-`base_role` - this resource never took authority over a value it was never told to manage.
-
-**Read that clearing carefully: it is not a reduction.** `deny_roles` are restrictions, so clearing a
-declared set back to empty *increases* that person's access - the one destroy in this provider that
-grants capability rather than removing it. Destroying this resource for someone whose configuration
-declared `deny_roles = ["image_reader_no_base_images"]` lifts that restriction and lets them read
-container images they could not read before. This is deliberate and documented, not a bug - it follows
-from the same rule as everything else on this page, that destroy releases authority over what was
-declared - but it is worth stating in these words, because nothing about the word "destroy" suggests a
-grant of new access.
-
-**Destroy is never silent about any of this.** It emits a warning diagnostic naming the person's email
-and exactly what was left in place, so "nothing changed about this person's access" is always something
-you can see in the `terraform destroy` output, not something you have to already know to expect.
-
-Two more things worth knowing before you destroy this resource in practice: clearing a declared
-`deny_roles` on destroy goes through the same gated endpoint a write to it always uses, so a destroy can
-fail with the same feature-gate diagnostic a `deny_roles` apply can; and destroying your own role
-resource hits the same self-modification restriction every scope in this provider enforces - expect a
-clear error naming that restriction, not a silent no-op, if you try.
-
-**A typo'd `email` has the same consequence, through a different path.** `email` is the value that
-identifies which person this resource manages, and changing it - including fixing a typo - replaces the
-resource: Terraform destroys the instance for the old address and creates a new one for the corrected
-one. Destroying the old instance is exactly the state-only behavior described above, so the person at
-the mistyped address keeps whatever role Terraform last gave them, indefinitely, with no automatic
-cleanup. Read `terraform plan` before applying an `email` change for exactly this reason.
-
-## Known values, since role names are not enforced by this provider's schema
-
-The valid values for `base_role`, `deny_roles`, and `permission_level` are enforced by the Anyscale
-API, not validated ahead of time by this provider's schema - the API adds new roles faster than a
-provider release cycle could keep a hard-coded list current. Each attribute's own schema description
-lists the values known at the time this was written; treat that list as a helpful starting point, not
-an exhaustive one, and expect a role name your configuration sends to fail at `apply` time (with the
-API's own error) rather than at `terraform plan` time if it's wrong or no longer current.
+- `base_role` is left exactly as it is, and the destroy warns, naming the member's email and the role.
+- A declared `deny_roles` is cleared to empty; `deny_roles` are restrictions, so this **increases**
+  that member's access. An undeclared `deny_roles` is left untouched.
+- Clearing a declared `deny_roles` uses the same gated endpoint an apply to it uses, so the destroy
+  can fail the same way the apply can.
+- You cannot destroy your own role resource: self-modification is refused with an error.
+- Changing `email` - including fixing a typo - replaces the resource; the person at the old address
+  keeps the role Terraform last gave them, with no automatic cleanup.

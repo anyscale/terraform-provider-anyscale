@@ -5,9 +5,9 @@ subcategory: ""
 description: |-
   ~> Deprecated for organizations converted to role bindings; use anyscale_iam_role_grant there. Unconverted organizations keep using this resource. Not available on Azure, where access is managed in the Azure portal. See Legacy RBAC deprecation ../guides/rbac.md#legacy-rbac-deprecation.
   Manages the complete member list of one Anyscale cloud: cloud roles, deny roles, and each member's project roles on the projects your configuration names. A converted organization ../guides/rbac.md#organization-access-mode refuses these writes.
-  ~> This resource is authoritative. Any member not declared in member is revoked, including people granted access in the Anyscale console and including on the first apply; those members appear nowhere in plan output. Read the RBAC guide ../guides/rbac.md before your first apply against a production cloud.
+  ~> This resource is authoritative. Any member not declared in member is revoked, including people granted access in the Anyscale console and including on the first apply; those members appear nowhere in plan output.
   A clean plan is not proof that nobody has unintended access: organization admins and your own identity are invisible to this resource, project roles are compared only for the projects you name, and a console role change between writer and owner is not detected. Only manage a given cloud from one Terraform state, and put lifecycle { prevent_destroy = true } on production clouds. A project role for a member with no cloud role is a plan-time error.
-  The resource refuses to create or update when the cloud has auto_add_user enabled, or a group policy binding when the apply would revoke someone (destroy still proceeds); turning auto_add_user off does not remove the collaborators it already added, so the first apply after that revokes everyone you do not declare. Binding detection is best-effort: when the check is inconclusive the resource warns and proceeds. It is unavailable (501) in organizations without the cloud roles API; reading and writing are gated by two separate feature flags with the same response, so ask Anyscale support to enable both. See the RBAC guide ../guides/rbac.md for the unmanaged_grants/ungranted_members diagnostics.
+  The resource refuses to create or update when the cloud has auto_add_user enabled, or a group policy binding when the apply would revoke someone (destroy still proceeds); turning auto_add_user off does not remove the collaborators it already added, so the first apply after that revokes everyone you do not declare. Binding detection is best-effort: when the check is inconclusive the resource warns and proceeds. It is unavailable (501) in organizations without the cloud roles API; reading and writing are gated by two separate feature flags with the same response, so ask Anyscale support to enable both.
 ---
 
 # anyscale_cloud_access (Resource)
@@ -16,11 +16,11 @@ description: |-
 
 Manages the **complete** member list of one Anyscale cloud: cloud roles, deny roles, and each member's project roles on the projects your configuration names. A [converted organization](../guides/rbac.md#organization-access-mode) refuses these writes.
 
-~> **This resource is authoritative.** Any member not declared in `member` is **revoked**, including people granted access in the Anyscale console and including on the **first** apply; those members appear nowhere in plan output. Read the [RBAC guide](../guides/rbac.md) before your first apply against a production cloud.
+~> **This resource is authoritative.** Any member not declared in `member` is **revoked**, including people granted access in the Anyscale console and including on the **first** apply; those members appear nowhere in plan output.
 
 A clean plan is not proof that nobody has unintended access: organization admins and your own identity are invisible to this resource, project roles are compared only for the projects you name, and a console role change between `writer` and `owner` is not detected. Only manage a given cloud from one Terraform state, and put `lifecycle { prevent_destroy = true }` on production clouds. A project role for a member with no cloud role is a plan-time error.
 
-The resource refuses to create or update when the cloud has `auto_add_user` enabled, or a group policy binding when the apply would revoke someone (destroy still proceeds); turning `auto_add_user` off does not remove the collaborators it already added, so the first apply after that revokes everyone you do not declare. Binding detection is best-effort: when the check is inconclusive the resource warns and proceeds. It is unavailable (`501`) in organizations without the cloud roles API; reading and writing are gated by two separate feature flags with the same response, so ask Anyscale support to enable both. See the [RBAC guide](../guides/rbac.md) for the `unmanaged_grants`/`ungranted_members` diagnostics.
+The resource refuses to create or update when the cloud has `auto_add_user` enabled, or a group policy binding when the apply would revoke someone (destroy still proceeds); turning `auto_add_user` off does not remove the collaborators it already added, so the first apply after that revokes everyone you do not declare. Binding detection is best-effort: when the check is inconclusive the resource warns and proceeds. It is unavailable (`501`) in organizations without the cloud roles API; reading and writing are gated by two separate feature flags with the same response, so ask Anyscale support to enable both.
 
 ## Example Usage
 
@@ -29,17 +29,13 @@ The resource refuses to create or update when the cloud has `auto_add_user` enab
 # anyscale_cloud_access is AUTHORITATIVE over this cloud's entire member
 # list. Anyone with access to the cloud who is not declared in `member`
 # below is REVOKED, including on the very first apply -- including
-# people granted access through the console. Before running this against
-# a real cloud for the first time, list its current members (console or
-# `terraform import`, see import.sh) and declare every one of them here;
-# a member you forget to declare is revoked silently and does not appear
-# anywhere in `terraform plan`'s output.
+# people granted access through the console. A member you forget to
+# declare is revoked silently and never appears in `terraform plan`'s
+# output. Before the first apply against an existing cloud, import it
+# (see import.sh) and declare every current member here.
 #
-# lifecycle.prevent_destroy guards against the sharpest failure mode:
-# destroying this resource, or replacing it because of a typo in
-# cloud_id, correctly-per-its-own-logic revokes every member of
-# whichever cloud_id it was pointed at. Keep this on for any cloud you
-# cannot afford to depopulate by accident.
+# lifecycle.prevent_destroy: destroying or replacing this resource
+# revokes every member of whichever cloud it is pointed at.
 resource "anyscale_cloud_access" "production" {
   cloud_id = "cld_00000000000000000000000000"
 
@@ -67,8 +63,7 @@ resource "anyscale_cloud_access" "production" {
     "engineer@example.com" = {
       base_role = "writer"
 
-      # Project vocabulary is "write", not "writer" -- the two scopes
-      # genuinely differ.
+      # Project vocabulary is "write"; "writer" is a cloud role.
       projects = {
         "prj_00000000000000000000000000" = "write"
       }
@@ -76,11 +71,9 @@ resource "anyscale_cloud_access" "production" {
   }
 }
 
-# unmanaged_grants and ungranted_members report opposite failures --
-# alert on both rather than trusting a clean plan alone. A nonzero
-# unmanaged_grants means someone has access this configuration says they
-# shouldn't; a nonzero ungranted_members means someone lacks access this
-# configuration says they should have.
+# A non-empty unmanaged_grants means someone still has access this
+# configuration does not declare; a non-empty ungranted_members means
+# someone lacks access it does declare. Alert on both.
 #   length(anyscale_cloud_access.production.unmanaged_grants) > 0
 #   length(anyscale_cloud_access.production.ungranted_members) > 0
 output "production_unmanaged_grants" {
@@ -100,7 +93,7 @@ output "production_ungranted_members" {
 ### Required
 
 - `cloud_id` (String) ID of the cloud whose member list this resource owns. Changing it replaces the resource, which revokes the members of the *old* cloud - review such a plan carefully.
-- `member` (Attributes Map) The complete set of members for this cloud, keyed by email address. **Anyone not listed is revoked**, including people granted access in the console and on the first apply. Keys that differ only in case are rejected at plan time. Declaring an organization admin is a plan-time error where the check can run (best-effort; otherwise it fails safely at apply). See the [RBAC guide](../guides/rbac.md). (see [below for nested schema](#nestedatt--member))
+- `member` (Attributes Map) The complete set of members for this cloud, keyed by email address. **Anyone not listed is revoked**, including people granted access in the console and on the first apply. Keys that differ only in case are rejected at plan time. Declaring an organization admin is a plan-time error where the check can run (best-effort; otherwise it fails safely at apply). (see [below for nested schema](#nestedatt--member))
 
 ### Optional
 
@@ -131,9 +124,9 @@ Optional:
 
 Optional:
 
-- `create` (String) Maximum time to wait for a create's reconcile to finish, including every per-write retry (e.g. `2m`, `10m`). Defaults to `5m` - real headroom even for a large member map with several retried transient failures. Purely local to this provider - never sent to or read from the Anyscale API.
-- `delete` (String) Maximum time to wait for destroy's revoke pass to finish. Same default and rationale as `create`.
-- `update` (String) Maximum time to wait for an update's reconcile to finish. Same default and rationale as `create`.
+- `create` (String) Maximum time to wait for a create's reconcile to finish, including every per-write retry (e.g. `2m`, `10m`). Defaults to `5m`. Local to this provider - never sent to or read from the Anyscale API.
+- `delete` (String) Maximum time to wait for destroy's revoke pass to finish. Defaults to `5m`, like `create`.
+- `update` (String) Maximum time to wait for an update's reconcile to finish. Defaults to `5m`, like `create`.
 
 
 <a id="nestedatt--ungranted_members"></a>
@@ -162,12 +155,11 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Import by cloud_id -- the same value the resource is keyed by. Do this
-# before your first `apply` against any cloud you did not create through
-# this resource: because Create is just as authoritative as Update,
-# applying against a cloud with real, undeclared members revokes them
-# exactly as an Update would. Import first, write your configuration to
-# match what came back (`terraform plan` will show you the difference if
-# it doesn't), and only then start changing it.
+# Import by cloud_id, the same value the resource is keyed by. Create is
+# as authoritative as Update, so applying against a cloud with real,
+# undeclared members revokes them: import before your first apply
+# against any cloud you did not create through this resource, write
+# your configuration to match what came back, and only then start
+# changing it.
 terraform import anyscale_cloud_access.production cld_00000000000000000000000000
 ```

@@ -26,9 +26,8 @@ import (
 // defaultCloudAccessTimeout bounds one Create/Update/Delete reconcile,
 // including every per-write retry the bounded policy permits
 // (3 attempts per write, exponential backoff capped at
-// cloudAccessRetryMaxBackoff). 5 minutes gives
-// real headroom even for a large member map with several retried transient
-// failures, while still being a real bound rather than an unbounded reconcile.
+// cloudAccessRetryMaxBackoff). 5 minutes covers a large member map
+// with several retried transient failures.
 const defaultCloudAccessTimeout = 5 * time.Minute
 
 // anyscale_cloud_access - AUTHORITATIVE over one cloud's entire member list.
@@ -196,9 +195,9 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 		DeprecationMessage: legacyRBACResourceDeprecation,
 		MarkdownDescription: legacyRBACResourceCallout() + "\n\n" +
 			"Manages the **complete** member list of one Anyscale cloud: cloud roles, deny roles, and each member's project roles on the projects your configuration names. A [converted organization](../guides/rbac.md#organization-access-mode) refuses these writes.\n\n" +
-			"~> **This resource is authoritative.** Any member not declared in `member` is **revoked**, including people granted access in the Anyscale console and including on the **first** apply; those members appear nowhere in plan output. Read the [RBAC guide](../guides/rbac.md) before your first apply against a production cloud.\n\n" +
+			"~> **This resource is authoritative.** Any member not declared in `member` is **revoked**, including people granted access in the Anyscale console and including on the **first** apply; those members appear nowhere in plan output.\n\n" +
 			"A clean plan is not proof that nobody has unintended access: organization admins and your own identity are invisible to this resource, project roles are compared only for the projects you name, and a console role change between `writer` and `owner` is not detected. Only manage a given cloud from one Terraform state, and put `lifecycle { prevent_destroy = true }` on production clouds. A project role for a member with no cloud role is a plan-time error.\n\n" +
-			"The resource refuses to create or update when the cloud has `auto_add_user` enabled, or a group policy binding when the apply would revoke someone (destroy still proceeds); turning `auto_add_user` off does not remove the collaborators it already added, so the first apply after that revokes everyone you do not declare. Binding detection is best-effort: when the check is inconclusive the resource warns and proceeds. It is unavailable (`501`) in organizations without the cloud roles API; reading and writing are gated by two separate feature flags with the same response, so ask Anyscale support to enable both. See the [RBAC guide](../guides/rbac.md) for the `unmanaged_grants`/`ungranted_members` diagnostics.",
+			"The resource refuses to create or update when the cloud has `auto_add_user` enabled, or a group policy binding when the apply would revoke someone (destroy still proceeds); turning `auto_add_user` off does not remove the collaborators it already added, so the first apply after that revokes everyone you do not declare. Binding detection is best-effort: when the check is inconclusive the resource warns and proceeds. It is unavailable (`501`) in organizations without the cloud roles API; reading and writing are gated by two separate feature flags with the same response, so ask Anyscale support to enable both.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
@@ -231,7 +230,7 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 			},
 			"member": schema.MapNestedAttribute{
 				Required:            true,
-				MarkdownDescription: "The complete set of members for this cloud, keyed by email address. **Anyone not listed is revoked**, including people granted access in the console and on the first apply. Keys that differ only in case are rejected at plan time. Declaring an organization admin is a plan-time error where the check can run (best-effort; otherwise it fails safely at apply). See the [RBAC guide](../guides/rbac.md).",
+				MarkdownDescription: "The complete set of members for this cloud, keyed by email address. **Anyone not listed is revoked**, including people granted access in the console and on the first apply. Keys that differ only in case are rejected at plan time. Declaring an organization admin is a plan-time error where the check can run (best-effort; otherwise it fails safely at apply).",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"base_role": schema.StringAttribute{
@@ -332,11 +331,10 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 				Update: true,
 				Delete: true,
 				CreateDescription: "Maximum time to wait for a create's reconcile to finish, including every per-write " +
-					"retry (e.g. `2m`, `10m`). Defaults to `5m` - real headroom even for a large member map with " +
-					"several retried transient failures. Purely local to this provider - never sent to or read from the " +
+					"retry (e.g. `2m`, `10m`). Defaults to `5m`. Local to this provider - never sent to or read from the " +
 					"Anyscale API.",
-				UpdateDescription: "Maximum time to wait for an update's reconcile to finish. Same default and rationale as `create`.",
-				DeleteDescription: "Maximum time to wait for destroy's revoke pass to finish. Same default and rationale as `create`.",
+				UpdateDescription: "Maximum time to wait for an update's reconcile to finish. Defaults to `5m`, like `create`.",
+				DeleteDescription: "Maximum time to wait for destroy's revoke pass to finish. Defaults to `5m`, like `create`.",
 			}),
 		},
 	}
