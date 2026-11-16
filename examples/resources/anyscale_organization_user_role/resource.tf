@@ -7,34 +7,22 @@ resource "anyscale_organization_user_role" "analyst" {
   email     = "analyst@example.com"
   base_role = "collaborator"
 
-  # deny_roles is omitted here. Omitting it leaves any existing
-  # container-image restrictions untouched and keeps this resource on
-  # the endpoint that works in every organization -- setting deny_roles
-  # at all requires a feature flag that is not enabled in every
-  # organization.
+  # deny_roles is omitted here. Omitting it leaves existing image
+  # restrictions untouched. Declaring deny_roles requires a feature
+  # flag that is not enabled in every organization.
 }
 
-# Set both base_role and deny_roles. This goes through a different,
-# gated API endpoint than base_role alone -- see this resource's own
-# documentation before relying on it in an organization you do not
-# control. Note that these deny roles restrict organization OWNERS too
-# -- there is no "owners are exempt" carve-out at this scope.
+# Set both base_role and deny_roles. Setting deny_roles routes through
+# a gated API endpoint (see this resource's documentation). These deny
+# roles also restrict organization owners.
 resource "anyscale_organization_user_role" "restricted_owner" {
   email      = "owner@example.com"
   base_role  = "owner"
   deny_roles = ["image_reader_no_base_images"]
 }
 
-# Two things worth knowing before your first apply, both explained fully
-# on this resource's own doc page and in the RBAC guide: destroying this
-# resource does not revert base_role -- an organization member always
-# has some role, so there is nothing to revert to, and reverting could
-# demote or lock out an owner -- and changing email (including fixing a
-# typo) replaces the resource, leaving whoever was at the old address
-# with whatever role they last had.
-
-# user_id and identity_id are resolved automatically from email -- you
-# never need to look either of them up yourself.
+# Destroy leaves the member's base_role unchanged; changing email
+# replaces the resource.
 output "analyst_user_id" {
   value       = anyscale_organization_user_role.analyst.user_id
   description = "The resolved user_id backing this role assignment"

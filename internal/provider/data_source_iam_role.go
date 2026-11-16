@@ -49,7 +49,7 @@ func (d *IAMRoleDataSource) Schema(ctx context.Context, req datasource.SchemaReq
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The role name, matched exactly, including case. Names can change; a binding refers to the role by `id`, so a rename does not affect existing bindings.",
+				MarkdownDescription: "The role name, matched exactly, including case, for example `Project reader`. Names can change; a binding refers to the role by `id`, so a rename does not affect existing bindings.",
 				Validators:          []validator.String{stringvalidator.LengthAtLeast(1)},
 			},
 			"id": schema.StringAttribute{

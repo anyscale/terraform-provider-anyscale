@@ -4,8 +4,8 @@
 # user on exactly one of a cloud, a project, or the organization. A
 # binding cannot be edited: changing any argument replaces it.
 #
-# Prefer groups: grant a role to a group once, then change who has
-# access by editing the group's members.
+# To manage a whole team, grant the role to the group once and change
+# who has access by editing the group's members.
 variable "project_id" {
   description = "ID of an existing Anyscale project (prj_...)"
   type        = string
@@ -16,8 +16,8 @@ variable "org_role_name" {
   type        = string
 }
 
-data "anyscale_iam_role" "project_viewer" {
-  name = "project_viewer" # exact, case-sensitive
+data "anyscale_iam_role" "project_reader" {
+  name = "Project reader" # exact, case-sensitive
 }
 
 resource "anyscale_iam_user_group" "analysts" {
@@ -34,11 +34,11 @@ resource "anyscale_iam_user_group_members" "analysts" {
   ]
 }
 
-# What the group may do: every member gets project_viewer on this
+# What the group may do: every member gets Project reader on this
 # project.
-resource "anyscale_iam_role_grant" "analysts_project_viewer" {
+resource "anyscale_iam_role_grant" "analysts_project_reader" {
   user_group_id = anyscale_iam_user_group.analysts.id
-  role_id       = data.anyscale_iam_role.project_viewer.id
+  role_id       = data.anyscale_iam_role.project_reader.id
   # exactly one of cloud_id, project_id, organization_id
   project_id = var.project_id
 
@@ -74,8 +74,8 @@ data "anyscale_iam_organization_user" "carol" {
   email = "carol@example.com"
 }
 
-resource "anyscale_iam_role_grant" "carol_project_viewer" {
+resource "anyscale_iam_role_grant" "carol_project_reader" {
   user_id    = data.anyscale_iam_organization_user.carol.user_id
-  role_id    = data.anyscale_iam_role.project_viewer.id
+  role_id    = data.anyscale_iam_role.project_reader.id
   project_id = var.project_id
 }

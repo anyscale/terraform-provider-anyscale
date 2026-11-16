@@ -7,9 +7,9 @@ description: |-
   Manages one organization member's organization-scope role. A converted organization ../guides/rbac.md#organization-access-mode refuses these writes.
   This resource manages the role of a user who is already a member of the organization; it does not add or remove members. Membership is managed by anyscale_iam_organization_user.
   Destroying this resource does not revert base_role
-  Destroy leaves the member at whatever base_role they currently have, and emits a warning naming them and that role. It does not demote them, because an organization member always has some base role - there is no "no role" state to return them to - and demoting an organization owner removes their implicit permissions across every cloud in the organization. If deny_roles was declared, destroy does clear it to empty, since an empty deny set is a real, reachable state this resource took authority over.
-  A consequence worth stating plainly: because email forces replacement, correcting a typo in email leaves the previously-named person at the role Terraform gave them, permanently. Terraform destroys the old resource and creates a new one, and the destroy does not revert the role. Review the plan; the provider cannot distinguish a typo from a deliberate change of subject.
-  Organization roles are not cloud roles. The vocabularies differ and the same words mean different things at different scopes - collaborator is an organization base role and a cloud base role with different meanings. See the RBAC guide ../guides/rbac.md before mixing them.
+  Destroy leaves the member at whatever base_role they currently have and emits a warning naming them and that role. If deny_roles was declared, destroy clears it to empty.
+  Because email forces replacement, correcting a typo in email leaves the previously-named person at the role Terraform gave them: Terraform destroys the old resource and creates a new one, and the destroy does not revert the role. Review the plan.
+  Organization roles are not cloud roles. The same words mean different things at different scopes - collaborator is an organization base role and a cloud base role with different meanings.
   deny_roles requires a feature that is not enabled in every organization. Managing base_role alone uses an endpoint that works everywhere. See the deny_roles description.
 ---
 
@@ -23,11 +23,11 @@ This resource manages the role of a user who is **already** a member of the orga
 
 ### Destroying this resource does not revert `base_role`
 
-Destroy leaves the member at whatever `base_role` they currently have, and emits a warning naming them and that role. It does **not** demote them, because an organization member always has *some* base role - there is no "no role" state to return them to - and demoting an organization owner removes their implicit permissions across every cloud in the organization. If `deny_roles` was declared, destroy does clear it to empty, since an empty deny set is a real, reachable state this resource took authority over.
+Destroy leaves the member at whatever `base_role` they currently have and emits a warning naming them and that role. If `deny_roles` was declared, destroy clears it to empty.
 
-A consequence worth stating plainly: because `email` forces replacement, **correcting a typo in `email` leaves the previously-named person at the role Terraform gave them**, permanently. Terraform destroys the old resource and creates a new one, and the destroy does not revert the role. Review the plan; the provider cannot distinguish a typo from a deliberate change of subject.
+Because `email` forces replacement, **correcting a typo in `email` leaves the previously-named person at the role Terraform gave them**: Terraform destroys the old resource and creates a new one, and the destroy does not revert the role. Review the plan.
 
-**Organization roles are not cloud roles.** The vocabularies differ and the same words mean different things at different scopes - `collaborator` is an organization base role *and* a cloud base role with different meanings. See the [RBAC guide](../guides/rbac.md) before mixing them.
+**Organization roles are not cloud roles.** The same words mean different things at different scopes - `collaborator` is an organization base role *and* a cloud base role with different meanings.
 
 **`deny_roles` requires a feature that is not enabled in every organization.** Managing `base_role` alone uses an endpoint that works everywhere. See the `deny_roles` description.
 
@@ -43,34 +43,22 @@ resource "anyscale_organization_user_role" "analyst" {
   email     = "analyst@example.com"
   base_role = "collaborator"
 
-  # deny_roles is omitted here. Omitting it leaves any existing
-  # container-image restrictions untouched and keeps this resource on
-  # the endpoint that works in every organization -- setting deny_roles
-  # at all requires a feature flag that is not enabled in every
-  # organization.
+  # deny_roles is omitted here. Omitting it leaves existing image
+  # restrictions untouched. Declaring deny_roles requires a feature
+  # flag that is not enabled in every organization.
 }
 
-# Set both base_role and deny_roles. This goes through a different,
-# gated API endpoint than base_role alone -- see this resource's own
-# documentation before relying on it in an organization you do not
-# control. Note that these deny roles restrict organization OWNERS too
-# -- there is no "owners are exempt" carve-out at this scope.
+# Set both base_role and deny_roles. Setting deny_roles routes through
+# a gated API endpoint (see this resource's documentation). These deny
+# roles also restrict organization owners.
 resource "anyscale_organization_user_role" "restricted_owner" {
   email      = "owner@example.com"
   base_role  = "owner"
   deny_roles = ["image_reader_no_base_images"]
 }
 
-# Two things worth knowing before your first apply, both explained fully
-# on this resource's own doc page and in the RBAC guide: destroying this
-# resource does not revert base_role -- an organization member always
-# has some role, so there is nothing to revert to, and reverting could
-# demote or lock out an owner -- and changing email (including fixing a
-# typo) replaces the resource, leaving whoever was at the old address
-# with whatever role they last had.
-
-# user_id and identity_id are resolved automatically from email -- you
-# never need to look either of them up yourself.
+# Destroy leaves the member's base_role unchanged; changing email
+# replaces the resource.
 output "analyst_user_id" {
   value       = anyscale_organization_user_role.analyst.user_id
   description = "The resolved user_id backing this role assignment"
@@ -87,7 +75,7 @@ output "analyst_current_role" {
 
 ### Required
 
-- `base_role` (String) The member's organization base role: `owner` or `collaborator`. Required - there is deliberately no default, because guessing it during adoption of an existing member could silently change their privileges.
+- `base_role` (String) The member's organization base role: `owner` or `collaborator`. Required, with no default.
 - `email` (String) Email of the organization member whose role this manages. The member must already exist in the organization. Matched case-insensitively against the API. Changing it to a different address replaces the resource - it identifies a different person; changing only its letter case updates in place.
 
 ### Optional
