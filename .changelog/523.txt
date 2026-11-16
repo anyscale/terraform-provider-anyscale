@@ -1,0 +1,4 @@
+```
+release-note:changed
+guide/rbac: The diagnostics table now names the frozen-binding, own-binding, user-group, conversion, not-found and duplicate-name errors and fixes two wrong titles, and the `anyscale_iam_role_binding` example says to apply as the project's creator.
+```
