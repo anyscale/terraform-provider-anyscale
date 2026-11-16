@@ -107,7 +107,8 @@ In a [converted organization](#organization-access-mode), Anyscale manages three
 - **All users** adds every joining member automatically and refuses removals. Do not manage it with
   `anyscale_iam_user_group_members`: it would show a perpetual diff, then fail with a 409.
 - **Service accounts** holds every service account in the organization. Its members cannot be added or
-  removed, and the group cannot be deleted or renamed. Do not manage it with
+  removed, and the group cannot be deleted or renamed. It is hidden: the groups data sources do not list
+  it and it cannot be looked up or named in configuration. Do not manage it with
   `anyscale_iam_user_group_members` either.
 - The **organization admin group** cannot be deleted or renamed, its last member cannot be removed, and
   service accounts cannot join it.
@@ -233,7 +234,7 @@ Role-binding writes are refused until the organization converts, so the move hap
 2. Run `terraform state rm` for `anyscale_organization_user_role` (or destroy it, which only warns), and remove it
    from your configuration.
 3. Declare an `anyscale_iam_role_grant` for each grant you want Terraform to manage, and **import** the
-   existing binding instead of creating one. Creating a grant that already exists fails with "Role Binding
+   existing binding instead of creating one. Creating a grant that already exists fails with "Role Grant
    Already Exists". You do not need to look up the binding ID: import by what the binding grants,
    `<scope_type>/<scope_id>/<principal_type>/<principal_id>/<role_id>`, where `scope_type` is `organization`,
    `cloud` or `project`, and `principal_type` is `user` or `user_group`. Import fails, and creates nothing,
@@ -405,9 +406,11 @@ Directory-synced (SCIM) groups can be bound; unlike membership, nothing here fig
 provider.
 
 ~> **Do not revoke your own way in.** Anyscale refuses adding a role to the organization admin
-group and refuses revoking any of its bindings - so an authoritative `anyscale_iam_role_binding`
-apply or destroy that would revoke one fails. It also refuses revoking the provider's own direct
-binding. It does **not** stop a
+group and refuses revoking any of its bindings. A converted organization freezes those bindings, so
+an authoritative `anyscale_iam_role_binding` apply that would revoke one fails with "Policy Would
+Revoke a Frozen Role Binding" (name the binding in `roles` to keep it), while a destroy keeps the
+binding; the destroy plan ("Destroy Revokes Role Bindings") lists what it keeps. It also refuses revoking
+the provider's own direct binding. It does **not** stop a
 configuration from removing a *group* binding that gives the Terraform identity its permission to manage
 access. If the identity depends on a group binding you destroy, later applies fail until someone restores
 it in the console. Keep the grant that the Terraform identity relies on out of any configuration you might
@@ -426,13 +429,19 @@ Whether the roles you bind are enforced depends on Anyscale's rollout of them.
 | "Role bindings are not enabled" | The feature flag is off for your organization; contact support@anyscale.com. During a refresh, state is kept unchanged. |
 | "Role Grant Already Exists" | The principal already holds that role on that scope; the message names the existing binding's import ID. |
 | "Organization Not Converted to Role Bindings" | The organization is not converted. See [Organization access mode](#organization-access-mode). |
+| "Role or User Group Not Found" | An `anyscale_iam_role_binding` policy names a role or group that does not exist (a deleted group is reported this way). A group that exists but that this identity cannot see is reported as "Not Allowed to Manage Access", not as missing. |
+| "User Group Name Already Exists" | Group names match ignoring letter case and spacing, so the message may quote your spelling while the existing group is spelled differently. List the groups to find it, then import it. |
 | "Role Is Archived" | The role cannot be newly assigned; pick another role. |
 | "Not Allowed to Manage Access" | This identity does not manage IAM on the scope the write targeted. Apply with an identity that does - for example one holding the Admin role there - or ask an admin. |
-| "Organization Admin Group Is Managed by Anyscale" | The platform owns the organization admin group's bindings; the error says which change to make. |
+| "Organization Admin Group Is Managed by Anyscale" | A role grant named the organization admin group, tried to remove one of its bindings, or a policy tried to add a role to it. The platform owns its bindings; the error says which change to make. |
+| "Policy Would Revoke a Frozen Role Binding" | An `anyscale_iam_role_binding` policy would remove a binding Anyscale froze, including the organization admin group's. The error names the binding; add it to `roles` to keep it. |
+| "Policy Would Revoke Your Own Role Binding" | The policy omits a direct binding this identity holds; the API never lets an identity revoke its own. Name it in `roles` to keep it, or apply with a different identity. |
+| "Cannot Manage User Group" | The group exists but this identity cannot change it: it does not manage IAM on at least one scope the group's bindings reach. Nothing was changed. Use an organization admin token, or manage the group outside Terraform. |
+| "Organization Is Converting to Role Bindings" | The conversion is still running and legacy writes are refused. Retry after it finishes. |
 | "Cannot Grant a Role to the Provider's Own Identity" | Bind a user group the identity belongs to, or apply with a different identity. |
-| "Cannot Revoke the Provider's Own Role Binding" | Revoke it in the console or with a different identity, or run `terraform state rm`. |
+| "Cannot Revoke the Provider's Own Role Grant" | Revoke it in the console or with a different identity, or run `terraform state rm`. |
 | Binding disappears from state | It was revoked outside Terraform, or its group was deleted; the next plan recreates it. |
-| "Role Binding Not Readable" | The cloud or project was deleted outside Terraform, or access to it was lost. State is kept; run `terraform state rm` for the binding if the scope is gone. |
+| "Role Binding Not Readable" | The cloud or project was deleted outside Terraform, access to it was lost, or this identity does not manage IAM on it (run the destroy as one that does). State is kept; run `terraform state rm` for the binding if the scope is gone. |
 
 ## Authority: what "Terraform manages here" actually means
 
