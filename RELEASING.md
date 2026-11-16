@@ -132,9 +132,11 @@ Three checks make it hard to reach a release in a broken state:
   the tag to the previous release for the newest commit whose `Acceptance Tests - Data Sources` and
   `Acceptance Tests - Resources` steps both ran and passed (step results, not job results), then
   requires every file changed since to be docs-only per `.github/docs-only-filter.yml` (the same list
-  CI uses to skip). No such commit, or a code change after it, fails the release; there is no
-  override. Fix: let CI finish on the newest code-changing commit, then re-tag. Script:
-  `.github/scripts/release-acctest-gate.sh`.
+  CI uses to skip). A code change after that commit fails the release; there is no override. Fix: let
+  CI finish on the newest code-changing commit, then re-tag. When the range contains no tested commit
+  at all — a release whose changes since the previous release are all docs-only — the previous
+  release is the baseline and the same per-file check still applies, so a code change anywhere in the
+  range still fails. Script: `.github/scripts/release-acctest-gate.sh`.
 
 ---
 
