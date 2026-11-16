@@ -1,9 +1,0 @@
-```
-release-note:fixed
-resource/anyscale_iam_role_grant: The example and the RBAC guide look up the `Project reader` role instead of `project_viewer`, which the `anyscale_iam_role` data source never finds.
-```
-
-```
-release-note:changed
-provider: The RBAC guide and the `anyscale_cloud_access`, `anyscale_organization_user_role` and `anyscale_iam_role_grant` pages are shortened to the facts that affect configuration, and the guide names the `anyscale_iam_role_binding` data source as the replacement for the deprecated collaborator and permission attributes.
-```
