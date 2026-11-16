@@ -1,3 +1,0 @@
-```release-note:changed
-provider: The AWS and GCP VM cloud guides read the organization ID from `data.anyscale_organization.current.id` instead of a hand-supplied variable.
-```
