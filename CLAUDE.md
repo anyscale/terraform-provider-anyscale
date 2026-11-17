@@ -367,8 +367,11 @@ Unit tests for schema validation and model conversions; acceptance tests via `re
   then revert (byte-diff clean). Code review alone doesn't establish that a test protects anything.
 - **Match the CI shard name regex or the test silently never runs.** `.github/workflows/ci.yml`
   shards acceptance tests: `acctest-data` runs `^TestAcc[A-Za-z]+DataSource`, `acctest-resource`
-  runs `^TestAcc[A-Za-z]+Resource`. A non-matching name neither runs nor fails. Confirm new tests
-  genuinely RUN (not SKIP) by reading the shard's job log, not the green checkmark.
+  runs `^TestAcc[A-Za-z]+Resource`, and `acctest-container-image` takes the real image builds out of
+  it (`^TestAccContainerImage(Build|Registry)Resource`, the `CONTAINER_IMAGE_ACCTESTS` variable).
+  A non-matching name neither runs nor fails. Confirm new tests genuinely RUN (not SKIP) by reading
+  the shard's job log, not the green checkmark. Changing a shard means changing
+  `acctest-fork-pr.yml` and `.github/scripts/release-acctest-gate.sh` with it.
 - **Naming corollaries.** An Ephemeral Resource's acceptance test runs through `resource.Test` (via
   `echoprovider`), so its name must still end in `Resource` (e.g. `TestAccFooEphemeralResource`, not
   `TestAccEphemeralFoo`). An Action has no acceptance-test tooling in `terraform-plugin-testing` at

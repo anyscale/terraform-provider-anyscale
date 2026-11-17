@@ -15,8 +15,11 @@
 # including) the previous release. The newest commit C in that range whose
 # `ci (acctest-data)` job ran the "Acceptance Tests - Data Sources" step to
 # success AND whose `ci (acctest-resource)` job ran "Acceptance Tests -
-# Resources" to success (step conclusions, not job conclusions: a skipped step
-# makes its job succeed) is the tested baseline. Every file changed between C
+# Resources" to success AND whose `ci (acctest-container-image)` job ran
+# "Acceptance Tests - Container Images" to success (step conclusions, not job
+# conclusions: a skipped step makes its job succeed) is the tested baseline.
+# Runs from before the container image shard existed lack that job, so they
+# no longer count as a baseline. Every file changed between C
 # and the tag commit must be docs-only per .github/docs-only-filter.yml.
 #
 # A range can contain no such commit: a release whose changes since the previous
@@ -37,6 +40,8 @@ DATA_JOB="ci (acctest-data)"
 DATA_STEP="Acceptance Tests - Data Sources"
 RES_JOB="ci (acctest-resource)"
 RES_STEP="Acceptance Tests - Resources"
+IMG_JOB="ci (acctest-container-image)"
+IMG_STEP="Acceptance Tests - Container Images"
 
 # Echo the filter's '!' exclusions as bash case-patterns. micromatch '**' and
 # bash '*' both cross '/', so '**' -> '*'; a leading '**/' also matches a
@@ -91,7 +96,7 @@ self_test >/dev/null
 
 fail() { echo "::error::release gate: $*" >&2; exit 1; }
 
-# Prints "ok" if some push run of ci.yml on $1 ran both acceptance steps green.
+# Prints "ok" if some push run of ci.yml on $1 ran every acceptance step green.
 covered() {
   local sha="$1" runs id jobs
   runs="$(gh api "repos/$REPO/actions/workflows/$WORKFLOW_FILE/runs?head_sha=$sha&event=push&per_page=100" --jq '.workflow_runs[].id')" \
@@ -99,9 +104,10 @@ covered() {
   for id in $runs; do
     jobs="$(gh api "repos/$REPO/actions/runs/$id/jobs?filter=latest&per_page=100")" \
       || fail "cannot read jobs of run $id"
-    if jq -e --arg dj "$DATA_JOB" --arg ds "$DATA_STEP" --arg rj "$RES_JOB" --arg rs "$RES_STEP" '
+    if jq -e --arg dj "$DATA_JOB" --arg ds "$DATA_STEP" --arg rj "$RES_JOB" --arg rs "$RES_STEP" \
+        --arg ij "$IMG_JOB" --arg is "$IMG_STEP" '
         def ok($j; $s): any(.jobs[]; .name == $j and any(.steps[]; .name == $s and .conclusion == "success"));
-        ok($dj; $ds) and ok($rj; $rs)' <<<"$jobs" >/dev/null; then
+        ok($dj; $ds) and ok($rj; $rs) and ok($ij; $is)' <<<"$jobs" >/dev/null; then
       echo "ok run=$id"; return 0
     fi
   done
@@ -117,13 +123,13 @@ baseline=""; run_note=""
 while read -r c; do
   if note="$(covered "$c")"; then baseline="$c"; run_note="$note"; break; fi
   checked+=("$c")
-  echo "  $(git log -1 --format='%h %s' "$c"): no run with both acceptance steps green"
+  echo "  $(git log -1 --format='%h %s' "$c"): no run with every acceptance step green"
 done < <(git rev-list --first-parent "${PREV}..${TAG_SHA}")
 
 if [ -z "$baseline" ]; then
   echo "  no tested commit in range (checked ${#checked[@]}); falling back to previous release ${PREV}"
   baseline="$PREV"
-  run_note="previous release: no commit in range has both acceptance steps green"
+  run_note="previous release: no commit in range has every acceptance step green"
 fi
 
 echo "Tested baseline: $(git log -1 --format='%h %s' "$baseline") ($run_note)"
