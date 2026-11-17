@@ -99,7 +99,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [acctest-data, acctest-resource]
+        shard: [acctest-data, acctest-resource, acctest-container-image]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -119,9 +119,9 @@ jobs:
           terraform_version: "1.17.1"
           terraform_wrapper: false
 
-      # Both steps below mirror ci.yml's "Acceptance Tests - Data Sources" /
-      # "Acceptance Tests - Resources" steps. If the go test invocation (flags,
-      # timeout, filter regex) changes there, mirror it here by hand.
+      # The steps below mirror ci.yml's "Acceptance Tests - *" steps. If a go
+      # test invocation (flags, timeout, filter regex, the container image
+      # pattern) changes there, mirror it here by hand.
       - name: Acceptance Tests - Data Sources
         if: matrix.shard == 'acctest-data'
         env:
@@ -139,9 +139,19 @@ jobs:
           ANYSCALE_TEST_CREATE_CLOUD: 1
         run: |
           set -o pipefail
-          TF_ACC=1 go test ./internal/acctest/ -v -timeout 20m -parallel 4 -run '^TestAcc[A-Za-z]+Resource' 2>&1 | tee /tmp/acctest.log
+          TF_ACC=1 go test ./internal/acctest/ -v -timeout 20m -parallel 4 -run '^TestAcc[A-Za-z]+Resource' -skip '^TestAccContainerImage(Build|Registry)Resource' 2>&1 | tee /tmp/acctest.log
           .github/scripts/summarize-acctest-skips.sh /tmp/acctest.log "Acceptance Tests - Resources"
           .github/scripts/summarize-compute-config-coverage.sh /tmp/acctest.log "Acceptance Tests - Resources"
+
+      - name: Acceptance Tests - Container Images
+        if: matrix.shard == 'acctest-container-image'
+        env:
+          ANYSCALE_CLI_TOKEN: ${{ secrets.ANYSCALE_CLI_TOKEN }}
+          ANYSCALE_TEST_CREATE_CLOUD: 1
+        run: |
+          set -o pipefail
+          TF_ACC=1 go test ./internal/acctest/ -v -timeout 20m -parallel 4 -run '^TestAccContainerImage(Build|Registry)Resource' 2>&1 | tee /tmp/acctest.log
+          .github/scripts/summarize-acctest-skips.sh /tmp/acctest.log "Acceptance Tests - Container Images"
 
   report:
     needs: [verify, acctest]

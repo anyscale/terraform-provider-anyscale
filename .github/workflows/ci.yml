@@ -29,6 +29,12 @@ concurrency:
 # "converted"; tests that need the other mode then skip with a reason.
 env:
   ANYSCALE_TEST_ORG_MODE: ${{ vars.ANYSCALE_TEST_ORG_MODE || 'legacy' }}
+  # The container image build and registry resource tests build and push real
+  # images: a third of the resource suite's runtime, and its most variable
+  # part. They run in their own shard so a slow build cannot push
+  # acctest-resource past its timeout. acctest-resource skips exactly what
+  # this selects; acctest-fork-pr.yml and release-acctest-gate.sh mirror it.
+  CONTAINER_IMAGE_ACCTESTS: '^TestAccContainerImage(Build|Registry)Resource'
 
 jobs:
   ci:
@@ -37,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [lint-and-unit, acctest-data, acctest-resource]
+        shard: [lint-and-unit, acctest-data, acctest-resource, acctest-container-image]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -50,7 +56,7 @@ jobs:
         # acctest package never reads any file under examples/ - it builds
         # its own Config values from Go string literals per test). Runs as a
         # plain step in this same job/shard, not a separate job gating this
-        # one, so the ci (acctest-data)/ci (acctest-resource) required status
+        # one, so the ci (acctest-*) status
         # checks always execute and report - only the expensive step inside
         # them short-circuits. predicate-quantifier: every is required here:
         # the default (some) answers "did any file touch docs", the wrong
@@ -60,7 +66,7 @@ jobs:
         # not explicitly excluded (e.g. a bare .golangci.yml tweak) fails safe
         # toward requiresFullAcctest == true.
         id: diff-scope
-        if: matrix.shard == 'acctest-data' || matrix.shard == 'acctest-resource'
+        if: startsWith(matrix.shard, 'acctest-')
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           predicate-quantifier: every
@@ -99,7 +105,7 @@ jobs:
         # the registry for it instead of skipping the query. Pinning to the
         # latest stable rather than the bisected floor (1.15.0) deliberately,
         # per team review. This version applies to every shard in this job's
-        # matrix, including acctest-data/acctest-resource, not just
+        # matrix, including the acctest-* shards, not just
         # lint-and-unit -- verified those two stay green before landing this.
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
@@ -227,7 +233,7 @@ jobs:
         # A maintainer runs the skipped tests on a fork PR with the 'Fork PR
         # credentialed acctests' workflow (acctest-fork-pr.yml).
         id: creds
-        if: matrix.shard == 'acctest-data' || matrix.shard == 'acctest-resource'
+        if: startsWith(matrix.shard, 'acctest-')
         env:
           EVENT_NAME: ${{ github.event_name }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
@@ -272,12 +278,26 @@ jobs:
         run: |
           set -o pipefail
           if [ "$CREDENTIALS_WITHHELD" = "true" ]; then export ANYSCALE_TEST_CREDENTIALS_WITHHELD=1; fi
-          TF_ACC=1 go test ./internal/acctest/ -v -timeout 20m -parallel 4 -run '^TestAcc[A-Za-z]+Resource' 2>&1 | tee /tmp/acctest.log
+          TF_ACC=1 go test ./internal/acctest/ -v -timeout 20m -parallel 4 -run '^TestAcc[A-Za-z]+Resource' -skip "$CONTAINER_IMAGE_ACCTESTS" 2>&1 | tee /tmp/acctest.log
           .github/scripts/summarize-acctest-skips.sh /tmp/acctest.log "Acceptance Tests - Resources"
           .github/scripts/summarize-compute-config-coverage.sh /tmp/acctest.log "Acceptance Tests - Resources"
 
+      - name: Acceptance Tests - Container Images
+        # The resource tests acctest-resource skips (see CONTAINER_IMAGE_ACCTESTS
+        # above). Same docs-only skip and hermetic mode as the other acctest steps.
+        if: matrix.shard == 'acctest-container-image' && steps.diff-scope.outputs.requiresFullAcctest == 'true'
+        env:
+          ANYSCALE_CLI_TOKEN: ${{ secrets.ANYSCALE_CLI_TOKEN }}
+          ANYSCALE_TEST_CREATE_CLOUD: 1
+          CREDENTIALS_WITHHELD: ${{ steps.creds.outputs.withheld }}
+        run: |
+          set -o pipefail
+          if [ "$CREDENTIALS_WITHHELD" = "true" ]; then export ANYSCALE_TEST_CREDENTIALS_WITHHELD=1; fi
+          TF_ACC=1 go test ./internal/acctest/ -v -timeout 20m -parallel 4 -run "$CONTAINER_IMAGE_ACCTESTS" 2>&1 | tee /tmp/acctest.log
+          .github/scripts/summarize-acctest-skips.sh /tmp/acctest.log "Acceptance Tests - Container Images"
+
       - name: Acceptance Tests skipped (docs-only diff)
-        # Keeps the acctest-data / acctest-resource required checks green when
-        # the acctest steps above skip a docs-only diff, and records why.
-        if: (matrix.shard == 'acctest-data' || matrix.shard == 'acctest-resource') && steps.diff-scope.outputs.requiresFullAcctest == 'false'
+        # Keeps the acctest-* checks green when the acctest steps above skip a
+        # docs-only diff, and records why.
+        if: startsWith(matrix.shard, 'acctest-') && steps.diff-scope.outputs.requiresFullAcctest == 'false'
         run: echo "::notice::Acceptance tests skipped -- every changed file in this diff falls under the docs-only path list (docs/**, examples/**, **/*.md, .changelog/**, templates/**; see this workflow's 'Detect docs-only diff' step). Required check still reports success. Full real-infra acctest coverage resumes on the next PR touching internal/**, main.go, go.mod/go.sum, tools/**, Makefile, or this file -- and also runs unconditionally every day via .github/workflows/scheduled-acctest.yml."
