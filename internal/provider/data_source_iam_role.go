@@ -49,7 +49,7 @@ func (d *IAMRoleDataSource) Schema(ctx context.Context, req datasource.SchemaReq
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The role name, matched exactly, including case, for example `Project reader`. Names can change; a binding refers to the role by `id`, so a rename does not affect existing bindings.",
+				MarkdownDescription: "The role name, matched exactly, including case, for example `Project reader`. Names can change; a binding refers to the role by `id`, so a rename does not affect existing bindings. The built-in role being renamed from `Organization owner` to `Admin` resolves by either name in every organization; use `Admin`.",
 				Validators:          []validator.String{stringvalidator.LengthAtLeast(1)},
 			},
 			"id": schema.StringAttribute{
@@ -107,6 +107,22 @@ func (d *IAMRoleDataSource) Read(ctx context.Context, req datasource.ReadRequest
 			folded = append(folded, role.Name)
 		}
 	}
+	if len(exact) == 0 {
+		if alias, ok := builtInRoleRenames[name]; ok {
+			role, found, err := findBuiltInRoleByName(ctx, d.client, alias)
+			if err != nil {
+				AddAPIError(&resp.Diagnostics, "list roles", err)
+				return
+			}
+			if found {
+				if name == builtInRoleOldName {
+					resp.Diagnostics.AddWarning("Role Renamed",
+						fmt.Sprintf("The built-in role %q is now named %q in this organization. Set name = %q.", name, alias, alias))
+				}
+				exact = append(exact, role)
+			}
+		}
+	}
 	switch len(exact) {
 	case 0:
 		detail := fmt.Sprintf("No assignable role is named %q. Archived roles are not listed.", name)
@@ -122,10 +138,45 @@ func (d *IAMRoleDataSource) Read(ctx context.Context, req datasource.ReadRequest
 		return
 	}
 
+	// name stays as configured: on the rename fallback it differs from the
+	// role's stored name, and it is an argument, not a read-back.
 	role := exact[0]
 	config.ID = types.StringValue(role.ID)
-	config.Name = types.StringValue(role.Name)
 	config.Description = types.StringPointerValue(role.Description)
 	config.BuiltIn = types.BoolValue(role.BuiltIn)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
+}
+
+// The built-in organization owner role (rol_zdti...) was renamed from
+// "Organization owner" to "Admin". Role rows are renamed per environment by a
+// backend job, not a migration, so for a while some organizations return one
+// name and some the other. Either name resolves the role in every
+// organization. Only built-in roles take the fallback, so a custom role that
+// shares a name still wins on an exact match.
+const (
+	builtInRoleOldName = "Organization owner"
+	builtInRoleNewName = "Admin"
+)
+
+var builtInRoleRenames = map[string]string{
+	builtInRoleOldName: builtInRoleNewName,
+	builtInRoleNewName: builtInRoleOldName,
+}
+
+// findBuiltInRoleByName returns the one built-in role named exactly name.
+func findBuiltInRoleByName(ctx context.Context, client *Client, name string) (roleResult, bool, error) {
+	roles, err := listRolesByName(ctx, client, name)
+	if err != nil {
+		return roleResult{}, false, err
+	}
+	var match []roleResult
+	for _, role := range roles {
+		if role.BuiltIn && role.Name == name {
+			match = append(match, role)
+		}
+	}
+	if len(match) != 1 {
+		return roleResult{}, false, nil
+	}
+	return match[0], true, nil
 }

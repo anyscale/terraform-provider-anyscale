@@ -37,7 +37,7 @@ output "project_reader_role_id" {
 
 ### Required
 
-- `name` (String) The role name, matched exactly, including case, for example `Project reader`. Names can change; a binding refers to the role by `id`, so a rename does not affect existing bindings.
+- `name` (String) The role name, matched exactly, including case, for example `Project reader`. Names can change; a binding refers to the role by `id`, so a rename does not affect existing bindings. The built-in role being renamed from `Organization owner` to `Admin` resolves by either name in every organization; use `Admin`.
 
 ### Read-Only
 

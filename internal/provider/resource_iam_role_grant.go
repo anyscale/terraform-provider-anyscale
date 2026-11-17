@@ -370,10 +370,23 @@ func (r *IAMRoleGrantResource) Read(ctx context.Context, req resource.ReadReques
 			return
 		}
 		if isHTTPStatus(err, http.StatusForbidden) {
-			resp.Diagnostics.AddError("Role Grant Not Readable",
-				fmt.Sprintf("The Anyscale API refused to list bindings on %s %q (HTTP 403): %s "+
-					"Reading them requires managing IAM on the %s. If the %s was deleted outside Terraform, remove this binding from state with `terraform state rm`.",
-					resourceType, resourceID, extractAPIErrorDetail(err), resourceType, resourceType))
+			// The same 403 answers for a deleted scope and for lost IAM on a
+			// live one; reading the scope tells them apart.
+			gone, scopeErr := roleBindingScopeGoneAfterForbidden(ctx, r.client, resourceType, resourceID)
+			switch {
+			case gone:
+				addForbiddenTreatedAsDeletedWarning(&resp.Diagnostics, scopeKind(resourceType), resourceID, scopeErr)
+				tflog.Warn(ctx, "Role binding's scope is gone, removing from state",
+					map[string]any{"role_binding_id": bindingID, "scope": resourceType + "/" + resourceID})
+				resp.State.RemoveResource(ctx)
+			case scopeErr != nil:
+				AddAPIError(&resp.Diagnostics, "read "+resourceType+" after a 403 on its role bindings", scopeErr)
+			default:
+				resp.Diagnostics.AddError("Role Grant Not Readable",
+					fmt.Sprintf("The Anyscale API refused to list bindings on %s %q (HTTP 403): %s "+
+						"The %s still exists, so this identity no longer manages IAM on it. Restore that access, or run `terraform state rm` to stop managing this binding.",
+						resourceType, resourceID, extractAPIErrorDetail(err), resourceType))
+			}
 			return
 		}
 		AddAPIError(&resp.Diagnostics, "read role binding", err)
@@ -495,6 +508,20 @@ func (r *IAMRoleGrantResource) Delete(ctx context.Context, req resource.DeleteRe
 	switch {
 	case listErr != nil && isRoleBindingsDisabled(listErr):
 		r.handleDeleteNotFound(ctx, &resp.Diagnostics, bindingID, listErr)
+	case listErr != nil && isHTTPStatus(listErr, http.StatusForbidden):
+		// Deleting a scope deletes its bindings, so a gone scope leaves
+		// nothing to revoke.
+		gone, scopeErr := roleBindingScopeGoneAfterForbidden(ctx, r.client, resourceType, resourceID)
+		switch {
+		case gone:
+			addForbiddenTreatedAsDeletedOnDestroyWarning(&resp.Diagnostics, scopeKind(resourceType), resourceID, scopeErr)
+			tflog.Info(ctx, "Role binding's scope is gone, nothing to revoke",
+				map[string]any{"role_binding_id": bindingID, "scope": resourceType + "/" + resourceID})
+		case scopeErr != nil:
+			AddAPIError(&resp.Diagnostics, "read "+resourceType+" after a 403 on its role bindings", scopeErr)
+		default:
+			AddAPIError(&resp.Diagnostics, "delete role binding", err)
+		}
 	case listErr != nil:
 		tflog.Warn(ctx, "Could not check whether the role binding is already revoked", map[string]any{"error": listErr.Error()})
 		AddAPIError(&resp.Diagnostics, "delete role binding", err)

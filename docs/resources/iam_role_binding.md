@@ -29,12 +29,11 @@ variable "cloud_name" {
   type        = string
 }
 
-# Exact, case-sensitive role names; they can differ per environment.
-# Newer projects grant their creator the Admin role, named
-# "Organization owner" here. Name the role the creator actually
-# holds; see the RBAC guide before assuming which one that is.
+# Exact, case-sensitive role names. Newer projects grant their
+# creator the Admin role. Name the role the creator actually holds;
+# see the RBAC guide before assuming which one that is.
 data "anyscale_iam_role" "admin" {
-  name = "Organization owner"
+  name = "Admin"
 }
 
 data "anyscale_iam_role" "project_reader" {

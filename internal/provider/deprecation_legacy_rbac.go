@@ -20,13 +20,13 @@ const (
 
 	// legacyAutoAddUserDeprecation is for anyscale_cloud.auto_add_user, the one legacy write
 	// that is an attribute.
-	legacyAutoAddUserDeprecation = "Deprecated for organizations converted to role bindings; bind a role to the All users group " +
+	legacyAutoAddUserDeprecation = "Deprecated for organizations converted to role bindings; bind a role to the All Users group " +
 		"on the cloud with anyscale_iam_role_grant there. Unconverted organizations keep using it. " +
 		"Not available on Azure, where access is managed in the Azure portal."
 
 	// legacyAutoAddUserReadDeprecation is for the data sources' read-only auto_add_user.
 	legacyAutoAddUserReadDeprecation = "Deprecated for organizations converted to role bindings, where it no longer applies; " +
-		"a role binding for the All users group replaces it. Unconverted organizations keep using it."
+		"a role binding for the All Users group replaces it. Unconverted organizations keep using it."
 
 	// legacyRBACReadDeprecation is for read-only attributes that report legacy access and
 	// have no replacement. Reads are not blocked on Azure, so there is no Azure clause.

@@ -123,11 +123,11 @@ data "anyscale_iam_role" "cloud_collaborator" {
   name = "Cloud collaborator"
 }
 
-# The Admin role a project's creator holds on it. The API stores it under this name.
+# The Admin role a project's creator holds on it.
 data "anyscale_iam_role" "admin" {
   count = var.enable_role_binding ? 1 : 0
 
-  name = "Organization owner"
+  name = "Admin"
 }
 
 # --- anyscale_iam_role_binding data source (gated by enable_role_binding) ------------------------

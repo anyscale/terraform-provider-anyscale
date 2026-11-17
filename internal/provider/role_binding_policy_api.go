@@ -152,6 +152,27 @@ func roleBindingPolicyScopeReadPath(scopeType, scopeID string) string {
 	return ""
 }
 
+// roleBindingScopeGoneAfterForbidden reads the scope after a role-binding
+// route answered the manage-IAM 403, which the API gives alike for a deleted
+// scope and for one the caller lost IAM on. It reports gone=true with the
+// scope's own error when that read is also 403 or 404; gone=false with a nil
+// error when the scope still reads, which means the caller lost IAM on it. An
+// organization has no read of its own and is never gone.
+func roleBindingScopeGoneAfterForbidden(ctx context.Context, client *Client, scopeType, scopeID string) (gone bool, scopeErr error) {
+	readPath := roleBindingPolicyScopeReadPath(scopeType, scopeID)
+	if readPath == "" {
+		return false, nil
+	}
+	_, err := DoRequestRaw(ctx, client, "GET", readPath, nil, http.StatusOK)
+	if err == nil {
+		return false, nil
+	}
+	if isGoneOrForbidden(err) {
+		return true, err
+	}
+	return false, err
+}
+
 // policyRoleModel is one entry of roles.
 type policyRoleModel struct {
 	UserIDs      types.Set `tfsdk:"user_ids"`

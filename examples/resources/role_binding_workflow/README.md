@@ -56,8 +56,8 @@ Look roles up by exact, case-sensitive name with `data "anyscale_iam_role"`. A c
 organization listed these built-in roles in November 2026; your organization may also define its
 own, and the list can grow.
 
-- `Organization owner`, `Organization collaborator`. `Organization owner` is also the name of the
-  Admin role a project's or cloud's creator holds on it.
+- `Admin`, `Organization collaborator`. `Admin` is also the role a project's or cloud's creator holds
+  on it. Some organizations still list it as `Organization owner`; either name resolves it.
 - `Cloud owner`, `Cloud writer`, `Cloud collaborator`, `Cloud read-only`, `Cloud project viewer`,
   `Cloud compute config viewer`, `Cloud workload operator`
 - `Project owner`, `Project writer`, `Project reader`
@@ -105,14 +105,14 @@ ID is unknown at plan time and the plan cannot dry-run the policy. Later plans c
 
 The `shared_project_grants` and `owned_project_grants` outputs map each role ID to its holders; the
 `role_ids` output maps the names back. On the shared project expect the group under
-`Project reader`, the direct member (if set) under `Project writer`, and you under the Admin role
-(`Organization owner`), which you received by creating the project. On the owned project expect
+`Project reader`, the direct member (if set) under `Project writer`, and you under the `Admin` role,
+which you received by creating the project. On the owned project expect
 exactly what `step5_binding.tf` lists. A real run's output (IDs shortened):
 
 ```text
 role_ids = {
+  "Admin"              = "rol_zdti..."
   "Cloud collaborator" = "rol_2nn8..."
-  "Organization owner" = "rol_zdti..."
   "Project reader"     = "rol_r2sc..."
   "Project writer"     = "rol_9k8u..."
 }
