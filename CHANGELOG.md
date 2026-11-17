@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.43.3] - 2026-11-17
+
+### Changed
+
+- resource/anyscale_project: The example points project access at `anyscale_iam_role_grant` and `anyscale_iam_role_binding` instead of the deprecated `anyscale_cloud_access`.
+
 ## [0.43.2] - 2026-11-16
 
 ### Changed
@@ -1478,7 +1484,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.43.2...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.43.3...HEAD
+[0.43.3]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.43.3
 [0.43.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.43.2
 [0.43.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.43.1
 [0.43.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.43.0
