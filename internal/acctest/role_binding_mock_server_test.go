@@ -47,13 +47,21 @@ type roleBindingMockServer struct {
 	bindings map[string]*roleBindingMockBinding
 	roles    map[string]*roleBindingMockRole
 	groups   map[string]bool
-	// goneScopes are "<type>/<id>" scopes deleted out of band.
-	goneScopes map[string]bool
+	// goneScopes are "<type>/<id>" scopes deleted out of band. Their own GET
+	// answers goneScopeStatus (404 by default; 403 as some routes answered
+	// before the backend restored 404s for deleted resources).
+	goneScopes      map[string]bool
+	goneScopeStatus int
+	// noIAMScopes are live scopes the caller no longer manages IAM on: the
+	// role-binding routes answer 403 but the scope's own GET succeeds.
+	noIAMScopes map[string]bool
 	// deleteMode simulates DELETE races: "revoked" revokes the binding and
 	// answers 403, as a concurrent revoke between refresh and delete would;
 	// "denied" answers 403 and keeps it, as a lost permission would;
 	// "admin_group" answers the admin-group 409 and keeps the binding, as
-	// the platform refusal would.
+	// the platform refusal would; "scope_gone" deletes the binding's scope
+	// (and so the binding) and answers 403, as a scope deleted between
+	// refresh and delete would.
 	deleteMode string
 	// unconverted makes every write answer 409, as in an organization that
 	// has not converted to role bindings.
@@ -134,6 +142,7 @@ func newRoleBindingMockServer(t *testing.T) *roleBindingMockServer {
 		roles:           map[string]*roleBindingMockRole{},
 		groups:          map[string]bool{},
 		goneScopes:      map[string]bool{},
+		noIAMScopes:     map[string]bool{},
 		invisibleGroups: map[string]bool{},
 	}
 	m.Server = httptest.NewServer(http.HandlerFunc(m.serve))
@@ -175,16 +184,33 @@ func (m *roleBindingMockServer) deleteGroup(id string) {
 	}
 }
 
+// deleteScope deletes a scope out of band. Like the backend, deleting a
+// project or cloud deletes the role bindings held on it.
 func (m *roleBindingMockServer) deleteScope(resourceType, resourceID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.goneScopes[resourceType+"/"+resourceID] = true
+	for id, b := range m.bindings {
+		if b.ResourceType == resourceType && b.ResourceID == resourceID {
+			delete(m.bindings, id)
+		}
+	}
 }
 
-func (m *roleBindingMockServer) restoreScope(resourceType, resourceID string) {
+func (m *roleBindingMockServer) setGoneScopeStatus(status int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.goneScopes, resourceType+"/"+resourceID)
+	m.goneScopeStatus = status
+}
+
+func (m *roleBindingMockServer) setNoIAMScope(resourceType, resourceID string, on bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if on {
+		m.noIAMScopes[resourceType+"/"+resourceID] = true
+	} else {
+		delete(m.noIAMScopes, resourceType+"/"+resourceID)
+	}
 }
 
 func (m *roleBindingMockServer) setGroupGone404(on bool) {
@@ -408,6 +434,21 @@ func (m *roleBindingMockServer) serve(w http.ResponseWriter, r *http.Request) {
 		m.serveUserGroupRead(w, strings.TrimPrefix(path, "/api/v2/user_groups/"))
 		return
 	}
+	for _, scope := range []struct{ prefix, kind string }{{"/api/v2/clouds/", "cloud"}, {"/api/v2/projects/", "project"}} {
+		if strings.HasPrefix(path, scope.prefix) && r.Method == http.MethodGet {
+			id := strings.TrimPrefix(path, scope.prefix)
+			if m.goneScopes[scope.kind+"/"+id] {
+				status := m.goneScopeStatus
+				if status == 0 {
+					status = http.StatusNotFound
+				}
+				m.fail(w, status, "not found")
+				return
+			}
+			m.reply(w, http.StatusOK, map[string]any{"result": map[string]any{"id": id}})
+			return
+		}
+	}
 	const rbBase, rolesBase = "/api/v2/role_bindings", "/api/v2/roles"
 	if !strings.HasPrefix(path, rbBase) && !strings.HasPrefix(path, rolesBase) {
 		m.t.Errorf("mock: unexpected route %s %s", r.Method, r.URL.Path)
@@ -458,7 +499,7 @@ func (m *roleBindingMockServer) serve(w http.ResponseWriter, r *http.Request) {
 			m.fail(w, http.StatusUnprocessableEntity, "invalid path parameter")
 			return
 		}
-		if m.goneScopes[rest[0]+"/"+rest[1]] {
+		if m.goneScopes[rest[0]+"/"+rest[1]] || m.noIAMScopes[rest[0]+"/"+rest[1]] {
 			m.fail(w, http.StatusForbidden, fmt.Sprintf("You do not manage IAM on %s '%s'.", rest[0], rest[1]))
 			return
 		}
@@ -475,7 +516,12 @@ func (m *roleBindingMockServer) serve(w http.ResponseWriter, r *http.Request) {
 		m.reply(w, http.StatusOK, map[string]any{"result": b.json()})
 	case len(rest) == 1 && strings.HasPrefix(rest[0], "rb_") && r.Method == http.MethodDelete:
 		b, ok := m.bindings[rest[0]]
-		denied := !ok || m.goneScopes[b.ResourceType+"/"+b.ResourceID] || m.deleteMode == "denied"
+		denied := !ok || m.goneScopes[b.ResourceType+"/"+b.ResourceID] || m.noIAMScopes[b.ResourceType+"/"+b.ResourceID] || m.deleteMode == "denied"
+		if ok && m.deleteMode == "scope_gone" {
+			m.goneScopes[b.ResourceType+"/"+b.ResourceID] = true
+			delete(m.bindings, rest[0])
+			denied = true
+		}
 		if ok && m.deleteMode == "revoked" {
 			delete(m.bindings, rest[0])
 			denied = true

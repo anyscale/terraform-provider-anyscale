@@ -254,7 +254,7 @@ func (r *IAMRoleBindingResource) ModifyPlan(ctx context.Context, req resource.Mo
 		if creating {
 			resp.Diagnostics.AddWarning("Role Binding Not Checked at Plan",
 				fmt.Sprintf("The %s ID is not known until apply, so this plan cannot check the policy or list the bindings the first apply revokes. "+
-					"Anyscale grants the identity that creates a project or cloud its Admin role on it (stored as Organization owner); "+
+					"Anyscale grants the identity that creates a project or cloud its Admin role on it; "+
 					"name that binding in roles, or the first apply fails with HTTP 403.",
 					scopeType))
 		}
@@ -517,26 +517,6 @@ func policyNotFound(ctx context.Context, client *Client, diags *diag.Diagnostics
 	}
 }
 
-// scopeGoneAfterForbidden reads the scope after generate answered 403. It
-// reports gone=true with the scope's own error when that read is also 403 or
-// 404; gone=false with a nil error when the scope still reads, which means the
-// caller lost IAM on it. An organization has no read of its own and is never
-// gone.
-func (r *IAMRoleBindingResource) scopeGoneAfterForbidden(ctx context.Context, scopeType, scopeID string) (gone bool, scopeErr error) {
-	readPath := roleBindingPolicyScopeReadPath(scopeType, scopeID)
-	if readPath == "" {
-		return false, nil
-	}
-	_, err := DoRequestRaw(ctx, r.client, "GET", readPath, nil, http.StatusOK)
-	if err == nil {
-		return false, nil
-	}
-	if isGoneOrForbidden(err) {
-		return true, err
-	}
-	return false, err
-}
-
 func addPolicyNotReadableError(diags *diag.Diagnostics, scopeType, scopeID string, err error, outcome string) {
 	diags.AddError("Role Binding Not Readable",
 		withOutcome(fmt.Sprintf("The Anyscale API refused to read the role bindings on %s %q (HTTP 403): %s The %s still exists, so this identity no longer manages IAM on it.",
@@ -556,7 +536,7 @@ func (r *IAMRoleBindingResource) Read(ctx context.Context, req resource.ReadRequ
 	if err != nil {
 		switch {
 		case isHTTPStatus(err, http.StatusForbidden):
-			gone, scopeErr := r.scopeGoneAfterForbidden(ctx, scopeType, scopeID)
+			gone, scopeErr := roleBindingScopeGoneAfterForbidden(ctx, r.client, scopeType, scopeID)
 			switch {
 			case gone:
 				addForbiddenTreatedAsDeletedWarning(&resp.Diagnostics, scopeKind(scopeType), scopeID, scopeErr)
@@ -597,7 +577,7 @@ func (r *IAMRoleBindingResource) Delete(ctx context.Context, req resource.Delete
 	if err != nil {
 		switch {
 		case isHTTPStatus(err, http.StatusForbidden):
-			gone, scopeErr := r.scopeGoneAfterForbidden(ctx, scopeType, scopeID)
+			gone, scopeErr := roleBindingScopeGoneAfterForbidden(ctx, r.client, scopeType, scopeID)
 			switch {
 			case gone:
 				addForbiddenTreatedAsDeletedOnDestroyWarning(&resp.Diagnostics, scopeKind(scopeType), scopeID, scopeErr)

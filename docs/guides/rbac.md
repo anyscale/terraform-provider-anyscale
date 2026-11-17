@@ -94,14 +94,14 @@ group remove each other's members on every apply, and nothing can detect that fr
 person who leaves the organization drops out of the group; the next plan proposes re-adding them and
 the apply fails, because they are no longer an organization member.
 
-In a [converted organization](#organization-access-mode), Anyscale manages three groups:
+Anyscale manages these groups, and refuses changes to them whether or not the organization is
+[converted](#organization-access-mode):
 
-- **All users** adds every joining member automatically and refuses removals. Do not manage it with
-  `anyscale_iam_user_group_members`: it would show a perpetual diff, then fail with a 409.
-- **Service accounts** holds every service account in the organization. Its members cannot be added or
-  removed, and the group cannot be deleted or renamed. It is hidden: the groups data sources do not list
-  it and it cannot be looked up or named in configuration. Do not manage it with
-  `anyscale_iam_user_group_members` either.
+- **All Users** and **All Service Accounts** hold every member and every service account. Anyscale adds
+  each one as it joins; members cannot be added or removed by hand, and neither group can be renamed or
+  deleted. Do not manage either with `anyscale_iam_user_group_members`: it would show a perpetual diff,
+  then fail with a 409. If a group already held one of these names, Anyscale's group takes a number
+  suffix, such as `All Users 2`.
 - The **organization admin group** cannot be deleted or renamed, its last member cannot be removed, and
   service accounts cannot join it.
 
@@ -266,7 +266,7 @@ None is available on an Azure control plane (see [Organization access mode](#org
 | Deprecated | In a converted organization | Use instead |
 |---|---|---|
 | `anyscale_organization_user_role` | Writes fail with "Organization Uses Role Bindings" | `anyscale_iam_role_grant` |
-| `anyscale_cloud.auto_add_user` | Setting it fails | An `anyscale_iam_role_grant` on the cloud for the All users group |
+| `anyscale_cloud.auto_add_user` | Setting it fails | An `anyscale_iam_role_grant` on the cloud for the All Users group |
 | `auto_add_user` on the `anyscale_cloud` and `anyscale_clouds` data sources | No longer applies | Same |
 | `collaborators` on the `anyscale_project` data source | Null | [`anyscale_iam_role_binding`](../data-sources/iam_role_binding.md) data source with `project_id`; reading needs IAM management on the project |
 | `permission_level`, `base_role` and `additional_roles` on the `anyscale_iam_organization_user(s)` data sources; `organization_permission_level` on the `anyscale_user` data source | A snapshot from before conversion | [`anyscale_iam_role_binding`](../data-sources/iam_role_binding.md) data source with `organization_id`; reading needs IAM management on the organization |
@@ -295,7 +295,8 @@ an `rb_` ID traced from the console or API corresponds to one grant resource.
 `project_id`, or `organization_id`. Look up the role with the [`anyscale_iam_role`](../data-sources/iam_role.md)
 data source, which resolves a role by its exact, case-sensitive `name`. Built-in role names include,
 for example, `Project reader`, `Project writer`, `Project owner`, `Cloud writer`, `Cloud owner`,
-`Organization owner` and `Organization collaborator`.
+`Admin` and `Organization collaborator`. Some organizations still list `Admin` under its former name,
+`Organization owner`; the data source resolves either name to the same role.
 
 ```hcl
 data "anyscale_iam_role" "project_reader" {
@@ -376,8 +377,8 @@ access to a scope; use `anyscale_iam_role_grant` when several owners share it.
 - **Name your own binding.** Anyscale refuses a policy that revokes the identity Terraform runs as, so if
   that identity holds a direct binding on the scope, list it under its role (see the
   [example](../resources/iam_role_binding.md#example-usage)). Name the role the identity actually holds
-  on that scope, not a fixed one: today a project or cloud creator holds the Admin role on it
-  (the API stores it under the name `Organization owner`); scopes created earlier may carry
+  on that scope, not a fixed one: today a project or cloud creator holds the `Admin` role on it;
+  scopes created earlier may carry
   `Project owner` or `Cloud owner` instead. Check with `anyscale role-binding policy generate` when unsure. An identity cannot grant
   itself a role, so one that reaches the scope through a group needs nothing named.
 - **Never manage one scope with this resource and `anyscale_iam_role_grant` or a CLI `policy apply`.** Each
@@ -429,8 +430,8 @@ accepted and has no effect. Roles are referenced by ID, so renaming a role never
 | "Organization Is Converting to Role Bindings" | The conversion is still running and legacy writes are refused. Retry after it finishes. |
 | "Cannot Grant a Role to the Provider's Own Identity" | Bind a user group the identity belongs to, or apply with a different identity. |
 | "Cannot Revoke the Provider's Own Role Grant" | Revoke it in the console or with a different identity, or run `terraform state rm`. |
-| Binding disappears from state | It was revoked outside Terraform, or its group was deleted; the next plan recreates it. |
-| "Role Binding Not Readable" | The cloud or project was deleted outside Terraform, access to it was lost, or this identity does not manage IAM on it (run the destroy as one that does). State is kept; run `terraform state rm` for the binding if the scope is gone. |
+| Binding disappears from state | It was revoked outside Terraform, or its group, cloud or project was deleted. The next plan recreates it; for a deleted cloud or project, remove the grant from configuration instead. |
+| "Role Grant Not Readable", "Role Binding Not Readable" | This identity does not manage IAM on the cloud or project, which still exists. State is kept: restore that access (or run the destroy as an identity that has it), or run `terraform state rm` for the binding. The `anyscale_iam_role_binding` data source also reports a deleted scope this way. |
 
 ## `anyscale_organization_user_role`: authority and destroy
 
