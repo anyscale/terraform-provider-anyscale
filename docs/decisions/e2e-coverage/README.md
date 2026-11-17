@@ -97,10 +97,11 @@ P = runs on that platform. N = must fail cleanly (plan or apply error naming the
 
 ### Organization-level (platform-independent, run once)
 
-`organization_invitation`, `organization_user`, `organization_user_role`,
-`organization_default_cloud`, `user_group`, `user_group_members`, `role_binding`,
-`scheduler_config`, and data sources `user`, `organization`, `organization_user(s)`,
-`user_group(s)`, `role`, `scheduler_config`. These need `ANYSCALE_TEST_USER_EMAIL`,
+`iam_organization_invitation`, `iam_organization_user`, `organization_user_role`,
+`organization_default_cloud`, `iam_user_group`, `iam_user_group_members`, `iam_role_grant`,
+`iam_role_binding`, `scheduler_config`, and data sources `user`, `organization`,
+`iam_organization_user(s)`, `iam_user_group(s)`, `iam_role`, `iam_role_binding`,
+`scheduler_config`. These need `ANYSCALE_TEST_USER_EMAIL`,
 `ANYSCALE_TEST_ORG_NAME` and `ANYSCALE_TEST_ORG_MODE`; they belong in one Buildkite step, not the
 per-platform matrix.
 
@@ -160,6 +161,7 @@ surfaces, P3 waits on a decision.
 | G10 | Org resources with no real test: `organization_invitation`, `organization_user`, `organization_default_cloud`, `scheduler_config` | P2 | Invitation: create to a plus-alias, import, destroy revokes. The other three change org-wide state: snapshot before, restore in `t.Cleanup`, and gate on a new `ANYSCALE_TEST_ORG_MUTATION=1` so they never run in a shared org by accident. |
 | G11 | 23 real-API tests never run in CI (engineering) | P1 | Buildkite steps set `ANYSCALE_TEST_REAL_INFRA`, `ANYSCALE_TEST_USER_EMAIL`, `ANYSCALE_TEST_ORG_NAME`, `ANYSCALE_TEST_ORG_MODE` and the per-platform `ANYSCALE_TEST_CLOUD_NAME`. |
 | G12 | `cloud_iam_mapping` real tests on one dedicated AWS cloud only | P3 | Same tests per platform once dedicated IAM-mapping clouds exist (open decision 3). |
+| G13 | Role bindings on real infrastructure | Done | Real-API tests: `TestAccIAMRoleGrantResource_RealAPI` (group, cloud scope, `rb_` import, drift), `_RealAPI_UserPrincipalProject` (user principal, project scope, composite import, `iam_role` and `iam_role_binding` data sources), `_RealAPI_OrganizationScopeGroup` (organization scope, composite import), `TestAccIAMRoleBindingResource_RealAPI` (project scope). Scenarios: `make test-role-binding-workflow` and `make test-kitchen-sink` with `TF_VAR_enable_user_groups=true TF_VAR_enable_role_binding=true TF_VAR_org_user_email=<member>`. Deliberately not real-tested: `iam_role_binding` on cloud or organization scope, which is authoritative over the whole scope and has only shared fixtures to run against. |
 
 Test rules for every new or moved test: names match the CI regexes and include `RealInfra`;
 `UniqueName`; sweepable; `CheckDestroy` against the API; mutation-proof each new assertion

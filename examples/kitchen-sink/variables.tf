@@ -127,12 +127,12 @@ variable "user_group_member_emails" {
 }
 
 variable "enable_role_binding" {
-  description = "Grant the user group the built-in project_viewer role on Cloud B's project. Needs enable_user_groups and an organization converted to role bindings; other organizations answer 409."
+  description = "Grant the user group roles on Cloud B and its project, grant org_user_email (if set) a role on that project, and manage every binding on Cloud A's project. Needs enable_user_groups and an organization converted to role bindings; other organizations answer 409. org_user_email must not be the identity running Terraform."
   type        = bool
   default     = false
   validation {
     condition     = !var.enable_role_binding || var.enable_user_groups
-    error_message = "enable_role_binding needs enable_user_groups: the binding is granted to the kitchen-sink user group."
+    error_message = "enable_role_binding needs enable_user_groups: the grants and the binding name the kitchen-sink user group."
   }
 }
 

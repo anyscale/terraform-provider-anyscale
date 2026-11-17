@@ -1,0 +1,4 @@
+```
+release-note:changed
+resource/anyscale_project: The example points project access at `anyscale_iam_role_grant` and `anyscale_iam_role_binding` instead of the deprecated `anyscale_cloud_access`.
+```

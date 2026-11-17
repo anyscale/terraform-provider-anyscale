@@ -21,6 +21,9 @@ Manages every direct role binding on one organization, cloud or project. Authori
 # the scope that roles does not name is revoked, including the Admin
 # binding Anyscale grants whoever created the project. Do not also
 # manage this scope with anyscale_iam_role_grant.
+#
+# Step-by-step walkthrough of every role-binding type:
+# examples/resources/role_binding_workflow
 variable "cloud_name" {
   description = "Name of an existing Anyscale cloud"
   type        = string

@@ -64,8 +64,8 @@ falling back to a sane default; see the [Compute Config guide](../../docs/guides
 | `anyscale_iam_organization_invitation` | **Opt-in.** Zero instances unless you set `var.invite_email`; see below |
 | `anyscale_iam_organization_user` | **Opt-in.** Zero instances unless you set `var.org_user_email`; see below |
 
-`anyscale_iam_organization_user` manages a member's membership (not their role -
-that's `anyscale_organization_user_role`). Set `org_user_email` to an existing member to adopt them;
+`anyscale_iam_organization_user` manages a member's membership, not their role (with
+`enable_role_binding`, `anyscale_iam_role_grant` grants that member a role). Set `org_user_email` to an existing member to adopt them;
 an address that is not a member yet is sent a real invitation. Destroy never removes a member
 (it cancels a still-pending invitation). See
 [`organization_user_workflow`](../resources/organization_user_workflow/main.tf) for the full
@@ -95,7 +95,7 @@ implicit extra one.
 - `anyscale_runtime_env_package` packages `./app`, and `anyscale_service` runs it as a Ray Serve
   hello-world on the built image. Apply waits for `RUNNING`; destroy terminates the service.
 - `anyscale_cloud_iam_mapping` maps jobs and services to Cloud B's own node role (a no-op at runtime).
-- Data sources `anyscale_cloud_iam_mapping` and `anyscale_iam_role` (`project_viewer`); `anyscale_system_cluster` is gated (below).
+- Data source `anyscale_cloud_iam_mapping`; `anyscale_system_cluster` is gated (below).
 
 **Gated (zero instances unless you set the variable):**
 
@@ -105,7 +105,10 @@ implicit extra one.
 | `org_user_email` | `anyscale_iam_organization_user` and its data source | An existing member's email (a non-member gets a real invitation) |
 | `enable_user_groups` | `anyscale_iam_user_group`, `anyscale_iam_user_group_members`, and the `anyscale_iam_user_group` / `anyscale_iam_user_groups` data sources | User groups enabled for your org (org-wide objects behind a feature flag) |
 | `user_group_member_emails` | Group membership | Each email must be an accepted org member |
-| `enable_role_binding` | `anyscale_iam_role_grant` | `enable_user_groups`, and an org on role bindings (converted); legacy orgs answer `409` |
+| `enable_role_binding` | `anyscale_iam_role_grant` (the group on Cloud B and on its project; `org_user_email`'s member on that project, when set), `anyscale_iam_role_binding` (every binding on Cloud A's project), and the `anyscale_iam_role` / `anyscale_iam_role_binding` data sources | `enable_user_groups`, and an org on role bindings (converted); legacy orgs answer `409`. `org_user_email` must not be the identity running Terraform, which cannot grant itself a role |
+
+For a step-by-step introduction to the role-binding types `enable_role_binding` turns on, see
+[`role_binding_workflow`](../resources/role_binding_workflow/).
 
 **Excluded (never declared here):**
 

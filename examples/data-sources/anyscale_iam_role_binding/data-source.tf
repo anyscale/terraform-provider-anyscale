@@ -1,6 +1,9 @@
 # Beta; Anyscale enables it per organization (contact
 # support@anyscale.com). Reads every direct role binding on one scope;
 # reading requires managing IAM on it.
+#
+# Step-by-step walkthrough of every role-binding type:
+# examples/resources/role_binding_workflow
 variable "project_id" {
   description = "ID of an existing Anyscale project (prj_...)"
   type        = string

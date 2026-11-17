@@ -17,10 +17,10 @@ resource "anyscale_project" "shared_research" {
   description = "Shared research workspaces"
 }
 
-# Project access is not managed here. Use anyscale_cloud_access to
-# manage a cloud's members and their project roles (see the RBAC guide).
-# The anyscale_project data source reads a project's current
-# collaborators without managing them.
+# Project access is not managed here. Grant roles on a project with
+# anyscale_iam_role_grant, or manage every binding on it with
+# anyscale_iam_role_binding (organizations converted to role
+# bindings; see the RBAC guide).
 
 # Outputs
 output "project_id" {

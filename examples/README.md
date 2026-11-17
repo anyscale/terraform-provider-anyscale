@@ -268,6 +268,17 @@ acceptance happens outside Terraform entirely.
 **Use this when**: You want to see how the invitation and collaborator resources fit together
 across the full member-onboarding lifecycle, not just in isolation.
 
+#### [resources/role_binding_workflow](./resources/role_binding_workflow/)
+
+A step-by-step introduction to role bindings for a converted organization, one file per step: look
+up roles, create a group, grant it roles on a project, a cloud and the organization, grant one user
+directly, own every grant on a project with `anyscale_iam_role_binding`, adopt existing grants with
+`import` blocks, and read back who holds what. The README explains the model (role, principal,
+scope, grant), prerequisites, built-in role names, expected output, day-2 changes and common errors.
+Tested end to end with `make test-role-binding-workflow`.
+
+**Use this when**: You are starting with role bindings, or moving an organization onto them.
+
 #### [resources/scheduler_config_composition](./resources/scheduler_config_composition/)
 
 Splits a single `anyscale_scheduler_config` resource across files (`flavors.tf`, `queues.tf`,
