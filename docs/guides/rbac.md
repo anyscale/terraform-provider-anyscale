@@ -2,13 +2,45 @@
 page_title: "RBAC: Roles Across Organizations, Clouds, and Projects"
 subcategory: "Concepts & Reference"
 description: |-
-  Managing access with this provider: organization membership and invitations, user groups, role grants and role bindings, organization access mode, legacy RBAC deprecation, and organization roles - which resource manages what.
+  Managing access with this provider, for a first-time administrator and for reference: the grant model and prerequisites, baseline access for everyone who joins, team groups, project-scoped access, onboarding and offboarding, adopting existing access, organization access mode, user groups, role grants and role bindings, legacy RBAC deprecation, and which resource manages what.
 ---
 
 # RBAC: Roles Across Organizations, Clouds, and Projects
 
-Anyscale access control spans three scopes: organization, cloud, and project. This guide covers the
-resources that manage membership, roles, and role bindings, and what each one is authoritative over.
+Anyscale access control spans three scopes: organization, cloud, and project. This guide starts
+with a progressive walkthrough - understand the model, give joining members a baseline, give a
+team scoped access, keep access correct as people join and leave, adopt access that already
+exists - and then covers each resource, its constraints, and its error messages in detail.
+
+## The model
+
+Access is a set of **grants**. Each grant gives one **role** - a named set of permissions, such as
+`Project reader` - to one **principal** on one **scope**:
+
+| Term | What it is | ID |
+|---|---|---|
+| **Role** | A named set of permissions, such as `Project reader` | `rol_...` |
+| **Principal** | Who holds it: a **user group** or a single **user** | `ug_...` / `usr_...` |
+| **Scope** | Where it applies: one **project**, one **cloud**, or the **organization** | `prj_...` / `cld_...` / `org_...` |
+| **Grant** | One role, for one principal, on one scope. The API calls it a *role binding* | `rb_...` |
+
+Two resources write grants, and you never use both on the same scope:
+
+| Resource | Manages | Removes grants it did not create? |
+|---|---|---|
+| [`anyscale_iam_role_grant`](../resources/iam_role_grant.md) | One grant | **No.** Additive. |
+| [`anyscale_iam_role_binding`](../resources/iam_role_binding.md) | **Every** direct grant on one scope | **Yes.** Anything not listed is revoked. |
+
+**Membership is separate from access.** In a converted organization, joining grants a person
+nothing: a new member holds no role until an admin grants one, usually to a group the person
+belongs to - most broadly the All Users group every member joins automatically. The
+`owner`/`collaborator` base roles belong to the legacy model; see
+[Organization access mode](#organization-access-mode).
+
+For a runnable, end-to-end tutorial of every RBAC resource, see
+[`examples/resources/role_binding_workflow`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/resources/role_binding_workflow);
+for the unconverted-organization equivalent,
+[`examples/resources/organization_user_workflow`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/resources/organization_user_workflow).
 
 ## Which resource manages what
 
@@ -19,161 +51,207 @@ resources that manage membership, roles, and role bindings, and what each one is
 | User groups (Beta) | [`anyscale_iam_user_group`](../resources/iam_user_group.md), [`anyscale_iam_user_group_members`](../resources/iam_user_group_members.md) | A group's name, and its **entire** member list. Not what the group may access - see role bindings, next row. See [User groups (Beta)](#user-groups-beta). |
 | Role grants (Beta) | [`anyscale_iam_role_grant`](../resources/iam_role_grant.md), [`anyscale_iam_role_binding`](../resources/iam_role_binding.md), [`anyscale_iam_role`](../data-sources/iam_role.md) and [`anyscale_iam_role_binding`](../data-sources/iam_role_binding.md) data sources | One role held by one user group or one user on one cloud, project, or the organization (`anyscale_iam_role_grant`), or every direct role binding on a scope (`anyscale_iam_role_binding`). **Converted organizations only** - see [Organization access mode](#organization-access-mode). See [Role bindings (Beta)](#role-bindings-beta). |
 
-## Inviting people: limits, single sign-on, directory sync
+## Before you start
 
-`anyscale_iam_organization_user` and `anyscale_iam_organization_invitation` both send invitations, and both
-are subject to the same constraints.
+1. **Know your organization's access mode.** Writes that work depend on it - role grants in a
+   converted organization, `anyscale_organization_user_role` in an unconverted one. An admin
+   sees and converts the mode (one-way) in **Users & IAM**. See
+   [Organization access mode](#organization-access-mode).
+2. **Beta resources and feature flag.** User groups and role grants/bindings are Beta, and role
+   bindings are enabled per organization: without the flag every call fails with "Role bindings
+   are not enabled". Contact support@anyscale.com. See
+   [User groups (Beta)](#user-groups-beta) and [Role bindings (Beta)](#role-bindings-beta).
+3. **Apply as an identity that can manage access** - an organization owner, or a holder of the
+   Admin role on each scope you change. Otherwise writes fail with "Not Allowed to Manage Access".
+4. **People must already be members.** Group members must have accepted an invitation; invite
+   first with [`anyscale_iam_organization_invitation`](../resources/iam_organization_invitation.md).
+5. **Terraform 1.10 or later**, with credentials from `anyscale login` or `ANYSCALE_CLI_TOKEN`.
+   The token decides which organization a run changes.
+6. **Not an Anyscale control plane in Azure.** There, access is managed with Azure RBAC and the
+   write resources here fail at plan with "RBAC Is Managed in Azure" - see
+   [Organization access mode](#organization-access-mode).
 
-- **Apply success is not access.** A person who is not yet a member has only been *invited*; they
-  have access once they accept the emailed link. Read the `anyscale_iam_organization_user` data source
-  to see where they are.
-- **Rate limits are per organization**, shared with the Anyscale console and not per configuration:
-  by default at most 20 pending invitations at once and 20 sent per 24 hours. Anyscale can change
-  both per organization. A `for_each` that invites more people than the limit fails partway
-  through the apply, leaving earlier invitations sent. Invite in batches, or ask Anyscale to raise
-  the limit.
-- **Single sign-on `required`:** creating an invitation is refused, because the emailed link would be
-  rejected on use while still spending one of the 20 daily invitations. Bring the person in through
-  your identity provider; once they have logged in, `anyscale_iam_organization_user` adopts them. If the
-  provider cannot read the organization's SSO mode, it sends the invitation and attaches a warning.
-- **Directory sync (SCIM) with the Policy API:** if the organization has both enabled, the backend
-  refuses to create invitations. Both must be true; SCIM alone does not trigger it. Existing members
-  can still be adopted and read. Manage membership through your identity provider and
-  [`anyscale policy set`](https://docs.anyscale.com/reference/cli/policy#policy-cli).
-- **Re-inviting a pending address** silently invalidates the earlier invitation and creates a new one
-  with a new `id`; letter case does not matter. A tracked earlier invitation then reads `expired`
-  on its next refresh.
-- **Destroying never removes a member.** Destroying `anyscale_iam_organization_user` cancels only a
-  still-pending invitation it sent, and never evicts anyone who had joined or was adopted. Destroying
-  `anyscale_iam_organization_invitation` revokes a pending invitation and has no effect on an accepted
-  one. Neither resource can remove someone's access.
+## Start here: baseline access, then a team
 
-## User groups (Beta)
-
-~> **Beta.** User groups are a Beta feature. Beta resources may change incompatibly; every breaking
-change is listed in the changelog. Pin the provider version if you depend on these resources, and
-read the changelog before upgrading.
-
-An Anyscale **user group** is a named set of organization members. This provider manages groups in
-four types:
-
-| Type | Does |
-|---|---|
-| [`anyscale_iam_user_group`](../resources/iam_user_group.md) | Creates, renames, and deletes one group. Does not manage who is in it. |
-| [`anyscale_iam_user_group_members`](../resources/iam_user_group_members.md) | The **complete** member list of one group, keyed by email. |
-| [`anyscale_iam_user_group`](../data-sources/iam_user_group.md) data source | Reads one group by `id` or `name`, including directory-synced groups. |
-| [`anyscale_iam_user_groups`](../data-sources/iam_user_groups.md) data source | Lists the organization's groups. |
-
-Managing groups needs the organization-level permission to manage IAM (an organization admin).
-
-### What is in scope, and what is not
-
-In scope: creating and renaming groups, and managing who belongs to them. **Not managed here:** what a
-group may access. Grant a group a role on a cloud, project, or the organization with
-[`anyscale_iam_role_grant`](#role-bindings-beta). A group may also already hold grants set in the
-Anyscale console or API, so adding or removing members can grant or revoke real access. A group's
-organization roles (`base_role`) are not managed by this provider.
-
-### Members must already be in the organization
-
-`anyscale_iam_user_group_members` takes **email addresses** and resolves each to a user in your
-organization. An email that is not an organization member fails the apply; invite the person first
-with [`anyscale_iam_organization_invitation`](../resources/iam_organization_invitation.md) and wait for them to
-accept. Emails match case-insensitively, and state keeps the spelling from your configuration. After `terraform import`, a configuration that spells an
-email with uppercase letters shows a one-time in-place update to `members`; it makes no API change.
-
-Anyscale support staff accounts cannot be added to a group: the apply fails with an error that names the
-email, and nothing is changed.
-
-### `anyscale_iam_user_group_members` is authoritative
-
-Anyone in the group who is not in `members` is **removed** - including people added through the
-Anyscale console, and including on the first apply. `members = []` is allowed and empties the group.
-Declare exactly one `anyscale_iam_user_group_members` per group; two configurations managing the same
-group remove each other's members on every apply, and nothing can detect that from either state. A
-person who leaves the organization drops out of the group; the next plan proposes re-adding them and
-the apply fails, because they are no longer an organization member.
-
-In a [converted organization](#organization-access-mode), Anyscale manages three groups:
-
-- **All users** adds every joining member automatically and refuses removals. Do not manage it with
-  `anyscale_iam_user_group_members`: it would show a perpetual diff, then fail with a 409.
-- **Service accounts** holds every service account in the organization. Its members cannot be added or
-  removed, and the group cannot be deleted or renamed. It is hidden: the groups data sources do not list
-  it and it cannot be looked up or named in configuration. Do not manage it with
-  `anyscale_iam_user_group_members` either.
-- The **organization admin group** cannot be deleted or renamed, its last member cannot be removed, and
-  service accounts cannot join it.
-
-### Directory-synced groups are read-only here
-
-Groups created by directory sync (SCIM) are owned by your identity provider. The resources refuse to
-manage them: importing one, or declaring members for it, fails with an error. Read them with the
-`anyscale_iam_user_group` data source (its `source` attribute is `scim`) and reference their IDs from
-other configuration. Groups created before April 2026 may report no `source`; those are treated as
-managed and can be imported.
-
-### Destroying
-
-Destroying `anyscale_iam_user_group_members` removes every member and leaves the group. Destroying
-`anyscale_iam_user_group` removes the members first, then deletes the group; deleting a group alone
-does not revoke access that was derived from its membership.
-
-### Cost of a refresh
-
-Reading membership fetches the whole organization's group memberships once per
-`anyscale_iam_user_group_members`, so refreshes scale with the number of groups you manage.
-
-### Example
+This configuration gives everyone who joins the organization read-only visibility of it, then
+gives one team write access to one project. Replace the names and emails with your own; every
+resource and argument below is real, and the configuration then applies as written.
 
 ```hcl
-# Prerequisite: both people are already organization members. If not, invite them first with
-# anyscale_iam_organization_invitation, wait for them to accept, then apply this configuration.
+terraform {
+  required_providers {
+    anyscale = {
+      source = "anyscale/anyscale"
+    }
+  }
+}
+
+# --- 1. Baseline: everyone who joins can read the organization. ---
+#
+# A converted organization grants a new member nothing until an admin
+# grants a role. The "All Users" group holds every member automatically,
+# so grant the baseline to it. The user group data source matches `name`
+# exactly; the platform group is named "All Users" unless a group of yours
+# already held that name when the organization converted, in which case
+# find the actual name with the anyscale_iam_user_groups data source.
+data "anyscale_iam_user_group" "all_users" {
+  name = "All Users"
+}
+
+data "anyscale_organization" "current" {}
+
+# The organization-scope read-only role, for "everyone who joins can at
+# least see the clouds and projects". Check what each role allows in the
+# console (Users & IAM); grant the least-privileged role that fits every
+# member. A narrower baseline is also possible: skip the organization
+# grant and grant per-cloud roles instead, such as "Cloud read-only" or
+# "Cloud project viewer" on individual clouds.
+data "anyscale_iam_role" "reader" {
+  name = "Reader"
+}
+
+resource "anyscale_iam_role_grant" "all_users_baseline" {
+  user_group_id   = data.anyscale_iam_user_group.all_users.id
+  role_id         = data.anyscale_iam_role.reader.id
+  organization_id = data.anyscale_organization.current.id
+}
+
+# The cloud the team works in. An organization-scope grant reaches every
+# cloud and project in the organization; this data source is for the
+# narrower, team-specific grants below.
+data "anyscale_cloud" "this" {
+  name = "my-cloud"
+}
+
+# --- 2. The team: a group and its full member list. ---
 resource "anyscale_iam_user_group" "ml_platform" {
   name = "ml-platform"
 }
 
+# AUTHORITATIVE: anyone in the group but not in this list is removed,
+# including people added in the Anyscale console, on every apply.
+# Everyone here must already be an organization member - invite people
+# first; see "Adding and removing people" below.
 resource "anyscale_iam_user_group_members" "ml_platform" {
   user_group_id = anyscale_iam_user_group.ml_platform.id
-  members       = ["dev1@example.com", "dev2@example.com"] # must already be organization members
+
+  members = [
+    "dev1@example.com",
+    "dev2@example.com",
+  ]
 }
-```
 
-See [`examples/resources/anyscale_iam_user_group_members`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/resources/anyscale_iam_user_group_members)
-for a runnable configuration.
+# --- 3. What the team may access: writer on one project, nothing wider. ---
+resource "anyscale_project" "shared" {
+  name     = "ml-platform-shared"
+  cloud_id = data.anyscale_cloud.this.id
+}
 
-### Managing a team without groups
+data "anyscale_iam_role" "project_writer" {
+  name = "Project writer"
+}
 
-Groups are one way to model a team. When you only need each person's *organization role*, which
-groups do not manage, a `locals` map keyed by email can drive both the invitation loop and the role
-loop. `anyscale_organization_user_role` works in
-[unconverted organizations](#organization-access-mode) only:
+# Additive: this grants exactly one role on one project and never removes
+# other grants - the baseline above and any grant made elsewhere are safe.
+resource "anyscale_iam_role_grant" "ml_platform_writes_shared" {
+  user_group_id = anyscale_iam_user_group.ml_platform.id
+  role_id       = data.anyscale_iam_role.project_writer.id
+  project_id    = anyscale_project.shared.id
 
-```hcl
-locals {
-  ml_team = {
-    "dev1@example.com" = "collaborator"
-    "dev2@example.com" = "collaborator"
-    "lead@example.com" = "owner"
+  # A grant cannot be edited: changing any argument replaces it. This
+  # creates the replacement before removing the old one, so the group is
+  # never briefly without access.
+  lifecycle {
+    create_before_destroy = true
   }
 }
+```
 
-resource "anyscale_iam_organization_invitation" "team_members" {
-  for_each = local.ml_team
-  email    = each.key
-}
+Three properties of this shape are deliberate:
 
-resource "anyscale_organization_user_role" "team_member_roles" {
-  for_each  = local.ml_team
-  email     = each.key
-  base_role = each.value
+- **Grants go to groups, not persons.** Team membership changes by editing `members`; no grant
+  changes when a person joins or leaves.
+- **Scope per grant.** A project role the group holds on one project gives it nothing on other
+  projects, other clouds, or the organization. Grant the narrowest scope the access needs.
+- **One resource, one grant, additive.** `terraform destroy` of everything above revokes exactly
+  the two declared grants, empties the group, deletes it and the project - and nobody's other
+  access, in this configuration or outside it, is touched.
+
+To read back who currently holds what, the
+[`anyscale_iam_role_binding`](../data-sources/iam_role_binding.md) data source lists every direct
+grant on a scope, whoever made it:
+
+```hcl
+data "anyscale_iam_role_binding" "shared" {
+  project_id = anyscale_iam_role_grant.ml_platform_writes_shared.project_id
 }
 ```
 
-`anyscale_organization_user_role` requires an already-accepted member, so the role loop above
-cannot apply in the same run as the invitation loop for someone who has not yet accepted - apply
-it in a second run once invitations are accepted. See the full staged workflow in
-[`examples/resources/organization_user_workflow`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/resources/organization_user_workflow).
+## Adding and removing people
+
+**Add a person** (a converted organization):
+
+1. Invite them with [`anyscale_iam_organization_invitation`](../resources/iam_organization_invitation.md)
+   - one resource per person; see
+   [Inviting people](#inviting-people-limits-single-sign-on-directory-sync) for rate limits,
+   single sign-on, and directory sync, which decide whether Terraform can invite at all.
+2. Wait for the emailed invitation to be accepted. The invitation's `status` attribute (`pending`,
+   `accepted`, `expired`) shows where the person is; a plan while it is pending shows no diff.
+3. Add their email to the team group's `members`. The plan shows one in-place update; after the
+   apply the person holds every role the group holds, plus the All Users baseline. Nothing else
+   in the configuration changes.
+
+**Remove a person** from a team: delete their email from `members`. They leave the group on the
+next apply and lose every role that group held - assuming nothing else grants it, which is
+[additive grants](#start-here-baseline-access-then-a-team) being a property of what you declare,
+not a guarantee about the world out of band. Removing a person from the **organization** is not
+possible with this provider: destroying any membership resource never evicts anyone - see
+[Inviting people](#inviting-people-limits-single-sign-on-directory-sync).
+
+**Change what someone may do:** edit the grants, not the people. A new role for the group is a new
+`anyscale_iam_role_grant` (or a second role ID in an `anyscale_iam_role_binding` policy);
+a narrower one replaces the old grant with `create_before_destroy`, as in the example above.
+An individual's organization-level base role is the one role you can give a person directly in
+an unconverted organization - see
+[Managing a team without groups](#managing-a-team-without-groups).
+
+**Verify.** `terraform plan` reports grants changed outside Terraform (an additive grant shows
+as a create; a grant revoked out of band shows as a create; an authoritative
+`anyscale_iam_role_binding` shows an update that would revoke the interloper). Read current
+access with the [`anyscale_iam_role_binding`](../data-sources/iam_role_binding.md) data source, or
+`anyscale role-binding policy generate` from the CLI.
+
+## Adopting access that already exists
+
+Do not create a duplicate of a grant that already exists - the API refuses with "Role Grant
+Already Exists", and the message names the import ID to adopt it instead:
+
+```text
+<scope_type>/<scope_id>/<principal_type>/<principal_id>/<role_id>
+```
+
+where `scope_type` is `organization`, `cloud` or `project` and `principal_type` is `user` or
+`user_group`. The binding's own ID (`rb_...`) works too, and an `import` block with `for_each`
+adopts many at once (Terraform 1.7 or later):
+
+```hcl
+import {
+  to = anyscale_iam_role_grant.ml_platform_writes_shared
+  id = "project/prj_.../user_group/ug_.../rol_..."
+}
+```
+
+The common case is an organization just converted to role bindings: conversion creates bindings
+for the access people already had, so import those rather than re-creating them. The full
+conversion sequence, and which bindings conversion creates, is in
+[Organization access mode](#organization-access-mode).
+
+The alternative is to take over **every** direct grant on one scope with
+[`anyscale_iam_role_binding`](../resources/iam_role_binding.md), imported by
+`<scope_type>/<scope_id>` - but its first apply revokes every grant the policy does not name,
+including grants made in the console. Read
+[Managing every grant on a scope](#managing-every-grant-on-a-scope-anyscale_iam_role_binding)
+before doing that.
 
 ## Organization access mode
 
@@ -195,11 +273,12 @@ new organization starts converted; an existing one stays unconverted until an ad
 **Azure control planes.** On an Anyscale control plane in Azure (`console.azure.anyscale.com`), access
 is managed with Azure role-based access control in the Azure portal, in either mode. When the
 provider's API URL is one of these hosts, creating, changing or importing `anyscale_iam_role_grant`,
-`anyscale_iam_user_group`, `anyscale_iam_user_group_members` or
-`anyscale_organization_user_role`, reading the `anyscale_iam_role`, `anyscale_iam_user_group` or
-`anyscale_iam_user_groups` data sources, and setting `anyscale_cloud.auto_add_user` fail at plan with "RBAC
-Is Managed in Azure". Destroying one, or a plan with no changes, still works. A custom or proxied URL in
-front of an Azure control plane is not detected.
+`anyscale_iam_role_binding`, `anyscale_iam_user_group`, `anyscale_iam_user_group_members` or
+`anyscale_organization_user_role`, reading the `anyscale_iam_role`, `anyscale_iam_role_binding`,
+`anyscale_iam_user_group` or `anyscale_iam_user_groups` data sources, and setting
+`anyscale_cloud.auto_add_user` fail at plan with "RBAC Is Managed in Azure". Destroying one, or a
+plan with no changes, still works. A custom or proxied URL in front of an Azure control plane is not
+detected.
 
 | Error | Mode it means | What to do |
 |---|---|---|
@@ -256,6 +335,151 @@ The binding ID (`rb_...`) also works as the import ID.
 Which bindings conversion creates depends on the option chosen in the migration wizard, so expect to
 find some grants missing and create those normally.
 
+## Inviting people: limits, single sign-on, directory sync
+
+`anyscale_iam_organization_user` and `anyscale_iam_organization_invitation` both send invitations, and both
+are subject to the same constraints.
+
+- **Apply success is not access.** A person who is not yet a member has only been *invited*; they
+  have access once they accept the emailed link. Read the `anyscale_iam_organization_user` data source
+  to see where they are.
+- **Rate limits are per organization**, shared with the Anyscale console and not per configuration:
+  by default at most 20 pending invitations at once and 20 sent per 24 hours. Anyscale can change
+  both per organization. A `for_each` that invites more people than the limit fails partway
+  through the apply, leaving earlier invitations sent. Invite in batches, or ask Anyscale to raise
+  the limit.
+- **Single sign-on `required`:** creating an invitation is refused, because the emailed link would be
+  rejected on use while still spending one of the 20 daily invitations. Bring the person in through
+  your identity provider; once they have logged in, `anyscale_iam_organization_user` adopts them. If the
+  provider cannot read the organization's SSO mode, it sends the invitation and attaches a warning.
+- **Directory sync (SCIM) with the Policy API:** if the organization has both enabled, the backend
+  refuses to create invitations. Both must be true; SCIM alone does not trigger it. Existing members
+  can still be adopted and read. Manage membership through your identity provider and
+  [`anyscale policy set`](https://docs.anyscale.com/reference/cli/policy#policy-cli).
+- **Re-inviting a pending address** silently invalidates the earlier invitation and creates a new one
+  with a new `id`; letter case does not matter. A tracked earlier invitation then reads `expired`
+  on its next refresh.
+- **Destroying never removes a member.** Destroying `anyscale_iam_organization_user` cancels only a
+  still-pending invitation it sent, and never evicts anyone who had joined or was adopted. Destroying
+  `anyscale_iam_organization_invitation` revokes a pending invitation and has no effect on an accepted
+  one. Neither resource can remove someone's access.
+
+## User groups (Beta)
+
+~> **Beta.** User groups are a Beta feature. Beta resources may change incompatibly; every breaking
+change is listed in the changelog. Pin the provider version if you depend on these resources, and
+read the changelog before upgrading.
+
+An Anyscale **user group** is a named set of organization members. This provider manages groups in
+four types:
+
+| Type | Does |
+|---|---|
+| [`anyscale_iam_user_group`](../resources/iam_user_group.md) | Creates, renames, and deletes one group. Does not manage who is in it. |
+| [`anyscale_iam_user_group_members`](../resources/iam_user_group_members.md) | The **complete** member list of one group, keyed by email. |
+| [`anyscale_iam_user_group`](../data-sources/iam_user_group.md) data source | Reads one group by `id` or `name`, including directory-synced groups and the All Users group (the All Service Accounts group is hidden and cannot be read). |
+| [`anyscale_iam_user_groups`](../data-sources/iam_user_groups.md) data source | Lists the organization's groups. |
+
+Managing groups needs the organization-level permission to manage IAM (an organization admin).
+
+### What is in scope, and what is not
+
+In scope: creating and renaming groups, and managing who belongs to them. **Not managed here:** what a
+group may access. Grant a group a role on a cloud, project, or the organization with
+[`anyscale_iam_role_grant`](#role-bindings-beta). A group may also already hold grants set in the
+Anyscale console or API, so adding or removing members can grant or revoke real access. A group's
+organization roles (`base_role`) are not managed by this provider.
+
+### Members must already be in the organization
+
+`anyscale_iam_user_group_members` takes **email addresses** and resolves each to a user in your
+organization. An email that is not an organization member fails the apply; invite the person first
+with [`anyscale_iam_organization_invitation`](../resources/iam_organization_invitation.md) and wait for them to
+accept. Emails match case-insensitively, and state keeps the spelling from your configuration. After `terraform import`, a configuration that spells an
+email with uppercase letters shows a one-time in-place update to `members`; it makes no API change.
+
+Anyscale support staff accounts cannot be added to a group: the apply fails with an error that names the
+email, and nothing is changed.
+
+### `anyscale_iam_user_group_members` is authoritative
+
+Anyone in the group who is not in `members` is **removed** - including people added through the
+Anyscale console, and including on the first apply. `members = []` is allowed and empties the group.
+Declare exactly one `anyscale_iam_user_group_members` per group; two configurations managing the same
+group remove each other's members on every apply, and nothing can detect that from either state. A
+person who leaves the organization drops out of the group; the next plan proposes re-adding them and
+the apply fails, because they are no longer an organization member.
+
+In a [converted organization](#organization-access-mode), Anyscale manages three groups:
+
+- **All Users** adds every joining member automatically and refuses removals. Do not manage it
+  with `anyscale_iam_user_group_members`: it would show a perpetual diff, then fail with a 409.
+  Granting
+  it roles is how you give every member a baseline - see
+  [Start here](#start-here-baseline-access-then-a-team).
+- **All Service Accounts** holds every service account in the organization. Its members cannot be
+  added or removed, and the group cannot be deleted or renamed. It is hidden: the groups data
+  sources do not list it and it cannot be looked up or named in configuration. Do not manage it with
+  `anyscale_iam_user_group_members` either.
+- The **organization admin group**, named **Super Admins**, cannot be deleted or renamed, its last
+  member cannot be removed, and service accounts cannot join it. Anyscale owns its grants: see
+  [Keeping your own access](#keeping-your-own-access).
+
+### Directory-synced groups are read-only here
+
+Groups created by directory sync (SCIM) are owned by your identity provider. The resources refuse to
+manage them: importing one, or declaring members for it, fails with an error. Read them with the
+`anyscale_iam_user_group` data source (its `source` attribute is `scim`) and reference their IDs from
+other configuration. Groups created before April 2026 may report no `source`; those are treated as
+managed and can be imported.
+
+### Destroying
+
+Destroying `anyscale_iam_user_group_members` removes every member and leaves the group. Destroying
+`anyscale_iam_user_group` removes the members first, then deletes the group; deleting a group alone
+does not revoke access that was derived from its membership.
+
+### Cost of a refresh
+
+Reading membership fetches the whole organization's group memberships once per
+`anyscale_iam_user_group_members`, so refreshes scale with the number of groups you manage.
+
+See [`examples/resources/anyscale_iam_user_group_members`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/resources/anyscale_iam_user_group_members)
+for a runnable configuration.
+
+### Managing a team without groups
+
+Groups are one way to model a team. When you only need each person's *organization role*, which
+groups do not manage, a `locals` map keyed by email can drive both the invitation loop and the role
+loop. `anyscale_organization_user_role` works in
+[unconverted organizations](#organization-access-mode) only:
+
+```hcl
+locals {
+  ml_team = {
+    "dev1@example.com" = "collaborator"
+    "dev2@example.com" = "collaborator"
+    "lead@example.com" = "owner"
+  }
+}
+
+resource "anyscale_iam_organization_invitation" "team_members" {
+  for_each = local.ml_team
+  email    = each.key
+}
+
+resource "anyscale_organization_user_role" "team_member_roles" {
+  for_each  = local.ml_team
+  email     = each.key
+  base_role = each.value
+}
+```
+
+`anyscale_organization_user_role` requires an already-accepted member, so the role loop above
+cannot apply in the same run as the invitation loop for someone who has not yet accepted - apply
+it in a second run once invitations are accepted. See the full staged workflow in
+[`examples/resources/organization_user_workflow`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/resources/organization_user_workflow).
+
 ## Legacy RBAC deprecation
 
 The resources and attributes that manage or report access through collaborator and policy records
@@ -266,7 +490,7 @@ None is available on an Azure control plane (see [Organization access mode](#org
 | Deprecated | In a converted organization | Use instead |
 |---|---|---|
 | `anyscale_organization_user_role` | Writes fail with "Organization Uses Role Bindings" | `anyscale_iam_role_grant` |
-| `anyscale_cloud.auto_add_user` | Setting it fails | An `anyscale_iam_role_grant` on the cloud for the All users group |
+| `anyscale_cloud.auto_add_user` | Setting it fails | An `anyscale_iam_role_grant` of the `Cloud collaborator` role on the cloud for the All Users group - in a converted organization a joining member gets this from nowhere |
 | `auto_add_user` on the `anyscale_cloud` and `anyscale_clouds` data sources | No longer applies | Same |
 | `collaborators` on the `anyscale_project` data source | Null | [`anyscale_iam_role_binding`](../data-sources/iam_role_binding.md) data source with `project_id`; reading needs IAM management on the project |
 | `permission_level`, `base_role` and `additional_roles` on the `anyscale_iam_organization_user(s)` data sources; `organization_permission_level` on the `anyscale_user` data source | A snapshot from before conversion | [`anyscale_iam_role_binding`](../data-sources/iam_role_binding.md) data source with `organization_id`; reading needs IAM management on the organization |
