@@ -1,0 +1,4 @@
+```
+release-note:changed
+provider: The RBAC guide is restructured as a progressive onboarding path - the grant model and a prerequisites checklist first, then one complete configuration granting the All Users group the organization-scope `Reader` role as the baseline followed by a team with project-scoped access - and now states that a converted organization grants a joining member nothing until an admin binds a role.
+```
