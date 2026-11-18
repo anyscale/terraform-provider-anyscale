@@ -28,7 +28,7 @@ workflow; for building, testing, and project layout see the [README](README.md#d
 4. Run `make fmt lint test` before pushing.
 5. Run `pre-commit install` once, so formatting hooks run automatically on commit.
 6. If your PR only touches `docs/`, `examples/`, `templates/`, `.changelog/`, or a `*.md` file, CI's
-   `ci (acctest-data)`/`ci (acctest-resource)` checks skip the real-infra test run and report success
+   `ci (acctest-*)` checks skip the real-infra test run and report success
    immediately instead (see `.github/workflows/ci.yml`'s "Detect docs-only diff" step) — this is
    expected, not a stuck check. Real acceptance-test coverage for these paths still runs daily via
    `.github/workflows/scheduled-acctest.yml`, so a regression introduced by a docs-only PR (which

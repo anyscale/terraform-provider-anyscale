@@ -22,8 +22,8 @@ data "anyscale_iam_role" "billing_reader" {
   name = "Billing/consumption reader"
 }
 
-# The Admin role whoever creates a project or cloud receives on it. The
-# API stores it under this name. Step 5 needs it.
+# The Admin role whoever creates a project or cloud receives on it.
+# Step 5 needs it.
 data "anyscale_iam_role" "admin" {
-  name = "Organization owner"
+  name = "Admin"
 }

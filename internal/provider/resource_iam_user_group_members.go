@@ -61,7 +61,7 @@ func (r *IAMUserGroupMembersResource) Schema(ctx context.Context, req resource.S
 		MarkdownDescription: userGroupsBetaBanner +
 			"Manages the complete member list of an Anyscale user group. This resource is authoritative: members added outside Terraform are removed on the next apply, and destroying it empties the group without deleting it. " +
 			"Use at most one per group. Directory-synced (SCIM) groups are rejected, because their identity provider owns membership. " +
-			"Do not manage the \"All users\" group of a [converted organization](../guides/rbac.md#organization-access-mode) with this resource.",
+			"Do not manage Anyscale's `All Users` or `All Service Accounts` groups with this resource; see the [RBAC guide](../guides/rbac.md#anyscale_iam_user_group_members-is-authoritative).",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,

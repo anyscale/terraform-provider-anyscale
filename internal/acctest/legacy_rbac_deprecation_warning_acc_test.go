@@ -80,7 +80,7 @@ resource "anyscale_cloud" "test" {
   region         = "us-east-2"
   auto_add_user  = true
 }
-`, "All users group")
+`, "All Users group")
 }
 
 // Referencing a deprecated read-only attribute warns, even though it is never configured.

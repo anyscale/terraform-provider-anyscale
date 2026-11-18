@@ -31,7 +31,6 @@ const (
 
 var (
 	rbFlagOffErr = regexp.MustCompile(`(?i)role bindings (are )?not enabled`)
-	rbStateRmErr = regexp.MustCompile(`terraform state rm`)
 )
 
 func newRBMock(t *testing.T) *roleBindingMockServer {
@@ -256,9 +255,37 @@ func TestAccIAMRoleGrantResource_ProbeFailureFailsClosed(t *testing.T) {
 	})
 }
 
-// A deleted cloud fails the listing's IAM check with 403 before any 404 the
-// service could give. Read must error with the state-rm hint and keep state.
-func TestAccIAMRoleGrantResource_DeletedScopeKeepsStateWithHint(t *testing.T) {
+// A deleted cloud fails the listing's IAM check with 403, the same answer a
+// lost IAM permission gets. The cloud's own read tells them apart: gone (404,
+// or 403 with a warning) removes the grant from state without a DELETE.
+func TestAccIAMRoleGrantResource_DeletedScopeIsRemoved(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	for _, status := range []int{http.StatusNotFound, http.StatusForbidden} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			m := newRBMock(t)
+			m.setGoneScopeStatus(status)
+			resource.Test(t, resource.TestCase{
+				ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+				CheckDestroy:             rbDestroyed(m),
+				Steps: []resource.TestStep{
+					{Config: rbConfig(m, rbRole)},
+					{
+						PreConfig: func() { m.deleteScope("cloud", rbCloud); m.takeWrites() },
+						Config:    m.providerBlock(),
+						ConfigPlanChecks: resource.ConfigPlanChecks{
+							PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+						},
+						Check: rbExpectNoDelete(m),
+					},
+				},
+			})
+		})
+	}
+}
+
+// The listing 403s but the cloud still reads: this identity lost IAM on a
+// live cloud. Read must error and keep state; restoring access plans clean.
+func TestAccIAMRoleGrantResource_LostIAMKeepsStateWithHint(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
 	resource.Test(t, resource.TestCase{
@@ -267,17 +294,36 @@ func TestAccIAMRoleGrantResource_DeletedScopeKeepsStateWithHint(t *testing.T) {
 		Steps: []resource.TestStep{
 			{Config: rbConfig(m, rbRole)},
 			{
-				PreConfig:   func() { m.deleteScope("cloud", rbCloud) },
+				PreConfig:   func() { m.setNoIAMScope("cloud", rbCloud, true) },
 				Config:      rbConfig(m, rbRole),
 				PlanOnly:    true,
-				ExpectError: rbStateRmErr,
+				ExpectError: regexp.MustCompile(`(?s)still exists.*terraform state rm`),
 			},
 			{
-				PreConfig: func() { m.restoreScope("cloud", rbCloud) },
+				PreConfig: func() { m.setNoIAMScope("cloud", rbCloud, false) },
 				Config:    rbConfig(m, rbRole),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
 				},
+			},
+		},
+	})
+}
+
+// The cloud is deleted between refresh and delete: DELETE and the re-list
+// both 403, the cloud reads 404, and the destroy succeeds.
+func TestAccIAMRoleGrantResource_DeleteAfterScopeGoneSucceeds(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newRBMock(t)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             rbDestroyed(m),
+		Steps: []resource.TestStep{
+			{Config: rbConfig(m, rbRole)},
+			{
+				PreConfig: func() { m.setDeleteMode("scope_gone") },
+				Config:    m.providerBlock(),
+				Check:     rbExpectBindings(m, 0),
 			},
 		},
 	})
