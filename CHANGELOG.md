@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.43.4] - 2026-11-18
+
+### Added
+
+- data-source/anyscale_iam_role: `Admin` and `Organization owner` both resolve the built-in organization owner role, which Anyscale is renaming to `Admin` environment by environment.
+
+### Changed
+
+- provider: The RBAC guide is restructured as a progressive onboarding path - the grant model and a prerequisites checklist first, then one complete configuration granting the All Users group the organization-scope `Reader` role as the baseline followed by a team with project-scoped access - and now states that a converted organization grants a joining member nothing until an admin binds a role.
+
+### Fixed
+
+- resource/anyscale_iam_role_grant: A grant whose cloud or project was deleted outside Terraform is now removed from state instead of failing every plan and destroy until `terraform state rm`.
+
 ## [0.43.3] - 2026-11-17
 
 ### Changed
@@ -1484,7 +1498,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.43.3...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.43.4...HEAD
+[0.43.4]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.43.4
 [0.43.3]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.43.3
 [0.43.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.43.2
 [0.43.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.43.1

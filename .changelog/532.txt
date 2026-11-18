@@ -1,7 +1,0 @@
-```release-note:added
-data-source/anyscale_iam_role: `Admin` and `Organization owner` both resolve the built-in organization owner role, which Anyscale is renaming to `Admin` environment by environment.
-```
-
-```release-note:fixed
-resource/anyscale_iam_role_grant: A grant whose cloud or project was deleted outside Terraform is now removed from state instead of failing every plan and destroy until `terraform state rm`.
-```
